@@ -6,6 +6,32 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+// Retry helper for transient AI gateway errors (503, 500)
+async function fetchAIWithRetry(url: string, options: RequestInit, corsHdrs: Record<string, string>, maxRetries = 3): Promise<Response> {
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    const resp = await fetch(url, options);
+    if (resp.ok) return resp;
+    const errText = await resp.text();
+    console.error(`AI attempt ${attempt + 1}/${maxRetries} failed:`, resp.status, errText);
+    if (resp.status === 402) {
+      return new Response(JSON.stringify({ error: "AI credits exhausted. Please add credits." }), {
+        status: 402, headers: { ...corsHdrs, "Content-Type": "application/json" },
+      });
+    }
+    if (resp.status === 429) {
+      return new Response(JSON.stringify({ error: "Rate limit exceeded. Please try again shortly." }), {
+        status: 429, headers: { ...corsHdrs, "Content-Type": "application/json" },
+      });
+    }
+    if (resp.status >= 500 && attempt < maxRetries - 1) {
+      await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
+      continue;
+    }
+    throw new Error(`AI extraction failed (HTTP ${resp.status})`);
+  }
+  throw new Error("AI extraction failed after retries");
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -146,35 +172,24 @@ You MUST call the extract_receipts function.`;
         },
       ];
 
-      const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      const aiRequestBody = JSON.stringify({
+        model: "google/gemini-2.5-flash",
+        messages,
+        tools: [extractMultiReceiptTool],
+        tool_choice: { type: "function", function: { name: "extract_receipts" } },
+      });
+
+      const aiResponse = await fetchAIWithRetry("https://ai.gateway.lovable.dev/v1/chat/completions", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${LOVABLE_API_KEY}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          model: "google/gemini-2.5-flash",
-          messages,
-          tools: [extractMultiReceiptTool],
-          tool_choice: { type: "function", function: { name: "extract_receipts" } },
-        }),
-      });
+        body: aiRequestBody,
+      }, corsHeaders);
 
-      if (!aiResponse.ok) {
-        const errText = await aiResponse.text();
-        console.error("AI error:", aiResponse.status, errText);
-        if (aiResponse.status === 429) {
-          return new Response(JSON.stringify({ error: "Rate limit exceeded. Please try again shortly." }), {
-            status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
-        }
-        if (aiResponse.status === 402) {
-          return new Response(JSON.stringify({ error: "AI credits exhausted. Please add credits." }), {
-            status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
-        }
-        throw new Error("AI extraction failed");
-      }
+      // If retry helper returned a non-OK response (402/429), pass it through
+      if (!aiResponse.ok) return aiResponse;
 
       const aiData = await aiResponse.json();
       const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
@@ -195,7 +210,7 @@ You MUST call the extract_receipts function.`;
         textContent = `[XLSX file base64 - first 20000 chars]: ${base64.substring(0, 20000)}`;
       }
 
-      const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      const aiResponse = await fetchAIWithRetry("https://ai.gateway.lovable.dev/v1/chat/completions", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${LOVABLE_API_KEY}`,
@@ -213,18 +228,9 @@ You MUST call the extract_receipts function.`;
           tools: [extractMultiReceiptTool],
           tool_choice: { type: "function", function: { name: "extract_receipts" } },
         }),
-      });
+      }, corsHeaders);
 
-      if (!aiResponse.ok) {
-        const errText = await aiResponse.text();
-        console.error("AI error:", aiResponse.status, errText);
-        if (aiResponse.status === 429) {
-          return new Response(JSON.stringify({ error: "Rate limit exceeded. Please try again shortly." }), {
-            status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
-        }
-        throw new Error("AI extraction failed");
-      }
+      if (!aiResponse.ok) return aiResponse;
 
       const aiData = await aiResponse.json();
       const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
