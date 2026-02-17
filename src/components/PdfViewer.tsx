@@ -1,9 +1,8 @@
-import { useEffect, useRef, useState } from "react";
-import { Loader2, ChevronLeft, ChevronRight } from "lucide-react";
+import { useEffect, useRef, useState, useCallback } from "react";
+import { Loader2, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import * as pdfjsLib from "pdfjs-dist";
 
-// Use the bundled worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.9.155/pdf.worker.min.mjs`;
 
 interface PdfViewerProps {
@@ -13,11 +12,17 @@ interface PdfViewerProps {
 
 export default function PdfViewer({ url, className }: PdfViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const [pdf, setPdf] = useState<pdfjsLib.PDFDocumentProxy | null>(null);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [zoom, setZoom] = useState(1);
+
+  // Drag-to-pan state
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStart = useRef({ x: 0, y: 0, scrollLeft: 0, scrollTop: 0 });
 
   useEffect(() => {
     let cancelled = false;
@@ -35,10 +40,7 @@ export default function PdfViewer({ url, className }: PdfViewerProps) {
       })
       .catch((err) => {
         console.error("PDF load error:", err);
-        if (!cancelled) {
-          setError(true);
-          setLoading(false);
-        }
+        if (!cancelled) { setError(true); setLoading(false); }
       });
 
     return () => { cancelled = true; };
@@ -52,7 +54,7 @@ export default function PdfViewer({ url, className }: PdfViewerProps) {
       if (cancelled) return;
       const canvas = canvasRef.current!;
       const ctx = canvas.getContext("2d")!;
-      const scale = 1.5;
+      const scale = 1.5 * zoom;
       const viewport = p.getViewport({ scale });
       canvas.width = viewport.width;
       canvas.height = viewport.height;
@@ -60,7 +62,35 @@ export default function PdfViewer({ url, className }: PdfViewerProps) {
     });
 
     return () => { cancelled = true; };
-  }, [pdf, page]);
+  }, [pdf, page, zoom]);
+
+  const handleZoomIn = () => setZoom((z) => Math.min(z + 0.25, 4));
+  const handleZoomOut = () => setZoom((z) => Math.max(z - 0.25, 0.5));
+  const handleZoomReset = () => setZoom(1);
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    if (zoom <= 1) return;
+    const container = containerRef.current;
+    if (!container) return;
+    setIsDragging(true);
+    dragStart.current = {
+      x: e.clientX,
+      y: e.clientY,
+      scrollLeft: container.scrollLeft,
+      scrollTop: container.scrollTop,
+    };
+  }, [zoom]);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (!isDragging) return;
+    const container = containerRef.current;
+    if (!container) return;
+    e.preventDefault();
+    container.scrollLeft = dragStart.current.scrollLeft - (e.clientX - dragStart.current.x);
+    container.scrollTop = dragStart.current.scrollTop - (e.clientY - dragStart.current.y);
+  }, [isDragging]);
+
+  const handleMouseUp = useCallback(() => setIsDragging(false), []);
 
   if (loading) {
     return (
@@ -80,17 +110,37 @@ export default function PdfViewer({ url, className }: PdfViewerProps) {
 
   return (
     <div className={className}>
-      <div className="overflow-auto max-h-[600px] rounded-lg border border-border bg-muted/30">
-        <canvas ref={canvasRef} className="mx-auto" style={{ maxWidth: "100%" }} />
+      <div className="flex items-center gap-1 mb-2">
+        <Button variant="ghost" size="sm" onClick={handleZoomOut} disabled={zoom <= 0.5} className="h-7 w-7 p-0">
+          <ZoomOut className="h-3.5 w-3.5" />
+        </Button>
+        <span className="text-xs text-muted-foreground w-12 text-center font-mono">{Math.round(zoom * 100)}%</span>
+        <Button variant="ghost" size="sm" onClick={handleZoomIn} disabled={zoom >= 4} className="h-7 w-7 p-0">
+          <ZoomIn className="h-3.5 w-3.5" />
+        </Button>
+        {zoom !== 1 && (
+          <Button variant="ghost" size="sm" onClick={handleZoomReset} className="h-7 w-7 p-0">
+            <RotateCcw className="h-3.5 w-3.5" />
+          </Button>
+        )}
+      </div>
+      <div
+        ref={containerRef}
+        className="overflow-auto max-h-[600px] rounded-lg border border-border bg-muted/30"
+        style={{ cursor: zoom > 1 ? (isDragging ? "grabbing" : "grab") : "default" }}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+      >
+        <canvas ref={canvasRef} className="mx-auto" style={{ maxWidth: zoom > 1 ? "none" : "100%" }} />
       </div>
       {totalPages > 1 && (
         <div className="flex items-center justify-center gap-2 mt-2">
           <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
             <ChevronLeft className="h-4 w-4" />
           </Button>
-          <span className="text-xs text-muted-foreground">
-            {page} / {totalPages}
-          </span>
+          <span className="text-xs text-muted-foreground">{page} / {totalPages}</span>
           <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
             <ChevronRight className="h-4 w-4" />
           </Button>
