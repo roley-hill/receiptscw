@@ -2,6 +2,17 @@ import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Copy, CheckCircle2, XCircle, ChevronDown, ChevronUp, Loader2, Trash2 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
@@ -65,6 +76,23 @@ export default function Duplicates() {
   const [existingReceipts, setExistingReceipts] = useState<Record<string, ExistingReceipt>>({});
   const [loadingExisting, setLoadingExisting] = useState<Set<string>>(new Set());
   const [processing, setProcessing] = useState<Set<string>>(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+
+  const handleBulkDelete = async () => {
+    setBulkDeleting(true);
+    try {
+      const ids = duplicates.map((d) => d.id);
+      const { error } = await supabase.from("skipped_duplicates").delete().in("id", ids);
+      if (error) throw error;
+      toast.success(`Deleted ${ids.length} duplicate(s)`);
+      setExpandedId(null);
+      queryClient.invalidateQueries({ queryKey: ["skipped_duplicates"] });
+      queryClient.invalidateQueries({ queryKey: ["pending_counts"] });
+    } catch (err: any) {
+      toast.error(err.message || "Failed to bulk delete");
+    }
+    setBulkDeleting(false);
+  };
 
   const toggleExpand = async (dup: SkippedDuplicate) => {
     if (expandedId === dup.id) {
@@ -204,11 +232,33 @@ export default function Duplicates() {
 
   return (
     <div className="space-y-6 max-w-5xl">
-      <div>
-        <h1 className="text-2xl font-bold text-foreground">Duplicate Review</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          {duplicates.length} skipped duplicate{duplicates.length !== 1 ? "s" : ""} awaiting review. Compare with existing records and approve or dismiss.
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">Duplicate Review</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            {duplicates.length} skipped duplicate{duplicates.length !== 1 ? "s" : ""} awaiting review. Compare with existing records and approve or dismiss.
+          </p>
+        </div>
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <Button variant="destructive" size="sm" disabled={bulkDeleting}>
+              {bulkDeleting ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Trash2 className="h-4 w-4 mr-1" />}
+              Delete All ({duplicates.length})
+            </Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete all pending duplicates?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This will permanently delete all {duplicates.length} pending duplicate{duplicates.length !== 1 ? "s" : ""}. This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={handleBulkDelete}>Delete All</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
 
       <div className="space-y-3">
