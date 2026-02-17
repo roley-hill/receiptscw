@@ -47,49 +47,90 @@ serve(async (req) => {
 
     if (uploadError) throw new Error(`Upload failed: ${uploadError.message}`);
 
-    // Shared tool definition for AI extraction
-    const extractReceiptTool = {
+    // Tool definition for MULTI-receipt extraction
+    const extractMultiReceiptTool = {
       type: "function" as const,
       function: {
-        name: "extract_receipt_data",
-        description: "Extract structured rent payment/receipt data from a document",
+        name: "extract_receipts",
+        description: "Extract one or more structured rent payment/receipt records from a document. Each line item on a remittance detail, spreadsheet row, or individual receipt should be its own entry in the items array.",
         parameters: {
           type: "object",
           properties: {
-            property: { type: "string", description: "The physical street address of the rental property (e.g. '9034 Orion Ave'). Do NOT put owner entity names or LP names here. If only an owner LP name is visible, leave this empty." },
-            property_confidence: { type: "number", description: "Confidence 0-1" },
-            unit: { type: "string", description: "Unit or apartment number (e.g. '#11', 'Apt 3B'). Extract just the unit identifier." },
-            unit_confidence: { type: "number", description: "Confidence 0-1" },
-            tenant: { type: "string", description: "The individual person's name who is the tenant/resident (e.g. 'Maria Rodriguez'). Do NOT put organization names, agency names, or owner LP names here. If no individual tenant name is found, use empty string." },
-            tenant_confidence: { type: "number", description: "Confidence 0-1" },
-            payer: { type: "string", description: "The organization or person who made the payment (e.g. 'People Assisting the Homeless', 'Shine BC-LA', 'The Salvation Army'). This may differ from the tenant." },
-            receipt_date: { type: "string", description: "Date the payment was made or receipt issued, format YYYY-MM-DD" },
-            receipt_date_confidence: { type: "number", description: "Confidence 0-1" },
-            rent_month: { type: "string", description: "The month the rent payment covers, format YYYY-MM (e.g. '2026-02')" },
-            amount: { type: "number", description: "The actual payment amount in dollars. Be careful with formatting — do NOT combine multiple numbers. Look for the specific payment amount, not account numbers or reference IDs." },
-            amount_confidence: { type: "number", description: "Confidence 0-1" },
-            payment_type: { type: "string", description: "Payment method: 'ACH', 'EFT', 'Check', 'Cash', 'Money Order', 'Wire', or other" },
-            payment_type_confidence: { type: "number", description: "Confidence 0-1" },
-            reference: { type: "string", description: "Check number, transaction ID, or EFT reference number" },
-            memo: { type: "string", description: "Any memo, remarks, or notes about the payment" },
-            extracted_text: { type: "string", description: "Key text excerpts from the document (first 500 chars)" },
+            items: {
+              type: "array",
+              description: "Array of receipt line items. One entry per tenant/unit payment.",
+              items: {
+                type: "object",
+                properties: {
+                  property: { type: "string", description: "Street address of the rental property (e.g. '9034 Orion Ave'). Never an owner entity or LP name." },
+                  property_confidence: { type: "number", description: "Confidence 0-1" },
+                  unit: { type: "string", description: "Unit or apartment number (e.g. '#11', 'Apt 3B')." },
+                  unit_confidence: { type: "number", description: "Confidence 0-1" },
+                  tenant: { type: "string", description: "Individual person's name who is the tenant/resident. Never an organization." },
+                  tenant_confidence: { type: "number", description: "Confidence 0-1" },
+                  payer: { type: "string", description: "Organization or person who made the payment." },
+                  receipt_date: { type: "string", description: "Date of payment, format YYYY-MM-DD" },
+                  receipt_date_confidence: { type: "number", description: "Confidence 0-1" },
+                  rent_month: { type: "string", description: "Month the rent covers, format YYYY-MM" },
+                  amount: { type: "number", description: "Payment amount in dollars." },
+                  amount_confidence: { type: "number", description: "Confidence 0-1" },
+                  payment_type: { type: "string", description: "Payment method: 'ACH', 'EFT', 'Check', 'Cash', 'Money Order', 'Wire', or other" },
+                  payment_type_confidence: { type: "number", description: "Confidence 0-1" },
+                  reference: { type: "string", description: "Check number, transaction ID, or EFT reference" },
+                  memo: { type: "string", description: "Any memo or notes about the payment" },
+                },
+                required: ["property", "tenant", "amount"],
+                additionalProperties: false,
+              },
+            },
+            extracted_text: { type: "string", description: "Key text excerpts from the document (first 2000 chars)" },
           },
-          required: ["property", "tenant", "amount"],
+          required: ["items"],
           additionalProperties: false,
         },
       },
     };
 
-    let extractedData: any = {};
+    const systemPrompt = `You are a rent payment data extraction AI for a property management company.
+
+CRITICAL RULES:
+- "property" must be a STREET ADDRESS (e.g. "9034 Orion Ave"), never an owner entity or LP name like "9010 Tobias Owner LP"
+- "tenant" must be an INDIVIDUAL PERSON's name (e.g. "Maria Rodriguez"), never an organization, agency, or LP name
+- "payer" is the organization or person who sent the payment (may differ from tenant)
+- "amount" is the PAYMENT AMOUNT in dollars — do NOT concatenate digits from different fields
+
+MULTI-LINE ITEM RULES:
+- If this is a REMITTANCE DETAIL or ACH payment covering MULTIPLE tenants/units, extract EACH line item as a separate entry in the items array
+- If this is a SPREADSHEET/LEDGER with multiple rows, each row is a separate receipt — extract ALL of them
+- If this is a single receipt for one tenant, return an array with one item
+- NEVER combine multiple line items into one — each tenant payment must be its own item
+- Make sure every line item on the remittance or spreadsheet is accounted for
+
+You MUST call the extract_receipts function.`;
+
+    let extractedItems: any[] = [];
+    let extractedText = "";
     
     const isImage = file.type.startsWith("image/");
     const fileExt = file.name.split(".").pop()?.toLowerCase();
     const isXlsx = fileExt === "xlsx" || fileExt === "xls" || file.type.includes("spreadsheet") || file.type.includes("excel");
     const isEml = fileExt === "eml" || file.type === "message/rfc822";
+    const isPdf = fileExt === "pdf" || file.type === "application/pdf";
 
-    if (isImage) {
+    if (isImage || isPdf) {
       const base64 = btoa(String.fromCharCode(...fileBytes));
       const dataUrl = `data:${file.type};base64,${base64}`;
+
+      const messages: any[] = [
+        { role: "system", content: systemPrompt },
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "Extract ALL rent payment line items from this document. If it is a remittance detail with multiple tenants/units, extract EACH line item separately. Carefully distinguish between: the property street address, each tenant's personal name, the paying organization/agency, the payment amount per tenant, and the payment method." },
+            { type: "image_url", image_url: { url: dataUrl } },
+          ],
+        },
+      ];
 
       const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
         method: "POST",
@@ -99,31 +140,9 @@ serve(async (req) => {
         },
         body: JSON.stringify({
           model: "google/gemini-2.5-flash",
-          messages: [
-            {
-              role: "system",
-              content: `You are a rent payment data extraction AI for a property management company. Extract structured data from rent receipt/payment images.
-
-CRITICAL RULES:
-- "property" must be a STREET ADDRESS (e.g. "9034 Orion Ave"), never an owner entity or LP name like "9010 Tobias Owner LP"
-- "tenant" must be an INDIVIDUAL PERSON's name (e.g. "Maria Rodriguez"), never an organization, agency, or LP name
-- "payer" is the organization or person who sent the payment (may differ from tenant)
-- "amount" is the PAYMENT AMOUNT in dollars — do NOT concatenate digits from different fields. Look for dollar signs, "amount", "total", or "payment" labels
-- If a unit number appears as part of "Apt 3B" or "#11" or similar, extract just the unit part
-- If you cannot identify a field with confidence, leave it empty rather than guessing
-
-You MUST call the extract_receipt_data function with the extracted fields.`,
-            },
-            {
-              role: "user",
-              content: [
-                { type: "text", text: "Extract rent payment data from this image. Carefully distinguish between: the property street address, the tenant's personal name, the paying organization/agency, the payment amount, and the payment method." },
-                { type: "image_url", image_url: { url: dataUrl } },
-              ],
-            },
-          ],
-          tools: [extractReceiptTool],
-          tool_choice: { type: "function", function: { name: "extract_receipt_data" } },
+          messages,
+          tools: [extractMultiReceiptTool],
+          tool_choice: { type: "function", function: { name: "extract_receipts" } },
         }),
       });
 
@@ -146,21 +165,18 @@ You MUST call the extract_receipt_data function with the extracted fields.`,
       const aiData = await aiResponse.json();
       const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
       if (toolCall) {
-        extractedData = JSON.parse(toolCall.function.arguments);
+        const parsed = JSON.parse(toolCall.function.arguments);
+        extractedItems = parsed.items || [];
+        extractedText = parsed.extracted_text || "";
       }
     } else if (isXlsx || isEml) {
-      // For XLSX and EML: decode as text where possible, send to AI for extraction
       let textContent = "";
 
       if (isEml) {
-        // EML files are text-based (RFC 822)
         const decoder = new TextDecoder("utf-8");
         textContent = decoder.decode(fileBytes);
-        // Truncate to avoid token limits
         if (textContent.length > 30000) textContent = textContent.substring(0, 30000);
       } else {
-        // XLSX: extract what we can as CSV-like text using basic parsing
-        // Send the raw base64 to AI with instruction to parse
         const base64 = btoa(String.fromCharCode(...fileBytes));
         textContent = `[XLSX file base64 - first 20000 chars]: ${base64.substring(0, 20000)}`;
       }
@@ -174,27 +190,14 @@ You MUST call the extract_receipt_data function with the extracted fields.`,
         body: JSON.stringify({
           model: "google/gemini-2.5-flash",
           messages: [
-            {
-              role: "system",
-              content: `You are a rent payment data extraction AI for a property management company. Extract structured rent payment data from ${isEml ? "email (EML)" : "spreadsheet (XLSX)"} content.
-
-CRITICAL RULES:
-- "property" must be a STREET ADDRESS (e.g. "14654 Blythe St"), never an owner entity or LP name
-- "tenant" must be an INDIVIDUAL PERSON's name, never an organization or agency name. Look for names in memo lines, reference codes, or payment descriptions that follow patterns like "F.RODRIGUEZ" or "H.AREVALO"
-- "payer" is the organization or person who sent the payment (e.g. "People Assisting the Homeless", "The Salvation Army", "Shine BC-LA")
-- "amount" is the PAYMENT AMOUNT — look for dollar amounts, not account numbers or reference IDs. Be very careful not to concatenate unrelated numbers
-- For EML emails: payment notifications often have the amount in the subject or body. The "To" address is usually the property owner, NOT the tenant
-- For spreadsheets: extract the first/primary receipt row
-
-You MUST call the extract_receipt_data function.`,
-            },
+            { role: "system", content: systemPrompt },
             {
               role: "user",
-              content: `Extract rent payment data from this ${isEml ? "email" : "spreadsheet"} content. Carefully identify: the property street address (not owner LP name), the individual tenant name (not the paying organization), the exact payment amount, and payment method.\n\n${textContent}`,
+              content: `Extract ALL rent payment line items from this ${isEml ? "email" : "spreadsheet"}. EVERY row/line item in the ${isEml ? "remittance detail" : "spreadsheet"} represents a separate receipt for a different tenant — extract ALL of them as separate items.\n\n${textContent}`,
             },
           ],
-          tools: [extractReceiptTool],
-          tool_choice: { type: "function", function: { name: "extract_receipt_data" } },
+          tools: [extractMultiReceiptTool],
+          tool_choice: { type: "function", function: { name: "extract_receipts" } },
         }),
       });
 
@@ -212,76 +215,127 @@ You MUST call the extract_receipt_data function.`,
       const aiData = await aiResponse.json();
       const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
       if (toolCall) {
-        extractedData = JSON.parse(toolCall.function.arguments);
+        const parsed = JSON.parse(toolCall.function.arguments);
+        extractedItems = parsed.items || [];
+        extractedText = parsed.extracted_text || (isEml ? textContent.substring(0, 5000) : `[XLSX file: ${file.name}]`);
       }
-      extractedData.extracted_text = isEml ? textContent.substring(0, 5000) : `[XLSX file: ${file.name}]`;
     } else {
-      // For PDFs and other files, create a placeholder
-      extractedData = {
+      // Unknown file type — placeholder single item
+      extractedItems = [{
         property: "",
         property_confidence: 0,
         tenant: "",
         tenant_confidence: 0,
         amount: 0,
         amount_confidence: 0,
-        extracted_text: `[${fileExt?.toUpperCase() || "Unknown"} file: ${file.name}]`,
-      };
+      }];
+      extractedText = `[${fileExt?.toUpperCase() || "Unknown"} file: ${file.name}]`;
     }
 
-    // Determine status based on confidence
-    const confidences = [
-      extractedData.property_confidence || 0,
-      extractedData.unit_confidence || 0,
-      extractedData.tenant_confidence || 0,
-      extractedData.amount_confidence || 0,
-      extractedData.receipt_date_confidence || 0,
-    ];
-    const avgConfidence = confidences.reduce((a: number, b: number) => a + b, 0) / confidences.length;
-    const hasMissingRequired = !extractedData.property || !extractedData.tenant || !extractedData.amount;
-    const status = hasMissingRequired ? "exception" : avgConfidence < 0.7 ? "exception" : "needs_review";
+    // Fallback if AI returned empty
+    if (extractedItems.length === 0) {
+      extractedItems = [{
+        property: "",
+        property_confidence: 0,
+        tenant: "",
+        tenant_confidence: 0,
+        amount: 0,
+        amount_confidence: 0,
+      }];
+    }
 
-    // Insert receipt record
-    const { data: receipt, error: insertError } = await supabase
-      .from("receipts")
-      .insert({
+    // ---- DUPLICATE DETECTION & INSERT ----
+    const insertedReceipts: any[] = [];
+    const duplicates: any[] = [];
+
+    for (const item of extractedItems) {
+      // Check for duplicates: same tenant + amount + receipt_date + property
+      if (item.tenant && item.amount && item.receipt_date) {
+        const { data: existing } = await supabase
+          .from("receipts")
+          .select("id, receipt_id")
+          .eq("tenant", item.tenant)
+          .eq("amount", item.amount)
+          .eq("receipt_date", item.receipt_date)
+          .eq("property", item.property || "")
+          .limit(1);
+
+        if (existing && existing.length > 0) {
+          duplicates.push({
+            tenant: item.tenant,
+            amount: item.amount,
+            receipt_date: item.receipt_date,
+            existing_receipt_id: existing[0].receipt_id,
+          });
+          continue; // skip duplicate
+        }
+      }
+
+      // Determine status based on confidence
+      const confidences = [
+        item.property_confidence || 0,
+        item.unit_confidence || 0,
+        item.tenant_confidence || 0,
+        item.amount_confidence || 0,
+        item.receipt_date_confidence || 0,
+      ];
+      const avgConfidence = confidences.reduce((a: number, b: number) => a + b, 0) / confidences.length;
+      const hasMissingRequired = !item.property || !item.tenant || !item.amount;
+      const status = hasMissingRequired ? "exception" : avgConfidence < 0.7 ? "exception" : "needs_review";
+
+      const { data: receipt, error: insertError } = await supabase
+        .from("receipts")
+        .insert({
+          user_id: userId,
+          property: item.property || "",
+          unit: item.unit || "",
+          tenant: item.tenant || "",
+          receipt_date: item.receipt_date || null,
+          rent_month: item.rent_month || null,
+          amount: item.amount || 0,
+          payment_type: item.payment_type || "",
+          reference: item.reference || "",
+          memo: item.memo || "",
+          confidence_scores: {
+            property: item.property_confidence || 0,
+            unit: item.unit_confidence || 0,
+            tenant: item.tenant_confidence || 0,
+            amount: item.amount_confidence || 0,
+            receiptDate: item.receipt_date_confidence || 0,
+            paymentType: item.payment_type_confidence || 0,
+          },
+          status,
+          file_path: filePath,
+          file_name: file.name,
+          original_text: extractedText,
+        })
+        .select()
+        .single();
+
+      if (insertError) {
+        console.error("Insert error for item:", item.tenant, insertError.message);
+        continue;
+      }
+
+      insertedReceipts.push(receipt);
+
+      // Audit log
+      await supabase.from("audit_logs").insert({
         user_id: userId,
-        property: extractedData.property || "",
-        unit: extractedData.unit || "",
-        tenant: extractedData.tenant || "",
-        receipt_date: extractedData.receipt_date || null,
-        rent_month: extractedData.rent_month || null,
-        amount: extractedData.amount || 0,
-        payment_type: extractedData.payment_type || "",
-        reference: extractedData.reference || "",
-        memo: extractedData.memo || "",
-        confidence_scores: {
-          property: extractedData.property_confidence || 0,
-          unit: extractedData.unit_confidence || 0,
-          tenant: extractedData.tenant_confidence || 0,
-          amount: extractedData.amount_confidence || 0,
-          receiptDate: extractedData.receipt_date_confidence || 0,
-          paymentType: extractedData.payment_type_confidence || 0,
-        },
-        status,
-        file_path: filePath,
-        file_name: file.name,
-        original_text: extractedData.extracted_text || "",
-      })
-      .select()
-      .single();
+        action: "receipt_uploaded",
+        entity_type: "receipt",
+        entity_id: receipt.receipt_id,
+        details: { file_name: file.name, status, confidence: avgConfidence, line_item: true },
+      });
+    }
 
-    if (insertError) throw new Error(`Insert failed: ${insertError.message}`);
-
-    // Audit log
-    await supabase.from("audit_logs").insert({
-      user_id: userId,
-      action: "receipt_uploaded",
-      entity_type: "receipt",
-      entity_id: receipt.receipt_id,
-      details: { file_name: file.name, status, confidence: avgConfidence },
-    });
-
-    return new Response(JSON.stringify({ receipt, extractedData }), {
+    return new Response(JSON.stringify({
+      receipts: insertedReceipts,
+      duplicates,
+      total_line_items: extractedItems.length,
+      inserted_count: insertedReceipts.length,
+      duplicate_count: duplicates.length,
+    }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {

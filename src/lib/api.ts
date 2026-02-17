@@ -62,6 +62,14 @@ export async function uploadReceiptFile(file: File, token: string) {
   return resp.json();
 }
 
+export async function getFilePreviewUrl(filePath: string): Promise<string> {
+  const { data } = await supabase.storage
+    .from("receipts")
+    .createSignedUrl(filePath, 3600); // 1 hour expiry
+  if (!data?.signedUrl) throw new Error("Could not generate preview URL");
+  return data.signedUrl;
+}
+
 export async function createDepositBatch(property: string, receiptIds: string[], depositPeriod: string, userId: string) {
   // Get receipt amounts
   const { data: receipts } = await supabase

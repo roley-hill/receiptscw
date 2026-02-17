@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { fetchReceipts, updateReceipt } from "@/lib/api";
+import { fetchReceipts, updateReceipt, getFilePreviewUrl } from "@/lib/api";
 import { motion } from "framer-motion";
-import { CheckCircle2, AlertTriangle, ChevronLeft, ChevronRight, Eye, Edit3, Save } from "lucide-react";
+import { CheckCircle2, AlertTriangle, ChevronLeft, ChevronRight, Eye, Edit3, Save, FileText, Image as ImageIcon, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 
@@ -113,19 +113,7 @@ export default function ReviewPage() {
             <h3 className="text-sm font-semibold text-foreground flex items-center gap-2"><Eye className="h-4 w-4" />Document Preview</h3>
             <span className="text-xs vault-mono text-muted-foreground">{receipt.file_name || "No file"}</span>
           </div>
-          <div className="rounded-lg bg-muted/50 border border-border p-4 min-h-[400px]">
-            {receipt.original_text ? (
-              <pre className="text-xs text-muted-foreground whitespace-pre-wrap font-mono">{receipt.original_text}</pre>
-            ) : (
-              <div className="flex items-center justify-center h-full text-muted-foreground text-center">
-                <div>
-                  <Eye className="h-8 w-8 mx-auto mb-2 opacity-40" />
-                  <p className="text-sm">No extracted text available</p>
-                  <p className="text-xs mt-1">{receipt.file_name}</p>
-                </div>
-              </div>
-            )}
-          </div>
+          <FilePreview filePath={receipt.file_path} fileName={receipt.file_name} originalText={receipt.original_text} />
         </motion.div>
 
         <motion.div key={receipt.id + "-fields"} initial={{ opacity: 0, x: 12 }} animate={{ opacity: 1, x: 0 }} className="vault-card p-4 space-y-4">
@@ -156,6 +144,68 @@ export default function ReviewPage() {
           </div>
         </motion.div>
       </div>
+    </div>
+  );
+}
+
+function FilePreview({ filePath, fileName, originalText }: { filePath: string | null; fileName: string | null; originalText: string | null }) {
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(false);
+
+  const fileExt = fileName?.split(".").pop()?.toLowerCase();
+  const isImage = ["jpg", "jpeg", "png", "webp", "heic"].includes(fileExt || "");
+  const isPdf = fileExt === "pdf";
+  const canPreview = isImage || isPdf;
+
+  useEffect(() => {
+    if (!filePath || !canPreview) return;
+    setLoading(true);
+    setError(false);
+    getFilePreviewUrl(filePath)
+      .then((url) => { setPreviewUrl(url); setLoading(false); })
+      .catch(() => { setError(true); setLoading(false); });
+  }, [filePath, canPreview]);
+
+  if (loading) {
+    return (
+      <div className="rounded-lg bg-muted/50 border border-border p-4 min-h-[400px] flex items-center justify-center">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (canPreview && previewUrl && !error) {
+    if (isImage) {
+      return (
+        <div className="rounded-lg bg-muted/50 border border-border overflow-hidden min-h-[400px] flex items-center justify-center">
+          <img src={previewUrl} alt={fileName || "Receipt"} className="max-w-full max-h-[600px] object-contain" />
+        </div>
+      );
+    }
+    if (isPdf) {
+      return (
+        <div className="rounded-lg border border-border overflow-hidden" style={{ minHeight: 500 }}>
+          <iframe src={previewUrl} title={fileName || "PDF Preview"} className="w-full" style={{ height: 500 }} />
+        </div>
+      );
+    }
+  }
+
+  // Fallback: show extracted text
+  return (
+    <div className="rounded-lg bg-muted/50 border border-border p-4 min-h-[400px]">
+      {originalText ? (
+        <pre className="text-xs text-muted-foreground whitespace-pre-wrap font-mono">{originalText}</pre>
+      ) : (
+        <div className="flex items-center justify-center h-full text-muted-foreground text-center">
+          <div>
+            <Eye className="h-8 w-8 mx-auto mb-2 opacity-40" />
+            <p className="text-sm">No preview available</p>
+            <p className="text-xs mt-1">{fileName}</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

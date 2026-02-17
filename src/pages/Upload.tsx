@@ -1,6 +1,6 @@
 import { useState, useRef } from "react";
 import { motion } from "framer-motion";
-import { Upload as UploadIcon, FolderOpen, FileText, Image, AlertCircle, CheckCircle2, X, Loader2 } from "lucide-react";
+import { Upload as UploadIcon, FolderOpen, FileText, Image, AlertCircle, CheckCircle2, X, Loader2, Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { uploadReceiptFile } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
@@ -14,7 +14,9 @@ interface UploadedFile {
   file: File;
   status: "pending" | "processing" | "done" | "error";
   error?: string;
-  receiptId?: string;
+  insertedCount?: number;
+  duplicateCount?: number;
+  totalLineItems?: number;
 }
 
 export default function UploadPage() {
@@ -30,7 +32,7 @@ export default function UploadPage() {
     const newFiles: UploadedFile[] = Array.from(fileList)
     .filter((f) => {
         const ext = f.name.split(".").pop()?.toLowerCase();
-        return accepted.includes(f.type) || ["xlsx", "xls", "eml"].includes(ext || "") || f.type.startsWith("image/");
+        return accepted.includes(f.type) || ["xlsx", "xls", "eml", "pdf"].includes(ext || "") || f.type.startsWith("image/");
       })
       .map((f) => ({
         name: f.name,
@@ -72,13 +74,21 @@ export default function UploadPage() {
 
       try {
         const result = await uploadReceiptFile(f.file, session.access_token);
+        const insertedCount = result.inserted_count ?? 1;
+        const duplicateCount = result.duplicate_count ?? 0;
+        const totalLineItems = result.total_line_items ?? 1;
+        
         setFiles((prev) =>
           prev.map((pf) =>
             pf.name === f.name && pf.status === "processing"
-              ? { ...pf, status: "done", receiptId: result.receipt?.receipt_id }
+              ? { ...pf, status: "done", insertedCount, duplicateCount, totalLineItems }
               : pf
           )
         );
+
+        if (duplicateCount > 0) {
+          toast.warning(`${duplicateCount} duplicate(s) skipped in ${f.name}`);
+        }
       } catch (err: any) {
         setFiles((prev) =>
           prev.map((pf) =>
@@ -114,7 +124,7 @@ export default function UploadPage() {
       <div>
         <h1 className="text-2xl font-bold text-foreground">Upload Receipts</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Upload rent receipt files. AI will extract data automatically. Supported: PDF, JPG, PNG, XLSX, EML.
+          Upload rent receipt files or remittance details. AI will extract each line item as a separate receipt. Supported: PDF, JPG, PNG, XLSX, EML.
         </p>
       </div>
 
@@ -136,8 +146,8 @@ export default function UploadPage() {
           <UploadIcon className="h-7 w-7 text-muted-foreground" />
         </div>
         <div className="text-center">
-          <p className="text-sm font-medium text-foreground">Drop receipt files here</p>
-          <p className="text-xs text-muted-foreground mt-1">PDF, JPG, PNG, XLSX, EML — files will be processed with AI extraction</p>
+          <p className="text-sm font-medium text-foreground">Drop receipt files or remittance details here</p>
+          <p className="text-xs text-muted-foreground mt-1">PDF, JPG, PNG, XLSX, EML — each line item will become a separate receipt</p>
         </div>
         <Button variant="outline" size="sm" className="mt-2">
           <FolderOpen className="h-4 w-4 mr-2" /> Browse Files
@@ -173,7 +183,17 @@ export default function UploadPage() {
                   <p className="text-sm font-medium text-foreground truncate">{file.name}</p>
                   <p className="text-xs text-muted-foreground">
                     {formatSize(file.size)}
-                    {file.receiptId && <span className="ml-2 vault-mono text-vault-emerald">→ {file.receiptId}</span>}
+                    {file.status === "done" && file.totalLineItems !== undefined && (
+                      <span className="ml-2 vault-mono text-vault-emerald">
+                        → {file.insertedCount} receipt{file.insertedCount !== 1 ? "s" : ""} extracted
+                        {(file.totalLineItems ?? 0) > 1 && ` (from ${file.totalLineItems} line items)`}
+                      </span>
+                    )}
+                    {file.status === "done" && (file.duplicateCount ?? 0) > 0 && (
+                      <span className="ml-2 vault-mono text-vault-amber flex items-center gap-1 inline-flex">
+                        <Copy className="h-3 w-3" /> {file.duplicateCount} duplicate{file.duplicateCount !== 1 ? "s" : ""} skipped
+                      </span>
+                    )}
                     {file.error && <span className="ml-2 text-vault-red">{file.error}</span>}
                   </p>
                 </div>
