@@ -138,7 +138,16 @@ CRITICAL RULES:
 - "property" must be a STREET ADDRESS (e.g. "9034 Orion Ave"), never an owner entity or LP name like "9010 Tobias Owner LP"
 - "tenant" must be an INDIVIDUAL PERSON's name (e.g. "Maria Rodriguez"), never an organization, agency, or LP name
 - "payer" is the organization or person who sent the payment (may differ from tenant)
-- "amount" is the PAYMENT AMOUNT in dollars — do NOT concatenate digits from different fields
+- "amount" MUST be a single numeric dollar value for that line item's payment (e.g. 1250.00). Do NOT concatenate digits from unrelated columns. Do NOT include reference numbers, check numbers, or dates in the amount.
+- "memo" is ONLY for notes, comments, or remarks — NOT for amounts, dates, or reference numbers
+
+COLUMN MAPPING FOR SPREADSHEETS:
+- Look at the column HEADERS to determine what each column contains
+- The column labeled "Amount", "Payment", "Rent", "Total", or similar numeric payment column → "amount"
+- The column labeled "Check", "Check #", "Ref", "Reference", "Transaction ID" → "reference"
+- The column labeled "Notes", "Memo", "Comments", "Remarks" → "memo"
+- Do NOT put dollar amounts into the memo field
+- Do NOT put partial amounts or concatenated values into any field
 
 MULTI-LINE ITEM RULES:
 - If this is a REMITTANCE DETAIL or ACH payment covering MULTIPLE tenants/units, extract EACH line item as a separate entry in the items array
@@ -204,8 +213,20 @@ You MUST call the extract_receipts function.`;
 
       if (isEml) {
         const decoder = new TextDecoder("utf-8");
-        textContent = decoder.decode(fileBytes);
+        const rawEml = decoder.decode(fileBytes);
+        // Extract HTML body for preview storage
+        const htmlMatch = rawEml.match(/<html[\s\S]*<\/html>/i);
+        // For AI: strip heavy headers, keep useful content
+        textContent = rawEml;
         if (textContent.length > 30000) textContent = textContent.substring(0, 30000);
+        // Store HTML body or clean text for preview (stored later in extractedText)
+        if (htmlMatch) {
+          extractedText = htmlMatch[0].substring(0, 50000);
+        } else {
+          // Fallback: strip routing headers, keep readable parts
+          const headerEnd = rawEml.indexOf("\n\n");
+          extractedText = headerEnd > 0 ? rawEml.substring(headerEnd + 2, headerEnd + 50002) : rawEml.substring(0, 50000);
+        }
       } else {
         // Parse XLSX properly into CSV text so the AI can read actual cell values
         try {
@@ -253,7 +274,10 @@ You MUST call the extract_receipts function.`;
       if (toolCall) {
         const parsed = JSON.parse(toolCall.function.arguments);
         extractedItems = parsed.items || [];
-        extractedText = parsed.extracted_text || (isEml ? textContent.substring(0, 5000) : textContent.substring(0, 5000));
+        // For EML, keep the HTML body we already extracted; for XLSX keep the CSV
+        if (!extractedText) {
+          extractedText = parsed.extracted_text || textContent.substring(0, 5000);
+        }
       }
     } else {
       // Unknown file type — placeholder single item
