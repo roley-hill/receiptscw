@@ -112,7 +112,7 @@ export default function EntryView() {
   const queryClient = useQueryClient();
   const { data: allReceipts = [], isLoading } = useQuery({ queryKey: ["receipts"], queryFn: fetchReceipts });
 
-  const finalized = allReceipts.filter((r) => r.status === "finalized");
+  const finalized = allReceipts.filter((r) => r.status === "finalized" && !r.batch_id);
 
   const [selectedProperty, setSelectedProperty] = useState<string>("all");
   const [treeSearch, setTreeSearch] = useState("");
