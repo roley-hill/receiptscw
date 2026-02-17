@@ -26,9 +26,12 @@ export default function UploadPage() {
   const queryClient = useQueryClient();
 
   const handleFiles = (fileList: FileList) => {
-    const accepted = ["application/pdf", "image/jpeg", "image/png", "image/heic", "image/jpg"];
+    const accepted = ["application/pdf", "image/jpeg", "image/png", "image/heic", "image/jpg", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.ms-excel", "message/rfc822", "application/octet-stream"];
     const newFiles: UploadedFile[] = Array.from(fileList)
-      .filter((f) => accepted.some((t) => f.type.startsWith(t.split("/")[0]) || f.type === t))
+    .filter((f) => {
+        const ext = f.name.split(".").pop()?.toLowerCase();
+        return accepted.includes(f.type) || ["xlsx", "xls", "eml"].includes(ext || "") || f.type.startsWith("image/");
+      })
       .map((f) => ({
         name: f.name,
         size: f.size,
@@ -37,7 +40,7 @@ export default function UploadPage() {
         status: "pending" as const,
       }));
     if (newFiles.length === 0) {
-      toast.error("No supported files found. Upload PDF, JPG, or PNG files.");
+      toast.error("No supported files found. Upload PDF, JPG, PNG, XLSX, or EML files.");
       return;
     }
     setFiles((prev) => [...prev, ...newFiles]);
@@ -111,7 +114,7 @@ export default function UploadPage() {
       <div>
         <h1 className="text-2xl font-bold text-foreground">Upload Receipts</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Upload rent receipt files. AI will extract data automatically. Supported: PDF, JPG, PNG.
+          Upload rent receipt files. AI will extract data automatically. Supported: PDF, JPG, PNG, XLSX, EML.
         </p>
       </div>
 
@@ -134,7 +137,7 @@ export default function UploadPage() {
         </div>
         <div className="text-center">
           <p className="text-sm font-medium text-foreground">Drop receipt files here</p>
-          <p className="text-xs text-muted-foreground mt-1">PDF, JPG, PNG — files will be processed with AI extraction</p>
+          <p className="text-xs text-muted-foreground mt-1">PDF, JPG, PNG, XLSX, EML — files will be processed with AI extraction</p>
         </div>
         <Button variant="outline" size="sm" className="mt-2">
           <FolderOpen className="h-4 w-4 mr-2" /> Browse Files
@@ -143,7 +146,7 @@ export default function UploadPage() {
           ref={inputRef}
           type="file"
           multiple
-          accept=".pdf,.jpg,.jpeg,.png,.heic"
+          accept=".pdf,.jpg,.jpeg,.png,.heic,.xlsx,.xls,.eml"
           className="hidden"
           onChange={(e) => e.target.files && handleFiles(e.target.files)}
         />
