@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchReceipts, markAppfolioRecorded, getFilePreviewUrl, createDepositBatch } from "@/lib/api";
 import { motion } from "framer-motion";
-import { Copy, Check, Download, FileText, Layers, X, ZoomIn, ZoomOut, RotateCcw, Loader2, ChevronRight, Building2 } from "lucide-react";
+import { Copy, Check, Download, FileText, Layers, X, ZoomIn, ZoomOut, RotateCcw, Loader2, ChevronRight, Building2, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { DbReceipt } from "@/lib/api";
@@ -115,6 +115,7 @@ export default function EntryView() {
   const finalized = allReceipts.filter((r) => r.status === "finalized");
 
   const [selectedProperty, setSelectedProperty] = useState<string>("all");
+  const [treeSearch, setTreeSearch] = useState("");
   const [batchDialogOpen, setBatchDialogOpen] = useState(false);
   const [batchProperty, setBatchProperty] = useState("");
   const [depositPeriod, setDepositPeriod] = useState("");
@@ -229,19 +230,31 @@ export default function EntryView() {
       <div className="flex gap-4">
         {/* ─── Building Tree Sidebar ─── */}
         <div className="vault-card p-0 overflow-hidden w-[220px] shrink-0 self-start sticky top-4">
-          <div className="px-4 py-3 border-b border-border bg-muted/30">
+          <div className="px-3 py-3 border-b border-border bg-muted/30 space-y-2">
             <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Buildings</h3>
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+              <input
+                type="text"
+                placeholder="Filter buildings..."
+                value={treeSearch}
+                onChange={(e) => setTreeSearch(e.target.value)}
+                className="h-8 w-full rounded-md border border-input bg-background pl-8 pr-3 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+            </div>
           </div>
-          <div className="divide-y divide-border max-h-[calc(100vh-220px)] overflow-auto">
-            <button
-              onClick={() => setSelectedProperty("all")}
-              className={`w-full flex items-center gap-2 px-4 py-3 text-sm transition-colors ${selectedProperty === "all" ? "bg-accent/10 text-accent font-semibold border-l-2 border-accent" : "text-foreground hover:bg-muted/50 border-l-2 border-transparent"}`}
-            >
-              <Building2 className="h-4 w-4 shrink-0" />
-              <span>All Buildings</span>
-              <span className="ml-auto text-xs vault-mono text-muted-foreground">{finalized.length}</span>
-            </button>
-            {filteredProperties.sort().map((property) => {
+          <div className="divide-y divide-border max-h-[calc(100vh-260px)] overflow-auto">
+            {!treeSearch && (
+              <button
+                onClick={() => setSelectedProperty("all")}
+                className={`w-full flex items-center gap-2 px-4 py-3 text-sm transition-colors ${selectedProperty === "all" ? "bg-accent/10 text-accent font-semibold border-l-2 border-accent" : "text-foreground hover:bg-muted/50 border-l-2 border-transparent"}`}
+              >
+                <Building2 className="h-4 w-4 shrink-0" />
+                <span>All Buildings</span>
+                <span className="ml-auto text-xs vault-mono text-muted-foreground">{finalized.length}</span>
+              </button>
+            )}
+            {filteredProperties.sort().filter((p) => !treeSearch || p.toLowerCase().includes(treeSearch.toLowerCase())).map((property) => {
               const count = finalized.filter((r) => r.property === property).length;
               const recCount = finalized.filter((r) => r.property === property && (r as any).appfolio_recorded).length;
               return (
