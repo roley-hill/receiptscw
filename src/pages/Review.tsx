@@ -371,9 +371,7 @@ function EmlPdfPreview({ pdfPath, fileName, emlPreviewUrl, error }: { pdfPath: s
         <p className="text-sm font-medium text-foreground">{fileName} <span className="text-xs text-muted-foreground">(PDF attachment)</span></p>
       </div>
       {pdfUrl ? (
-        <ZoomablePreview>
-          <PdfViewer url={pdfUrl} />
-        </ZoomablePreview>
+        <PdfViewer url={pdfUrl} />
       ) : (
         <p className="text-sm text-muted-foreground">Could not load PDF attachment</p>
       )}
