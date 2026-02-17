@@ -64,36 +64,56 @@ export default function PdfViewer({ url, className }: PdfViewerProps) {
     return () => { cancelled = true; };
   }, [pdf, page, zoom]);
 
-  const handleZoomIn = () => setZoom((z) => Math.min(z + 0.5, 4));
-  const handleZoomOut = () => setZoom((z) => Math.max(z - 0.5, 0.5));
+  const handleZoomIn = () => setZoom((z) => Math.min(z + 0.25, 4));
+  const handleZoomOut = () => setZoom((z) => Math.max(z - 0.25, 0.5));
   const handleZoomReset = () => setZoom(1);
 
-  const handleDoubleClick = useCallback((e: React.MouseEvent) => {
+  const zoomToPoint = useCallback((newZoom: number, clientX: number, clientY: number) => {
     const container = containerRef.current;
     if (!container) return;
+    const rect = container.getBoundingClientRect();
+    const clickX = (clientX - rect.left + container.scrollLeft) / (container.scrollWidth || 1);
+    const clickY = (clientY - rect.top + container.scrollTop) / (container.scrollHeight || 1);
+    setZoom(newZoom);
+    requestAnimationFrame(() => {
+      container.scrollLeft = clickX * container.scrollWidth - rect.width / 2;
+      container.scrollTop = clickY * container.scrollHeight - rect.height / 2;
+    });
+  }, []);
 
-    // If already zoomed, reset
+  const handleDoubleClick = useCallback((e: React.MouseEvent) => {
     if (zoom >= 2) {
       setZoom(1);
       return;
     }
+    zoomToPoint(Math.min(zoom + 0.5, 4), e.clientX, e.clientY);
+  }, [zoom, zoomToPoint]);
 
-    const newZoom = Math.min(zoom + 1, 4);
-    const rect = container.getBoundingClientRect();
-    // Click position as fraction of visible area
-    const clickX = (e.clientX - rect.left + container.scrollLeft) / (container.scrollWidth || 1);
-    const clickY = (e.clientY - rect.top + container.scrollTop) / (container.scrollHeight || 1);
-
-    setZoom(newZoom);
-
-    // After render, scroll so the clicked point stays centered
-    requestAnimationFrame(() => {
-      const newScrollWidth = container.scrollWidth;
-      const newScrollHeight = container.scrollHeight;
-      container.scrollLeft = clickX * newScrollWidth - rect.width / 2;
-      container.scrollTop = clickY * newScrollHeight - rect.height / 2;
-    });
-  }, [zoom]);
+  // Ctrl+scroll wheel zoom
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const handler = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      const delta = e.deltaY > 0 ? -0.25 : 0.25;
+      setZoom((prev) => {
+        const next = Math.min(Math.max(prev + delta, 0.5), 4);
+        if (next === prev) return prev;
+        // Scroll to keep pointer position stable
+        const rect = container.getBoundingClientRect();
+        const fracX = (e.clientX - rect.left + container.scrollLeft) / (container.scrollWidth || 1);
+        const fracY = (e.clientY - rect.top + container.scrollTop) / (container.scrollHeight || 1);
+        requestAnimationFrame(() => {
+          container.scrollLeft = fracX * container.scrollWidth - (e.clientX - rect.left);
+          container.scrollTop = fracY * container.scrollHeight - (e.clientY - rect.top);
+        });
+        return next;
+      });
+    };
+    container.addEventListener("wheel", handler, { passive: false });
+    return () => container.removeEventListener("wheel", handler);
+  }, []);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     if (zoom <= 1) return;
