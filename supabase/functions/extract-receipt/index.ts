@@ -47,11 +47,44 @@ serve(async (req) => {
 
     if (uploadError) throw new Error(`Upload failed: ${uploadError.message}`);
 
-    // Convert file to base64 for AI processing (images)
+    // Shared tool definition for AI extraction
+    const extractReceiptTool = {
+      type: "function" as const,
+      function: {
+        name: "extract_receipt_data",
+        description: "Extract structured receipt data",
+        parameters: {
+          type: "object",
+          properties: {
+            property: { type: "string", description: "Property or building name/address" },
+            property_confidence: { type: "number", description: "Confidence 0-1" },
+            unit: { type: "string", description: "Unit number" },
+            unit_confidence: { type: "number", description: "Confidence 0-1" },
+            tenant: { type: "string", description: "Tenant full name" },
+            tenant_confidence: { type: "number", description: "Confidence 0-1" },
+            receipt_date: { type: "string", description: "Receipt date YYYY-MM-DD" },
+            receipt_date_confidence: { type: "number", description: "Confidence 0-1" },
+            rent_month: { type: "string", description: "Rent month YYYY-MM" },
+            amount: { type: "number", description: "Amount paid" },
+            amount_confidence: { type: "number", description: "Confidence 0-1" },
+            payment_type: { type: "string", description: "Payment method" },
+            payment_type_confidence: { type: "number", description: "Confidence 0-1" },
+            reference: { type: "string", description: "Check/transaction number" },
+            memo: { type: "string", description: "Memo or remarks" },
+            extracted_text: { type: "string", description: "Full text visible" },
+          },
+          required: ["property", "tenant", "amount"],
+          additionalProperties: false,
+        },
+      },
+    };
+
     let extractedData: any = {};
     
     const isImage = file.type.startsWith("image/");
-    const isPdf = file.type === "application/pdf";
+    const fileExt = file.name.split(".").pop()?.toLowerCase();
+    const isXlsx = fileExt === "xlsx" || fileExt === "xls" || file.type.includes("spreadsheet") || file.type.includes("excel");
+    const isEml = fileExt === "eml" || file.type === "message/rfc822";
 
     if (isImage) {
       const base64 = btoa(String.fromCharCode(...fileBytes));
@@ -78,38 +111,7 @@ serve(async (req) => {
               ],
             },
           ],
-          tools: [
-            {
-              type: "function",
-              function: {
-                name: "extract_receipt_data",
-                description: "Extract structured receipt data from image",
-                parameters: {
-                  type: "object",
-                  properties: {
-                    property: { type: "string", description: "Property or building name/address" },
-                    property_confidence: { type: "number", description: "Confidence 0-1" },
-                    unit: { type: "string", description: "Unit number" },
-                    unit_confidence: { type: "number", description: "Confidence 0-1" },
-                    tenant: { type: "string", description: "Tenant full name" },
-                    tenant_confidence: { type: "number", description: "Confidence 0-1" },
-                    receipt_date: { type: "string", description: "Receipt date YYYY-MM-DD" },
-                    receipt_date_confidence: { type: "number", description: "Confidence 0-1" },
-                    rent_month: { type: "string", description: "Rent month YYYY-MM" },
-                    amount: { type: "number", description: "Amount paid" },
-                    amount_confidence: { type: "number", description: "Confidence 0-1" },
-                    payment_type: { type: "string", description: "Payment method" },
-                    payment_type_confidence: { type: "number", description: "Confidence 0-1" },
-                    reference: { type: "string", description: "Check/transaction number" },
-                    memo: { type: "string", description: "Memo or remarks" },
-                    extracted_text: { type: "string", description: "Full text visible in image" },
-                  },
-                  required: ["property", "tenant", "amount"],
-                  additionalProperties: false,
-                },
-              },
-            },
-          ],
+          tools: [extractReceiptTool],
           tool_choice: { type: "function", function: { name: "extract_receipt_data" } },
         }),
       });
@@ -117,7 +119,6 @@ serve(async (req) => {
       if (!aiResponse.ok) {
         const errText = await aiResponse.text();
         console.error("AI error:", aiResponse.status, errText);
-        
         if (aiResponse.status === 429) {
           return new Response(JSON.stringify({ error: "Rate limit exceeded. Please try again shortly." }), {
             status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -136,24 +137,73 @@ serve(async (req) => {
       if (toolCall) {
         extractedData = JSON.parse(toolCall.function.arguments);
       }
+    } else if (isXlsx || isEml) {
+      // For XLSX and EML: decode as text where possible, send to AI for extraction
+      let textContent = "";
+
+      if (isEml) {
+        // EML files are text-based (RFC 822)
+        const decoder = new TextDecoder("utf-8");
+        textContent = decoder.decode(fileBytes);
+        // Truncate to avoid token limits
+        if (textContent.length > 30000) textContent = textContent.substring(0, 30000);
+      } else {
+        // XLSX: extract what we can as CSV-like text using basic parsing
+        // Send the raw base64 to AI with instruction to parse
+        const base64 = btoa(String.fromCharCode(...fileBytes));
+        textContent = `[XLSX file base64 - first 20000 chars]: ${base64.substring(0, 20000)}`;
+      }
+
+      const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${LOVABLE_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "google/gemini-2.5-flash",
+          messages: [
+            {
+              role: "system",
+              content: `You are a receipt data extraction AI. Extract structured rent receipt data from ${isEml ? "email (EML)" : "spreadsheet (XLSX)"} content. You MUST call the extract_receipt_data function. For spreadsheets, there may be multiple receipts — extract the first/primary one. For emails, look for payment confirmations, rent receipts, or invoice details in the body and attachments info.`,
+            },
+            {
+              role: "user",
+              content: `Extract rent receipt data from this ${isEml ? "email" : "spreadsheet"} content:\n\n${textContent}`,
+            },
+          ],
+          tools: [extractReceiptTool],
+          tool_choice: { type: "function", function: { name: "extract_receipt_data" } },
+        }),
+      });
+
+      if (!aiResponse.ok) {
+        const errText = await aiResponse.text();
+        console.error("AI error:", aiResponse.status, errText);
+        if (aiResponse.status === 429) {
+          return new Response(JSON.stringify({ error: "Rate limit exceeded. Please try again shortly." }), {
+            status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+        throw new Error("AI extraction failed");
+      }
+
+      const aiData = await aiResponse.json();
+      const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
+      if (toolCall) {
+        extractedData = JSON.parse(toolCall.function.arguments);
+      }
+      extractedData.extracted_text = isEml ? textContent.substring(0, 5000) : `[XLSX file: ${file.name}]`;
     } else {
-      // For PDFs and other files, create a placeholder for now
+      // For PDFs and other files, create a placeholder
       extractedData = {
         property: "",
         property_confidence: 0,
-        unit: "",
-        unit_confidence: 0,
         tenant: "",
         tenant_confidence: 0,
-        receipt_date: "",
-        receipt_date_confidence: 0,
         amount: 0,
         amount_confidence: 0,
-        payment_type: "",
-        payment_type_confidence: 0,
-        reference: "",
-        memo: "",
-        extracted_text: `[PDF file: ${file.name}]`,
+        extracted_text: `[${fileExt?.toUpperCase() || "Unknown"} file: ${file.name}]`,
       };
     }
 
