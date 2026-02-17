@@ -214,16 +214,48 @@ You MUST call the extract_receipts function.`;
       if (isEml) {
         const decoder = new TextDecoder("utf-8");
         const rawEml = decoder.decode(fileBytes);
-        // Extract HTML body for preview storage
-        const htmlMatch = rawEml.match(/<html[\s\S]*<\/html>/i);
-        // For AI: strip heavy headers, keep useful content
+
+        // --- Robust MIME HTML extraction ---
+        function extractHtmlFromEml(eml: string): string | null {
+          // Find the HTML MIME part by looking for Content-Type: text/html
+          // then decode it (base64 or quoted-printable)
+          const parts = eml.split(/--[\w\-\.]+/);
+          for (const part of parts) {
+            if (!/content-type:\s*text\/html/i.test(part)) continue;
+            // Determine encoding
+            const encodingMatch = part.match(/content-transfer-encoding:\s*(\S+)/i);
+            const encoding = encodingMatch?.[1]?.toLowerCase() || "7bit";
+            // Get the body (after the blank line separating headers from content)
+            const blankLine = part.indexOf("\r\n\r\n");
+            const blankLine2 = part.indexOf("\n\n");
+            const bodyStart = blankLine > 0 ? blankLine + 4 : (blankLine2 > 0 ? blankLine2 + 2 : -1);
+            if (bodyStart < 0) continue;
+            let body = part.substring(bodyStart).trim();
+            if (encoding === "base64") {
+              try { body = atob(body.replace(/\s/g, "")); } catch { continue; }
+            } else if (encoding === "quoted-printable") {
+              body = body
+                .replace(/=\r?\n/g, "") // soft line breaks
+                .replace(/=([0-9A-Fa-f]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+            }
+            if (body.length > 50) return body;
+          }
+          // Fallback: direct regex for <html> (non-MIME or inline HTML)
+          const htmlMatch = eml.match(/<html[\s\S]*<\/html>/i);
+          if (htmlMatch) return htmlMatch[0];
+          return null;
+        }
+
+        const htmlBody = extractHtmlFromEml(rawEml);
+
+        // For AI: send the raw EML (headers help with extraction context)
         textContent = rawEml;
         if (textContent.length > 30000) textContent = textContent.substring(0, 30000);
-        // Store HTML body or clean text for preview (stored later in extractedText)
-        if (htmlMatch) {
-          extractedText = htmlMatch[0].substring(0, 50000);
+
+        // Store extracted HTML for preview, or fallback to body text without routing headers
+        if (htmlBody) {
+          extractedText = htmlBody.substring(0, 80000);
         } else {
-          // Fallback: strip routing headers, keep readable parts
           const headerEnd = rawEml.indexOf("\n\n");
           extractedText = headerEnd > 0 ? rawEml.substring(headerEnd + 2, headerEnd + 50002) : rawEml.substring(0, 50000);
         }

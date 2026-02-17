@@ -303,29 +303,43 @@ function SpreadsheetPreview({ csv }: { csv: string }) {
 
 function EmailPreview({ raw }: { raw: string }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const [iframeHeight, setIframeHeight] = useState(500);
 
-  // Determine if the content is already HTML or raw EML
+  // Try to extract usable HTML from the stored content
   const getHtmlContent = (text: string): string => {
-    // If it already contains HTML tags, use it directly
-    if (/<html[\s>]/i.test(text) || /<body[\s>]/i.test(text) || /<table[\s>]/i.test(text)) {
+    // If it starts with an HTML doctype or tag, it's already extracted HTML
+    const trimmed = text.trimStart();
+    if (/^<!doctype\s+html/i.test(trimmed) || /^<html[\s>]/i.test(trimmed)) {
       return text;
     }
-    // If it looks like raw EML with headers, try to extract HTML
-    const htmlMatch = text.match(/<html[\s\S]*<\/html>/i);
-    if (htmlMatch) return htmlMatch[0];
-    // Fallback: wrap plain text in basic HTML
-    return `<html><body style="font-family:sans-serif;padding:16px;font-size:14px;white-space:pre-wrap">${text.substring(0, 10000).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</body></html>`;
+    // If it contains significant HTML structure (tables, divs, body), use it
+    if (/<body[\s>]/i.test(text) && (/<table[\s>]/i.test(text) || /<div[\s>]/i.test(text))) {
+      return text;
+    }
+    // Client-side fallback: try to parse MIME parts for HTML
+    const parts = text.split(/--[\w\-\.]+/);
+    for (const part of parts) {
+      if (!/content-type:\s*text\/html/i.test(part)) continue;
+      const encodingMatch = part.match(/content-transfer-encoding:\s*(\S+)/i);
+      const encoding = encodingMatch?.[1]?.toLowerCase() || "7bit";
+      const blankLine = part.indexOf("\r\n\r\n");
+      const blankLine2 = part.indexOf("\n\n");
+      const bodyStart = blankLine > 0 ? blankLine + 4 : (blankLine2 > 0 ? blankLine2 + 2 : -1);
+      if (bodyStart < 0) continue;
+      let body = part.substring(bodyStart).trim();
+      if (encoding === "base64") {
+        try { body = atob(body.replace(/\s/g, "")); } catch { continue; }
+      } else if (encoding === "quoted-printable") {
+        body = body
+          .replace(/=\r?\n/g, "")
+          .replace(/=([0-9A-Fa-f]{2})/g, (_, hex: string) => String.fromCharCode(parseInt(hex, 16)));
+      }
+      if (body.length > 50) return body;
+    }
+    // Last resort: wrap as plain text
+    const stripped = text.replace(/^[\s\S]*?\n\n/, ""); // remove headers
+    return `<html><body style="font-family:sans-serif;padding:16px;font-size:14px;white-space:pre-wrap;background:#fff;color:#333">${stripped.substring(0, 10000).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</body></html>`;
   };
-
-  // Extract headers for the info bar
-  const getHeader = (name: string) => {
-    const match = raw.match(new RegExp(`^${name}:\\s*(.+?)$`, "mi"));
-    return match?.[1]?.trim() || null;
-  };
-  const from = getHeader("From");
-  const to = getHeader("To");
-  const subject = getHeader("Subject");
-  const date = getHeader("Date");
 
   useEffect(() => {
     if (!iframeRef.current) return;
@@ -335,25 +349,24 @@ function EmailPreview({ raw }: { raw: string }) {
       doc.open();
       doc.write(htmlContent);
       doc.close();
+      // Auto-size iframe after a moment
+      setTimeout(() => {
+        try {
+          const h = doc.documentElement?.scrollHeight || doc.body?.scrollHeight;
+          if (h && h > 100) setIframeHeight(Math.min(h + 20, 900));
+        } catch { /* cross-origin safety */ }
+      }, 200);
     }
   }, [raw]);
 
   return (
-    <div className="space-y-3">
-      {(from || to || subject || date) && (
-        <div className="space-y-1 pb-3 border-b border-border">
-          {subject && <p className="text-sm font-semibold text-foreground">{subject}</p>}
-          {from && <p className="text-xs text-muted-foreground"><span className="font-medium">From:</span> {from}</p>}
-          {to && <p className="text-xs text-muted-foreground"><span className="font-medium">To:</span> {to}</p>}
-          {date && <p className="text-xs text-muted-foreground"><span className="font-medium">Date:</span> {date}</p>}
-        </div>
-      )}
+    <div>
       <iframe
         ref={iframeRef}
         title="Email preview"
         sandbox="allow-same-origin"
-        className="w-full min-h-[400px] max-h-[600px] rounded-md border border-border bg-white"
-        style={{ height: "500px" }}
+        className="w-full rounded-md border border-border bg-white"
+        style={{ height: `${iframeHeight}px`, minHeight: "400px" }}
       />
     </div>
   );
