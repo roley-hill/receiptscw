@@ -91,10 +91,18 @@ export default function Duplicates() {
     }
   };
 
+  const advanceToNext = (currentId: string) => {
+    const currentIndex = duplicates.findIndex((d) => d.id === currentId);
+    const nextDup = duplicates.find((d, i) => i > currentIndex && d.id !== currentId);
+    setExpandedId(nextDup ? nextDup.id : null);
+    if (nextDup && nextDup.existing_receipt_uuid && !existingReceipts[nextDup.existing_receipt_uuid]) {
+      toggleExpand(nextDup);
+    }
+  };
+
   const handleForceAdd = async (dup: SkippedDuplicate) => {
     setProcessing((prev) => new Set(prev).add(dup.id));
     try {
-      // Insert as a new receipt
       const confidences = dup.confidence_scores || {};
       const avgConf = [confidences.property || 0, confidences.unit || 0, confidences.tenant || 0, confidences.amount || 0, confidences.receiptDate || 0].reduce((a: number, b: number) => a + b, 0) / 5;
       const hasMissing = !dup.property || !dup.tenant || !dup.amount;
@@ -118,7 +126,6 @@ export default function Duplicates() {
       });
       if (insertError) throw insertError;
 
-      // Mark duplicate as approved
       await supabase.from("skipped_duplicates").update({
         status: "approved",
         resolved_at: new Date().toISOString(),
@@ -126,8 +133,10 @@ export default function Duplicates() {
       }).eq("id", dup.id);
 
       toast.success("Receipt added successfully");
+      advanceToNext(dup.id);
       queryClient.invalidateQueries({ queryKey: ["skipped_duplicates"] });
       queryClient.invalidateQueries({ queryKey: ["receipts"] });
+      queryClient.invalidateQueries({ queryKey: ["pending_counts"] });
     } catch (err: any) {
       toast.error(err.message || "Failed to add receipt");
     }
@@ -147,7 +156,9 @@ export default function Duplicates() {
         resolved_by: user?.id,
       }).eq("id", dup.id);
       toast.success("Duplicate confirmed — skipped");
+      advanceToNext(dup.id);
       queryClient.invalidateQueries({ queryKey: ["skipped_duplicates"] });
+      queryClient.invalidateQueries({ queryKey: ["pending_counts"] });
     } catch (err: any) {
       toast.error(err.message || "Failed to dismiss");
     }
