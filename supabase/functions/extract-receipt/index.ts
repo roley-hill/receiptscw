@@ -312,42 +312,45 @@ You MUST call the extract_receipts function.`;
           const boundaryMatch = eml.match(/boundary="?([^\s";\r\n]+)"?/i);
           if (!boundaryMatch) return null;
 
-          function findPdfInParts(parts: string[]): Uint8Array | null {
+          const seenBoundaries = new Set<string>();
+
+          function findPdfInParts(parts: string[], depth: number): Uint8Array | null {
+            if (depth > 3) return null;
             for (const part of parts) {
-              if (!/content-type:\s*application\/pdf/i.test(part)) {
-                // Check nested
+              if (/content-type:\s*application\/pdf/i.test(part)) {
+                // Found PDF part - extract base64 body
+                const bl = part.indexOf("\r\n\r\n");
+                const bl2 = part.indexOf("\n\n");
+                const bs = bl > 0 ? bl + 4 : (bl2 > 0 ? bl2 + 2 : -1);
+                if (bs < 0) continue;
+                let b64 = part.substring(bs).trim();
+                const trailingBoundary = b64.indexOf("\r\n--");
+                if (trailingBoundary > 0) b64 = b64.substring(0, trailingBoundary);
+                b64 = b64.replace(/\s/g, "");
+                if (b64.length < 100) continue;
+                try {
+                  const binary = atob(b64);
+                  const bytes = new Uint8Array(binary.length);
+                  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+                  if (bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46) {
+                    return bytes;
+                  }
+                } catch { continue; }
+              } else {
+                // Check nested multipart
                 const nested = part.match(/boundary="?([^\s";\r\n]+)"?/i);
-                if (nested) {
-                  const result = findPdfInParts(part.split("--" + nested[1]));
+                if (nested && !seenBoundaries.has(nested[1])) {
+                  seenBoundaries.add(nested[1]);
+                  const result = findPdfInParts(part.split("--" + nested[1]), depth + 1);
                   if (result) return result;
                 }
-                continue;
               }
-              // Found PDF part - extract base64 body
-              const bl = part.indexOf("\r\n\r\n");
-              const bl2 = part.indexOf("\n\n");
-              const bs = bl > 0 ? bl + 4 : (bl2 > 0 ? bl2 + 2 : -1);
-              if (bs < 0) continue;
-              let b64 = part.substring(bs).trim();
-              // Remove any trailing boundary
-              const trailingBoundary = b64.indexOf("\r\n--");
-              if (trailingBoundary > 0) b64 = b64.substring(0, trailingBoundary);
-              b64 = b64.replace(/\s/g, "");
-              if (b64.length < 100) continue;
-              try {
-                const binary = atob(b64);
-                const bytes = new Uint8Array(binary.length);
-                for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-                // Verify PDF magic bytes
-                if (bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46) {
-                  return bytes;
-                }
-              } catch { continue; }
             }
             return null;
           }
 
-          return findPdfInParts(eml.split("--" + boundaryMatch[1]));
+          seenBoundaries.add(boundaryMatch[1]);
+          return findPdfInParts(eml.split("--" + boundaryMatch[1]), 0);
         }
 
         const pdfBytes = extractPdfAttachment(rawEml);
