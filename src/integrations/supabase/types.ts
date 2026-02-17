@@ -128,6 +128,9 @@ export type Database = {
       receipts: {
         Row: {
           amount: number
+          appfolio_recorded: boolean
+          appfolio_recorded_at: string | null
+          appfolio_recorded_by: string | null
           batch_id: string | null
           confidence_scores: Json | null
           created_at: string
@@ -155,6 +158,9 @@ export type Database = {
         }
         Insert: {
           amount?: number
+          appfolio_recorded?: boolean
+          appfolio_recorded_at?: string | null
+          appfolio_recorded_by?: string | null
           batch_id?: string | null
           confidence_scores?: Json | null
           created_at?: string
@@ -182,6 +188,9 @@ export type Database = {
         }
         Update: {
           amount?: number
+          appfolio_recorded?: boolean
+          appfolio_recorded_at?: string | null
+          appfolio_recorded_by?: string | null
           batch_id?: string | null
           confidence_scores?: Json | null
           created_at?: string
