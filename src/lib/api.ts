@@ -114,3 +114,22 @@ export async function markAppfolioRecorded(receiptId: string, recorded: boolean,
   if (error) throw error;
   return data;
 }
+
+export async function reverseBatch(batchId: string) {
+  // Unlink all receipts from this batch
+  const { error: unlinkError } = await supabase
+    .from("receipts")
+    .update({ batch_id: null })
+    .eq("batch_id", batchId);
+  if (unlinkError) throw unlinkError;
+
+  // Set batch status to reversed
+  const { data, error } = await supabase
+    .from("deposit_batches")
+    .update({ status: "reversed" as any })
+    .eq("id", batchId)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
