@@ -1,6 +1,5 @@
-import { useState } from "react";
 import { NavLink } from "@/components/NavLink";
-import { useLocation } from "react-router-dom";
+import { useAuth } from "@/hooks/useAuth";
 import {
   Sidebar,
   SidebarContent,
@@ -37,7 +36,7 @@ const navItems = [
 ];
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
-  const location = useLocation();
+  const { user, signOut } = useAuth();
 
   return (
     <SidebarProvider>
@@ -146,9 +145,17 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 />
               </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => signOut()}
+                className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Sign out
+              </button>
               <div className="h-8 w-8 rounded-full bg-primary flex items-center justify-center">
-                <span className="text-xs font-semibold text-primary-foreground">AD</span>
+                <span className="text-xs font-semibold text-primary-foreground">
+                  {user?.email?.substring(0, 2).toUpperCase() || "??"}
+                </span>
               </div>
             </div>
           </header>
