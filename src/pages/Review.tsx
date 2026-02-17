@@ -304,29 +304,17 @@ function SpreadsheetPreview({ csv }: { csv: string }) {
 function EmailPreview({ raw }: { raw: string }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
-  // Extract HTML body from MIME multipart EML
-  const extractHtmlBody = (emlText: string): string => {
-    // Find HTML part in multipart MIME
-    const htmlMatch = emlText.match(/Content-Type:\s*text\/html[^\n]*\n(?:Content-Transfer-Encoding:\s*[^\n]*\n)?(?:[^\n]*\n)*?\n([\s\S]*?)(?=\n--[^\n]+(?:--)?$|\n--[^\n]+\n|$)/mi);
-    if (htmlMatch) {
-      let html = htmlMatch[1].trim();
-      // Handle quoted-printable decoding
-      if (/Content-Transfer-Encoding:\s*quoted-printable/i.test(emlText)) {
-        html = html.replace(/=\r?\n/g, "").replace(/=([0-9A-Fa-f]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
-      }
-      // Handle base64 decoding
-      if (/Content-Transfer-Encoding:\s*base64/i.test(emlText.substring(0, emlText.indexOf(html)))) {
-        try { html = atob(html.replace(/\s/g, "")); } catch { /* keep as is */ }
-      }
-      return html;
+  // Determine if the content is already HTML or raw EML
+  const getHtmlContent = (text: string): string => {
+    // If it already contains HTML tags, use it directly
+    if (/<html[\s>]/i.test(text) || /<body[\s>]/i.test(text) || /<table[\s>]/i.test(text)) {
+      return text;
     }
-    // Fallback: try to find raw HTML tags
-    const rawHtml = emlText.match(/<html[\s\S]*<\/html>/i);
-    if (rawHtml) return rawHtml[0];
-    // Last fallback: show plain text body
-    const headerEnd = emlText.indexOf("\n\n");
-    const body = headerEnd > 0 ? emlText.substring(headerEnd + 2) : emlText;
-    return `<html><body style="font-family:sans-serif;padding:16px;font-size:14px;white-space:pre-wrap">${body.substring(0, 10000).replace(/</g, "&lt;").replace(/>/g, "&gt;")}</body></html>`;
+    // If it looks like raw EML with headers, try to extract HTML
+    const htmlMatch = text.match(/<html[\s\S]*<\/html>/i);
+    if (htmlMatch) return htmlMatch[0];
+    // Fallback: wrap plain text in basic HTML
+    return `<html><body style="font-family:sans-serif;padding:16px;font-size:14px;white-space:pre-wrap">${text.substring(0, 10000).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</body></html>`;
   };
 
   // Extract headers for the info bar
@@ -341,7 +329,7 @@ function EmailPreview({ raw }: { raw: string }) {
 
   useEffect(() => {
     if (!iframeRef.current) return;
-    const htmlContent = extractHtmlBody(raw);
+    const htmlContent = getHtmlContent(raw);
     const doc = iframeRef.current.contentDocument;
     if (doc) {
       doc.open();
