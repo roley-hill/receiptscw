@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import * as XLSX from "https://esm.sh/xlsx@0.18.5";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -206,8 +207,23 @@ You MUST call the extract_receipts function.`;
         textContent = decoder.decode(fileBytes);
         if (textContent.length > 30000) textContent = textContent.substring(0, 30000);
       } else {
-        const base64 = uint8ToBase64(fileBytes);
-        textContent = `[XLSX file base64 - first 20000 chars]: ${base64.substring(0, 20000)}`;
+        // Parse XLSX properly into CSV text so the AI can read actual cell values
+        try {
+          const workbook = XLSX.read(fileBytes, { type: "array" });
+          const csvParts: string[] = [];
+          for (const sheetName of workbook.SheetNames) {
+            const sheet = workbook.Sheets[sheetName];
+            const csv = XLSX.utils.sheet_to_csv(sheet);
+            csvParts.push(`=== Sheet: ${sheetName} ===\n${csv}`);
+          }
+          textContent = csvParts.join("\n\n");
+          if (textContent.length > 30000) textContent = textContent.substring(0, 30000);
+          console.log("Parsed XLSX to CSV, length:", textContent.length);
+        } catch (xlsxErr) {
+          console.error("XLSX parse error, falling back to raw text:", xlsxErr);
+          const decoder = new TextDecoder("utf-8", { fatal: false });
+          textContent = decoder.decode(fileBytes).substring(0, 20000);
+        }
       }
 
       const aiResponse = await fetchAIWithRetry("https://ai.gateway.lovable.dev/v1/chat/completions", {
