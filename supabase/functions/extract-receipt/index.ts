@@ -307,15 +307,20 @@ You MUST call the extract_receipts function.`;
         }
       }
 
-      // Also check by file_name + tenant + amount to catch re-uploads
-      if (item.tenant && item.amount) {
-        const { data: fileExisting } = await supabase
+      // Also check by file_name + all key fields to catch re-uploads
+      if (item.tenant && item.amount && item.receipt_date) {
+        const query = supabase
           .from("receipts")
           .select("id, receipt_id")
           .eq("file_name", file.name)
           .eq("tenant", item.tenant)
           .eq("amount", item.amount)
+          .eq("receipt_date", item.receipt_date)
+          .eq("property", item.property || "")
+          .eq("unit", item.unit || "")
           .limit(1);
+
+        const { data: fileExisting } = await query;
 
         if (fileExisting && fileExisting.length > 0) {
           duplicates.push({
