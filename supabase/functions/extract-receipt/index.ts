@@ -52,26 +52,27 @@ serve(async (req) => {
       type: "function" as const,
       function: {
         name: "extract_receipt_data",
-        description: "Extract structured receipt data",
+        description: "Extract structured rent payment/receipt data from a document",
         parameters: {
           type: "object",
           properties: {
-            property: { type: "string", description: "Property or building name/address" },
+            property: { type: "string", description: "The physical street address of the rental property (e.g. '9034 Orion Ave'). Do NOT put owner entity names or LP names here. If only an owner LP name is visible, leave this empty." },
             property_confidence: { type: "number", description: "Confidence 0-1" },
-            unit: { type: "string", description: "Unit number" },
+            unit: { type: "string", description: "Unit or apartment number (e.g. '#11', 'Apt 3B'). Extract just the unit identifier." },
             unit_confidence: { type: "number", description: "Confidence 0-1" },
-            tenant: { type: "string", description: "Tenant full name" },
+            tenant: { type: "string", description: "The individual person's name who is the tenant/resident (e.g. 'Maria Rodriguez'). Do NOT put organization names, agency names, or owner LP names here. If no individual tenant name is found, use empty string." },
             tenant_confidence: { type: "number", description: "Confidence 0-1" },
-            receipt_date: { type: "string", description: "Receipt date YYYY-MM-DD" },
+            payer: { type: "string", description: "The organization or person who made the payment (e.g. 'People Assisting the Homeless', 'Shine BC-LA', 'The Salvation Army'). This may differ from the tenant." },
+            receipt_date: { type: "string", description: "Date the payment was made or receipt issued, format YYYY-MM-DD" },
             receipt_date_confidence: { type: "number", description: "Confidence 0-1" },
-            rent_month: { type: "string", description: "Rent month YYYY-MM" },
-            amount: { type: "number", description: "Amount paid" },
+            rent_month: { type: "string", description: "The month the rent payment covers, format YYYY-MM (e.g. '2026-02')" },
+            amount: { type: "number", description: "The actual payment amount in dollars. Be careful with formatting — do NOT combine multiple numbers. Look for the specific payment amount, not account numbers or reference IDs." },
             amount_confidence: { type: "number", description: "Confidence 0-1" },
-            payment_type: { type: "string", description: "Payment method" },
+            payment_type: { type: "string", description: "Payment method: 'ACH', 'EFT', 'Check', 'Cash', 'Money Order', 'Wire', or other" },
             payment_type_confidence: { type: "number", description: "Confidence 0-1" },
-            reference: { type: "string", description: "Check/transaction number" },
-            memo: { type: "string", description: "Memo or remarks" },
-            extracted_text: { type: "string", description: "Full text visible" },
+            reference: { type: "string", description: "Check number, transaction ID, or EFT reference number" },
+            memo: { type: "string", description: "Any memo, remarks, or notes about the payment" },
+            extracted_text: { type: "string", description: "Key text excerpts from the document (first 500 chars)" },
           },
           required: ["property", "tenant", "amount"],
           additionalProperties: false,
@@ -101,12 +102,22 @@ serve(async (req) => {
           messages: [
             {
               role: "system",
-              content: `You are a receipt data extraction AI. Extract structured data from rent receipt images. You MUST call the extract_receipt_data function with the extracted fields.`,
+              content: `You are a rent payment data extraction AI for a property management company. Extract structured data from rent receipt/payment images.
+
+CRITICAL RULES:
+- "property" must be a STREET ADDRESS (e.g. "9034 Orion Ave"), never an owner entity or LP name like "9010 Tobias Owner LP"
+- "tenant" must be an INDIVIDUAL PERSON's name (e.g. "Maria Rodriguez"), never an organization, agency, or LP name
+- "payer" is the organization or person who sent the payment (may differ from tenant)
+- "amount" is the PAYMENT AMOUNT in dollars — do NOT concatenate digits from different fields. Look for dollar signs, "amount", "total", or "payment" labels
+- If a unit number appears as part of "Apt 3B" or "#11" or similar, extract just the unit part
+- If you cannot identify a field with confidence, leave it empty rather than guessing
+
+You MUST call the extract_receipt_data function with the extracted fields.`,
             },
             {
               role: "user",
               content: [
-                { type: "text", text: "Extract all rent receipt data from this image. Look for: property/building name, unit number, tenant name, receipt date, rent month, amount paid, payment type (check/cash/ACH/money order), reference/check number, and any memo or remarks." },
+                { type: "text", text: "Extract rent payment data from this image. Carefully distinguish between: the property street address, the tenant's personal name, the paying organization/agency, the payment amount, and the payment method." },
                 { type: "image_url", image_url: { url: dataUrl } },
               ],
             },
@@ -165,11 +176,21 @@ serve(async (req) => {
           messages: [
             {
               role: "system",
-              content: `You are a receipt data extraction AI. Extract structured rent receipt data from ${isEml ? "email (EML)" : "spreadsheet (XLSX)"} content. You MUST call the extract_receipt_data function. For spreadsheets, there may be multiple receipts — extract the first/primary one. For emails, look for payment confirmations, rent receipts, or invoice details in the body and attachments info.`,
+              content: `You are a rent payment data extraction AI for a property management company. Extract structured rent payment data from ${isEml ? "email (EML)" : "spreadsheet (XLSX)"} content.
+
+CRITICAL RULES:
+- "property" must be a STREET ADDRESS (e.g. "14654 Blythe St"), never an owner entity or LP name
+- "tenant" must be an INDIVIDUAL PERSON's name, never an organization or agency name. Look for names in memo lines, reference codes, or payment descriptions that follow patterns like "F.RODRIGUEZ" or "H.AREVALO"
+- "payer" is the organization or person who sent the payment (e.g. "People Assisting the Homeless", "The Salvation Army", "Shine BC-LA")
+- "amount" is the PAYMENT AMOUNT — look for dollar amounts, not account numbers or reference IDs. Be very careful not to concatenate unrelated numbers
+- For EML emails: payment notifications often have the amount in the subject or body. The "To" address is usually the property owner, NOT the tenant
+- For spreadsheets: extract the first/primary receipt row
+
+You MUST call the extract_receipt_data function.`,
             },
             {
               role: "user",
-              content: `Extract rent receipt data from this ${isEml ? "email" : "spreadsheet"} content:\n\n${textContent}`,
+              content: `Extract rent payment data from this ${isEml ? "email" : "spreadsheet"} content. Carefully identify: the property street address (not owner LP name), the individual tenant name (not the paying organization), the exact payment amount, and payment method.\n\n${textContent}`,
             },
           ],
           tools: [extractReceiptTool],
