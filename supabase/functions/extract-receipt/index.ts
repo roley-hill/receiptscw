@@ -237,7 +237,7 @@ You MUST call the extract_receipts function.`;
       if (toolCall) {
         const parsed = JSON.parse(toolCall.function.arguments);
         extractedItems = parsed.items || [];
-        extractedText = parsed.extracted_text || (isEml ? textContent.substring(0, 5000) : `[XLSX file: ${file.name}]`);
+        extractedText = parsed.extracted_text || (isEml ? textContent.substring(0, 5000) : textContent.substring(0, 5000));
       }
     } else {
       // Unknown file type — placeholder single item
@@ -288,6 +288,28 @@ You MUST call the extract_receipts function.`;
             existing_receipt_id: existing[0].receipt_id,
           });
           continue; // skip duplicate
+        }
+      }
+
+      // Also check by file_name + tenant + amount to catch re-uploads
+      if (item.tenant && item.amount) {
+        const { data: fileExisting } = await supabase
+          .from("receipts")
+          .select("id, receipt_id")
+          .eq("file_name", file.name)
+          .eq("tenant", item.tenant)
+          .eq("amount", item.amount)
+          .limit(1);
+
+        if (fileExisting && fileExisting.length > 0) {
+          duplicates.push({
+            tenant: item.tenant,
+            amount: item.amount,
+            receipt_date: item.receipt_date,
+            existing_receipt_id: fileExisting[0].receipt_id,
+            reason: "same_file_reupload",
+          });
+          continue;
         }
       }
 
