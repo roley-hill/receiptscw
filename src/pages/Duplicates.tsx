@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { Copy, CheckCircle2, XCircle, ChevronDown, ChevronUp, Loader2 } from "lucide-react";
+import { Copy, CheckCircle2, XCircle, ChevronDown, ChevronUp, Loader2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
@@ -169,6 +169,25 @@ export default function Duplicates() {
     });
   };
 
+  const handleDelete = async (dup: SkippedDuplicate) => {
+    setProcessing((prev) => new Set(prev).add(dup.id));
+    try {
+      const { error } = await supabase.from("skipped_duplicates").delete().eq("id", dup.id);
+      if (error) throw error;
+      toast.success("Duplicate deleted");
+      advanceToNext(dup.id);
+      queryClient.invalidateQueries({ queryKey: ["skipped_duplicates"] });
+      queryClient.invalidateQueries({ queryKey: ["pending_counts"] });
+    } catch (err: any) {
+      toast.error(err.message || "Failed to delete");
+    }
+    setProcessing((prev) => {
+      const next = new Set(prev);
+      next.delete(dup.id);
+      return next;
+    });
+  };
+
   if (isLoading) {
     return <div className="flex items-center justify-center py-20"><div className="h-8 w-8 border-2 border-accent border-t-transparent rounded-full animate-spin" /></div>;
   }
@@ -277,6 +296,15 @@ export default function Duplicates() {
                       </div>
 
                       <div className="flex items-center gap-2 mt-4 justify-end">
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          onClick={() => handleDelete(dup)}
+                          disabled={isProcessing}
+                        >
+                          <Trash2 className="h-4 w-4 mr-1" />
+                          Delete
+                        </Button>
                         <Button
                           variant="outline"
                           size="sm"
