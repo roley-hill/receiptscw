@@ -6,23 +6,11 @@ import { uploadReceiptFile } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
-
-interface UploadedFile {
-  name: string;
-  size: number;
-  type: string;
-  file: File;
-  status: "pending" | "processing" | "done" | "error";
-  error?: string;
-  insertedCount?: number;
-  duplicateCount?: number;
-  totalLineItems?: number;
-}
+import { useUploadStore } from "@/hooks/useUploadStore";
 
 export default function UploadPage() {
-  const [files, setFiles] = useState<UploadedFile[]>([]);
+  const { files, setFiles, isProcessing, setIsProcessing } = useUploadStore();
   const [isDragging, setIsDragging] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
   const { session } = useAuth();
@@ -30,12 +18,13 @@ export default function UploadPage() {
 
   const handleFiles = (fileList: FileList) => {
     const accepted = ["application/pdf", "image/jpeg", "image/png", "image/heic", "image/jpg", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.ms-excel", "message/rfc822", "application/octet-stream"];
-    const newFiles: UploadedFile[] = Array.from(fileList)
-    .filter((f) => {
+    const newFiles = Array.from(fileList)
+      .filter((f) => {
         const ext = f.name.split(".").pop()?.toLowerCase();
         return accepted.includes(f.type) || ["xlsx", "xls", "eml", "pdf"].includes(ext || "") || f.type.startsWith("image/");
       })
       .map((f) => ({
+        id: `${f.name}-${Date.now()}-${Math.random()}`,
         name: f.name,
         size: f.size,
         type: f.type,
@@ -55,8 +44,8 @@ export default function UploadPage() {
     if (e.dataTransfer.files.length) handleFiles(e.dataTransfer.files);
   };
 
-  const removeFile = (idx: number) => {
-    setFiles((prev) => prev.filter((_, i) => i !== idx));
+  const removeFile = (id: string) => {
+    setFiles((prev) => prev.filter((f) => f.id !== id));
   };
 
   const startExtraction = async () => {
@@ -70,7 +59,7 @@ export default function UploadPage() {
     for (let i = 0; i < pending.length; i++) {
       const f = pending[i];
       setFiles((prev) =>
-        prev.map((pf) => (pf.name === f.name && pf.status === "pending" ? { ...pf, status: "processing" } : pf))
+        prev.map((pf) => (pf.id === f.id ? { ...pf, status: "processing" } : pf))
       );
 
       try {
@@ -78,10 +67,10 @@ export default function UploadPage() {
         const insertedCount = result.inserted_count ?? 1;
         const duplicateCount = result.duplicate_count ?? 0;
         const totalLineItems = result.total_line_items ?? 1;
-        
+
         setFiles((prev) =>
           prev.map((pf) =>
-            pf.name === f.name && pf.status === "processing"
+            pf.id === f.id
               ? { ...pf, status: "done", insertedCount, duplicateCount, totalLineItems }
               : pf
           )
@@ -93,7 +82,7 @@ export default function UploadPage() {
       } catch (err: any) {
         setFiles((prev) =>
           prev.map((pf) =>
-            pf.name === f.name && pf.status === "processing"
+            pf.id === f.id
               ? { ...pf, status: "error", error: err.message }
               : pf
           )
@@ -103,12 +92,13 @@ export default function UploadPage() {
 
     setIsProcessing(false);
     queryClient.invalidateQueries({ queryKey: ["receipts"] });
+    queryClient.invalidateQueries({ queryKey: ["pending_counts"] });
     toast.success("Extraction complete!");
   };
 
   const getFileIcon = (type: string) => {
-    if (type.startsWith("image/")) return <Image className="h-4 w-4 text-vault-blue" />;
-    return <FileText className="h-4 w-4 text-vault-emerald" />;
+    if (type.startsWith("image/")) return <Image className="h-4 w-4 text-primary" />;
+    return <FileText className="h-4 w-4 text-accent" />;
   };
 
   const formatSize = (bytes: number) => {
@@ -192,33 +182,33 @@ export default function UploadPage() {
             )}
           </div>
           <div className="vault-card divide-y divide-border">
-            {files.map((file, i) => (
-              <div key={i} className="flex items-center gap-3 px-4 py-3">
+            {files.map((file) => (
+              <div key={file.id} className="flex items-center gap-3 px-4 py-3">
                 {getFileIcon(file.type)}
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-foreground truncate">{file.name}</p>
                   <p className="text-xs text-muted-foreground">
                     {formatSize(file.size)}
                     {file.status === "done" && file.totalLineItems !== undefined && (
-                      <span className="ml-2 vault-mono text-vault-emerald">
+                      <span className="ml-2 vault-mono text-accent">
                         → {file.insertedCount} receipt{file.insertedCount !== 1 ? "s" : ""} extracted
                         {(file.totalLineItems ?? 0) > 1 && ` (from ${file.totalLineItems} line items)`}
                       </span>
                     )}
                     {file.status === "done" && (file.duplicateCount ?? 0) > 0 && (
-                      <span className="ml-2 vault-mono text-vault-amber flex items-center gap-1 inline-flex">
+                      <span className="ml-2 vault-mono text-amber-500 flex items-center gap-1 inline-flex">
                         <Copy className="h-3 w-3" /> {file.duplicateCount} duplicate{file.duplicateCount !== 1 ? "s" : ""} skipped
                       </span>
                     )}
-                    {file.error && <span className="ml-2 text-vault-red">{file.error}</span>}
+                    {file.error && <span className="ml-2 text-destructive">{file.error}</span>}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
-                  {file.status === "done" && <CheckCircle2 className="h-4 w-4 text-vault-emerald" />}
-                  {file.status === "processing" && <Loader2 className="h-4 w-4 text-vault-blue animate-spin" />}
-                  {file.status === "error" && <AlertCircle className="h-4 w-4 text-vault-red" />}
+                  {file.status === "done" && <CheckCircle2 className="h-4 w-4 text-accent" />}
+                  {file.status === "processing" && <Loader2 className="h-4 w-4 text-primary animate-spin" />}
+                  {file.status === "error" && <AlertCircle className="h-4 w-4 text-destructive" />}
                   {file.status === "pending" && (
-                    <button onClick={(e) => { e.stopPropagation(); removeFile(i); }} className="p-1 rounded hover:bg-muted">
+                    <button onClick={(e) => { e.stopPropagation(); removeFile(file.id); }} className="p-1 rounded hover:bg-muted">
                       <X className="h-3.5 w-3.5 text-muted-foreground" />
                     </button>
                   )}

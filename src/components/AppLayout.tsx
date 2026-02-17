@@ -1,5 +1,7 @@
 import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/hooks/useAuth";
+import { usePendingCounts } from "@/hooks/usePendingCounts";
+import UploadProgressFloat from "@/components/UploadProgressFloat";
 import {
   Sidebar,
   SidebarContent,
@@ -26,19 +28,46 @@ import {
 } from "lucide-react";
 
 const navItems = [
-  { title: "Dashboard", url: "/", icon: LayoutDashboard },
-  { title: "Upload", url: "/upload", icon: Upload },
-  { title: "Review", url: "/review", icon: ClipboardCheck },
-  { title: "Entry & Recording", url: "/entry", icon: FileText },
-  { title: "Receivables Report", url: "/receivables", icon: FileText },
-  { title: "Deposit Batches", url: "/batches", icon: Layers },
-  { title: "Browse Files", url: "/browse", icon: FolderOpen },
-  { title: "Exceptions", url: "/exceptions", icon: AlertTriangle },
-  { title: "Duplicates", url: "/duplicates", icon: Copy },
+  { title: "Dashboard", url: "/", icon: LayoutDashboard, countKey: null },
+  { title: "Upload", url: "/upload", icon: Upload, countKey: null },
+  { title: "Review", url: "/review", icon: ClipboardCheck, countKey: "review" as const },
+  { title: "Entry & Recording", url: "/entry", icon: FileText, countKey: "entry" as const },
+  { title: "Receivables Report", url: "/receivables", icon: FileText, countKey: null },
+  { title: "Deposit Batches", url: "/batches", icon: Layers, countKey: null },
+  { title: "Browse Files", url: "/browse", icon: FolderOpen, countKey: null },
+  { title: "Exceptions", url: "/exceptions", icon: AlertTriangle, countKey: "exceptions" as const },
+  { title: "Duplicates", url: "/duplicates", icon: Copy, countKey: "duplicates" as const },
 ];
+
+function CountBadge({ count }: { count: number }) {
+  if (count === 0) return null;
+  return (
+    <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1.5 text-[10px] font-bold text-primary-foreground">
+      {count > 99 ? "99+" : count}
+    </span>
+  );
+}
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { user, signOut } = useAuth();
+  const { data: counts } = usePendingCounts();
+
+  const renderNavItem = (item: typeof navItems[number]) => (
+    <SidebarMenuItem key={item.title}>
+      <SidebarMenuButton asChild>
+        <NavLink
+          to={item.url}
+          end={item.url === "/"}
+          className="vault-sidebar-item-inactive"
+          activeClassName="vault-sidebar-item-active"
+        >
+          <item.icon className="h-4 w-4 shrink-0" />
+          <span>{item.title}</span>
+          {item.countKey && counts && <CountBadge count={counts[item.countKey]} />}
+        </NavLink>
+      </SidebarMenuButton>
+    </SidebarMenuItem>
+  );
 
   return (
     <SidebarProvider>
@@ -63,21 +92,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               </SidebarGroupLabel>
               <SidebarGroupContent>
                 <SidebarMenu>
-                  {navItems.slice(0, 4).map((item) => (
-                    <SidebarMenuItem key={item.title}>
-                      <SidebarMenuButton asChild>
-                        <NavLink
-                          to={item.url}
-                          end={item.url === "/"}
-                          className="vault-sidebar-item-inactive"
-                          activeClassName="vault-sidebar-item-active"
-                        >
-                          <item.icon className="h-4 w-4 shrink-0" />
-                          <span>{item.title}</span>
-                        </NavLink>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  ))}
+                  {navItems.slice(0, 4).map(renderNavItem)}
                 </SidebarMenu>
               </SidebarGroupContent>
             </SidebarGroup>
@@ -88,20 +103,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               </SidebarGroupLabel>
               <SidebarGroupContent>
                 <SidebarMenu>
-                  {navItems.slice(4, 6).map((item) => (
-                    <SidebarMenuItem key={item.title}>
-                      <SidebarMenuButton asChild>
-                        <NavLink
-                          to={item.url}
-                          className="vault-sidebar-item-inactive"
-                          activeClassName="vault-sidebar-item-active"
-                        >
-                          <item.icon className="h-4 w-4 shrink-0" />
-                          <span>{item.title}</span>
-                        </NavLink>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  ))}
+                  {navItems.slice(4, 6).map(renderNavItem)}
                 </SidebarMenu>
               </SidebarGroupContent>
             </SidebarGroup>
@@ -112,20 +114,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               </SidebarGroupLabel>
               <SidebarGroupContent>
                 <SidebarMenu>
-                  {navItems.slice(6).map((item) => (
-                    <SidebarMenuItem key={item.title}>
-                      <SidebarMenuButton asChild>
-                        <NavLink
-                          to={item.url}
-                          className="vault-sidebar-item-inactive"
-                          activeClassName="vault-sidebar-item-active"
-                        >
-                          <item.icon className="h-4 w-4 shrink-0" />
-                          <span>{item.title}</span>
-                        </NavLink>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  ))}
+                  {navItems.slice(6).map(renderNavItem)}
                 </SidebarMenu>
               </SidebarGroupContent>
             </SidebarGroup>
@@ -166,6 +155,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </main>
         </div>
       </div>
+      <UploadProgressFloat />
     </SidebarProvider>
   );
 }
