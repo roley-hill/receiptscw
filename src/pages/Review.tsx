@@ -221,6 +221,12 @@ function FilePreview({ filePath, fileName, originalText }: { filePath: string | 
     );
   }
 
+  // EML with PDF attachment: render PDF viewer
+  if (isEml && originalText?.startsWith("PDF_ATTACHMENT:")) {
+    const pdfPath = originalText.replace("PDF_ATTACHMENT:", "");
+    return <EmlPdfPreview pdfPath={pdfPath} fileName={fileName} emlPreviewUrl={previewUrl} error={error} />;
+  }
+
   // EML: render formatted email preview
   if (isEml && originalText) {
     return (
@@ -297,6 +303,46 @@ function SpreadsheetPreview({ csv }: { csv: string }) {
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function EmlPdfPreview({ pdfPath, fileName, emlPreviewUrl, error }: { pdfPath: string; fileName: string | null; emlPreviewUrl: string | null; error: boolean }) {
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    getFilePreviewUrl(pdfPath)
+      .then((url) => { setPdfUrl(url); setLoading(false); })
+      .catch(() => { setLoading(false); });
+  }, [pdfPath]);
+
+  if (loading) {
+    return (
+      <div className="rounded-lg bg-muted/50 border border-border p-4 min-h-[400px] flex items-center justify-center">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-lg bg-muted/50 border border-border p-4 min-h-[400px]">
+      <div className="flex items-center gap-2 mb-3">
+        <FileText className="h-5 w-5 text-muted-foreground" />
+        <p className="text-sm font-medium text-foreground">{fileName} <span className="text-xs text-muted-foreground">(PDF attachment)</span></p>
+      </div>
+      {pdfUrl ? (
+        <PdfViewer url={pdfUrl} />
+      ) : (
+        <p className="text-sm text-muted-foreground">Could not load PDF attachment</p>
+      )}
+      {emlPreviewUrl && !error && (
+        <div className="mt-3 text-right">
+          <Button variant="ghost" size="sm" onClick={() => window.open(emlPreviewUrl, "_blank")}>
+            <Eye className="h-3 w-3 mr-1" /> Download Original EML
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
