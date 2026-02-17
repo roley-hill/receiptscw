@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchReceipts, markAppfolioRecorded, getFilePreviewUrl, createDepositBatch } from "@/lib/api";
 import { motion } from "framer-motion";
-import { Download, Mail, Filter, FileText, Layers, ExternalLink } from "lucide-react";
+import { Download, Filter, FileText, Layers, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { DbReceipt } from "@/lib/api";
@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import PdfViewer from "@/components/PdfViewer";
 
 export default function Receivables() {
   const { user } = useAuth();
@@ -30,6 +31,12 @@ export default function Receivables() {
   const [batchDialogOpen, setBatchDialogOpen] = useState(false);
   const [batchProperty, setBatchProperty] = useState("");
   const [depositPeriod, setDepositPeriod] = useState("");
+
+  // Attachment preview state
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewFileName, setPreviewFileName] = useState<string>("");
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewDownloadUrl, setPreviewDownloadUrl] = useState<string | null>(null);
 
   const finalized = allReceipts.filter((r) => r.status === "finalized");
   const properties = [...new Set(finalized.map((r) => r.property).filter(Boolean))];
@@ -64,15 +71,39 @@ export default function Receivables() {
     onError: (e: Error) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
 
-  const handleViewAttachment = async (filePath: string | null) => {
+  const handleViewAttachment = async (filePath: string | null, fileName: string | null) => {
     if (!filePath) return;
+    setPreviewLoading(true);
+    setPreviewFileName(fileName || "Attachment");
+    setPreviewUrl(null);
     try {
       const url = await getFilePreviewUrl(filePath);
-      window.open(url, "_blank");
+      setPreviewUrl(url);
+      setPreviewDownloadUrl(url);
     } catch {
       toast({ title: "Error", description: "Could not load attachment", variant: "destructive" });
+    } finally {
+      setPreviewLoading(false);
     }
   };
+
+  const closePreview = () => {
+    setPreviewUrl(null);
+    setPreviewDownloadUrl(null);
+    setPreviewFileName("");
+  };
+
+  const handleDownloadAttachment = () => {
+    if (!previewDownloadUrl) return;
+    const a = document.createElement("a");
+    a.href = previewDownloadUrl;
+    a.download = previewFileName;
+    a.target = "_blank";
+    a.click();
+  };
+
+  const isPdf = previewFileName?.toLowerCase().endsWith(".pdf");
+  const isImage = /\.(png|jpg|jpeg|gif|webp|bmp|tiff?)$/i.test(previewFileName || "");
 
   const openBatchDialog = (property: string) => {
     const propertyRecorded = finalized.filter((r) => r.property === property && (r as any).appfolio_recorded && !r.batch_id);
@@ -117,7 +148,49 @@ export default function Receivables() {
   }
 
   return (
-    <div className="space-y-6 max-w-7xl">
+    <div className="space-y-6 max-w-7xl relative">
+      {/* Floating Attachment Preview */}
+      {(previewUrl || previewLoading) && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={closePreview}>
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-background border border-border rounded-xl shadow-2xl w-[90vw] max-w-3xl max-h-[85vh] flex flex-col overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-muted/30">
+              <div className="flex items-center gap-2 min-w-0">
+                <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
+                <span className="text-sm font-medium text-foreground truncate">{previewFileName}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={handleDownloadAttachment} disabled={!previewDownloadUrl}>
+                  <Download className="h-3.5 w-3.5 mr-1.5" /> Download
+                </Button>
+                <Button variant="ghost" size="sm" onClick={closePreview} className="h-8 w-8 p-0">
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+            {/* Content */}
+            <div className="flex-1 overflow-auto p-4">
+              {previewLoading ? (
+                <div className="flex items-center justify-center min-h-[300px]">
+                  <div className="h-8 w-8 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+                </div>
+              ) : isPdf ? (
+                <PdfViewer url={previewUrl!} />
+              ) : isImage ? (
+                <img src={previewUrl!} alt={previewFileName} className="max-w-full mx-auto rounded-lg" />
+              ) : (
+                <iframe src={previewUrl!} className="w-full min-h-[500px] rounded-lg border border-border" title="Document Preview" />
+              )}
+            </div>
+          </motion.div>
+        </div>
+      )}
+
       <div className="flex items-start justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Property Receivables & Deposits</h1>
@@ -194,7 +267,7 @@ export default function Receivables() {
                       <td className="px-4 py-2.5">{r.transfer_status === "transferred" ? <span className="vault-badge-success">Transferred</span> : <span className="vault-badge-neutral">Pending</span>}</td>
                       <td className="px-4 py-2.5 text-center">
                         {r.file_path ? (
-                          <Button variant="ghost" size="sm" onClick={() => handleViewAttachment(r.file_path)} title="View source document">
+                          <Button variant="ghost" size="sm" onClick={() => handleViewAttachment(r.file_path, r.file_name)} title="Preview source document">
                             <FileText className="h-4 w-4 text-vault-blue" />
                           </Button>
                         ) : (
