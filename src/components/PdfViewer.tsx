@@ -64,9 +64,36 @@ export default function PdfViewer({ url, className }: PdfViewerProps) {
     return () => { cancelled = true; };
   }, [pdf, page, zoom]);
 
-  const handleZoomIn = () => setZoom((z) => Math.min(z + 0.25, 4));
-  const handleZoomOut = () => setZoom((z) => Math.max(z - 0.25, 0.5));
+  const handleZoomIn = () => setZoom((z) => Math.min(z + 0.5, 4));
+  const handleZoomOut = () => setZoom((z) => Math.max(z - 0.5, 0.5));
   const handleZoomReset = () => setZoom(1);
+
+  const handleDoubleClick = useCallback((e: React.MouseEvent) => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    // If already zoomed, reset
+    if (zoom >= 2) {
+      setZoom(1);
+      return;
+    }
+
+    const newZoom = Math.min(zoom + 1, 4);
+    const rect = container.getBoundingClientRect();
+    // Click position as fraction of visible area
+    const clickX = (e.clientX - rect.left + container.scrollLeft) / (container.scrollWidth || 1);
+    const clickY = (e.clientY - rect.top + container.scrollTop) / (container.scrollHeight || 1);
+
+    setZoom(newZoom);
+
+    // After render, scroll so the clicked point stays centered
+    requestAnimationFrame(() => {
+      const newScrollWidth = container.scrollWidth;
+      const newScrollHeight = container.scrollHeight;
+      container.scrollLeft = clickX * newScrollWidth - rect.width / 2;
+      container.scrollTop = clickY * newScrollHeight - rect.height / 2;
+    });
+  }, [zoom]);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     if (zoom <= 1) return;
@@ -132,6 +159,7 @@ export default function PdfViewer({ url, className }: PdfViewerProps) {
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
+        onDoubleClick={handleDoubleClick}
       >
         <canvas ref={canvasRef} className="mx-auto" style={{ maxWidth: zoom > 1 ? "none" : "100%" }} />
       </div>
