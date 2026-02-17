@@ -307,6 +307,52 @@ You MUST call the extract_receipts function.`;
           return null;
         }
 
+        // --- Extract PDF attachment from EML ---
+        function extractPdfAttachment(eml: string): Uint8Array | null {
+          const boundaryMatch = eml.match(/boundary="?([^\s";\r\n]+)"?/i);
+          if (!boundaryMatch) return null;
+
+          function findPdfInParts(parts: string[]): Uint8Array | null {
+            for (const part of parts) {
+              if (!/content-type:\s*application\/pdf/i.test(part)) {
+                // Check nested
+                const nested = part.match(/boundary="?([^\s";\r\n]+)"?/i);
+                if (nested) {
+                  const result = findPdfInParts(part.split("--" + nested[1]));
+                  if (result) return result;
+                }
+                continue;
+              }
+              // Found PDF part - extract base64 body
+              const bl = part.indexOf("\r\n\r\n");
+              const bl2 = part.indexOf("\n\n");
+              const bs = bl > 0 ? bl + 4 : (bl2 > 0 ? bl2 + 2 : -1);
+              if (bs < 0) continue;
+              let b64 = part.substring(bs).trim();
+              // Remove any trailing boundary
+              const trailingBoundary = b64.indexOf("\r\n--");
+              if (trailingBoundary > 0) b64 = b64.substring(0, trailingBoundary);
+              b64 = b64.replace(/\s/g, "");
+              if (b64.length < 100) continue;
+              try {
+                const binary = atob(b64);
+                const bytes = new Uint8Array(binary.length);
+                for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+                // Verify PDF magic bytes
+                if (bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46) {
+                  return bytes;
+                }
+              } catch { continue; }
+            }
+            return null;
+          }
+
+          return findPdfInParts(eml.split("--" + boundaryMatch[1]));
+        }
+
+        const pdfBytes = extractPdfAttachment(rawEml);
+        console.log("EML PDF attachment found:", !!pdfBytes, pdfBytes ? `(${pdfBytes.length} bytes)` : "");
+
         // Try HTML first, then plain text
         const htmlBody = extractMimePartByType(rawEml, "text/html");
         const plainBody = !htmlBody ? extractMimePartByType(rawEml, "text/plain") : null;
@@ -316,17 +362,32 @@ You MUST call the extract_receipts function.`;
         textContent = rawEml;
         if (textContent.length > 30000) textContent = textContent.substring(0, 30000);
 
-        // Store for preview: prefer HTML, then wrap plain text in basic HTML
-        if (htmlBody) {
-          extractedText = htmlBody.substring(0, 80000);
-        } else if (plainBody) {
-          extractedText = `<html><body><pre style="font-family:Arial,sans-serif;white-space:pre-wrap;padding:20px;">${plainBody.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</pre></body></html>`;
-        } else {
-          // Last fallback: skip all headers, show body text
-          // Find the end of the top-level headers
-          const headerEnd = rawEml.search(/\r?\n\r?\n/);
-          const bodyText = headerEnd > 0 ? rawEml.substring(headerEnd + 2) : rawEml;
-          extractedText = `<html><body><pre style="font-family:Arial,sans-serif;white-space:pre-wrap;padding:20px;">${bodyText.substring(0, 50000).replace(/</g, "&lt;").replace(/>/g, "&gt;")}</pre></body></html>`;
+        // If PDF attachment exists, upload it and store path for preview
+        if (pdfBytes) {
+          const pdfPath = `uploads/${timestamp}_${safeName}_attachment.pdf`;
+          const { error: pdfUploadError } = await supabase.storage
+            .from("receipts")
+            .upload(pdfPath, pdfBytes, { contentType: "application/pdf", upsert: true });
+          if (pdfUploadError) {
+            console.error("PDF attachment upload error:", pdfUploadError);
+          } else {
+            // Store with prefix so frontend knows to render PdfViewer
+            extractedText = `PDF_ATTACHMENT:${pdfPath}`;
+            console.log("Stored PDF attachment at:", pdfPath);
+          }
+        }
+
+        // If no PDF attachment (or upload failed), fall back to HTML/text preview
+        if (!extractedText.startsWith("PDF_ATTACHMENT:")) {
+          if (htmlBody) {
+            extractedText = htmlBody.substring(0, 80000);
+          } else if (plainBody) {
+            extractedText = `<html><body><pre style="font-family:Arial,sans-serif;white-space:pre-wrap;padding:20px;">${plainBody.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</pre></body></html>`;
+          } else {
+            const headerEnd = rawEml.search(/\r?\n\r?\n/);
+            const bodyText = headerEnd > 0 ? rawEml.substring(headerEnd + 2) : rawEml;
+            extractedText = `<html><body><pre style="font-family:Arial,sans-serif;white-space:pre-wrap;padding:20px;">${bodyText.substring(0, 50000).replace(/</g, "&lt;").replace(/>/g, "&gt;")}</pre></body></html>`;
+          }
         }
       } else {
         // Parse XLSX properly into CSV text so the AI can read actual cell values
