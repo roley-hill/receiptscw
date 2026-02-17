@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchReceipts, updateReceipt, getFilePreviewUrl } from "@/lib/api";
 import { motion } from "framer-motion";
-import { CheckCircle2, AlertTriangle, ChevronLeft, ChevronRight, Eye, Edit3, Save, FileText, Image as ImageIcon, Loader2 } from "lucide-react";
+import { CheckCircle2, AlertTriangle, ChevronLeft, ChevronRight, Eye, Edit3, Save, FileText, Image as ImageIcon, Loader2, ZoomIn, ZoomOut, RotateCcw } from "lucide-react";
 import PdfViewer from "@/components/PdfViewer";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
@@ -149,6 +149,37 @@ export default function ReviewPage() {
   );
 }
 
+function ZoomablePreview({ children }: { children: React.ReactNode }) {
+  const [zoom, setZoom] = useState(1);
+  const zoomIn = () => setZoom((z) => Math.min(z + 0.25, 3));
+  const zoomOut = () => setZoom((z) => Math.max(z - 0.25, 0.5));
+  const resetZoom = () => setZoom(1);
+
+  return (
+    <div>
+      <div className="flex items-center gap-1 mb-2">
+        <Button variant="ghost" size="sm" onClick={zoomOut} disabled={zoom <= 0.5} className="h-7 w-7 p-0">
+          <ZoomOut className="h-3.5 w-3.5" />
+        </Button>
+        <span className="text-xs text-muted-foreground w-12 text-center vault-mono">{Math.round(zoom * 100)}%</span>
+        <Button variant="ghost" size="sm" onClick={zoomIn} disabled={zoom >= 3} className="h-7 w-7 p-0">
+          <ZoomIn className="h-3.5 w-3.5" />
+        </Button>
+        {zoom !== 1 && (
+          <Button variant="ghost" size="sm" onClick={resetZoom} className="h-7 w-7 p-0">
+            <RotateCcw className="h-3.5 w-3.5" />
+          </Button>
+        )}
+      </div>
+      <div className="overflow-auto max-h-[700px] rounded-lg border border-border bg-muted/50">
+        <div style={{ transform: `scale(${zoom})`, transformOrigin: "top left", width: `${100 / zoom}%` }}>
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function FilePreview({ filePath, fileName, originalText }: { filePath: string | null; fileName: string | null; originalText: string | null }) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -180,13 +211,15 @@ function FilePreview({ filePath, fileName, originalText }: { filePath: string | 
   // Image preview
   if (isImage && previewUrl && !error) {
     return (
-      <div className="rounded-lg bg-muted/50 border border-border overflow-hidden min-h-[400px] flex items-center justify-center">
-        <img src={previewUrl} alt={fileName || "Receipt"} className="max-w-full max-h-[600px] object-contain" />
-      </div>
+      <ZoomablePreview>
+        <div className="p-4 flex items-center justify-center min-h-[400px]">
+          <img src={previewUrl} alt={fileName || "Receipt"} className="max-w-full object-contain" />
+        </div>
+      </ZoomablePreview>
     );
   }
 
-  // PDF: open in new tab (iframes are blocked in sandboxed preview)
+  // PDF
   if (isPdf && previewUrl && !error) {
     return (
       <div className="rounded-lg bg-muted/50 border border-border p-4 min-h-[400px]">
@@ -201,15 +234,19 @@ function FilePreview({ filePath, fileName, originalText }: { filePath: string | 
     );
   }
 
-  // XLSX: render as table from extracted CSV text
+  // XLSX
   if (isXlsx && originalText) {
     return (
-      <div className="rounded-lg bg-muted/50 border border-border p-4 min-h-[400px]">
+      <div className="p-4">
         <div className="flex items-center gap-2 mb-3">
           <FileText className="h-5 w-5 text-muted-foreground" />
           <p className="text-sm font-medium text-foreground">{fileName}</p>
         </div>
-        <SpreadsheetPreview csv={originalText} />
+        <ZoomablePreview>
+          <div className="p-4">
+            <SpreadsheetPreview csv={originalText} />
+          </div>
+        </ZoomablePreview>
         {previewUrl && !error && (
           <div className="mt-3 text-right">
             <Button variant="ghost" size="sm" onClick={() => window.open(previewUrl, "_blank")}>
@@ -221,7 +258,7 @@ function FilePreview({ filePath, fileName, originalText }: { filePath: string | 
     );
   }
 
-  // EML with PDF attachment: render PDF viewer
+  // EML with PDF attachment
   if (isEml && originalText?.startsWith("PDF_ATTACHMENT:")) {
     const pdfPath = originalText.replace("PDF_ATTACHMENT:", "");
     return <EmlPdfPreview pdfPath={pdfPath} fileName={fileName} emlPreviewUrl={previewUrl} error={error} />;
@@ -230,12 +267,14 @@ function FilePreview({ filePath, fileName, originalText }: { filePath: string | 
   // EML: render formatted email preview
   if (isEml && originalText) {
     return (
-      <div className="rounded-lg bg-muted/50 border border-border p-4 min-h-[400px]">
+      <div className="p-4">
         <div className="flex items-center gap-2 mb-3">
           <FileText className="h-5 w-5 text-muted-foreground" />
           <p className="text-sm font-medium text-foreground">{fileName}</p>
         </div>
-        <EmailPreview raw={originalText} />
+        <ZoomablePreview>
+          <EmailPreview raw={originalText} />
+        </ZoomablePreview>
         {previewUrl && !error && (
           <div className="mt-3 text-right">
             <Button variant="ghost" size="sm" onClick={() => window.open(previewUrl, "_blank")}>
@@ -247,7 +286,7 @@ function FilePreview({ filePath, fileName, originalText }: { filePath: string | 
     );
   }
 
-  // Fallback for other file types
+  // Fallback
   return (
     <div className="rounded-lg bg-muted/50 border border-border p-4 min-h-[400px]">
       <div className="flex flex-col items-center justify-center gap-3 py-4">
