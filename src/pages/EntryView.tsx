@@ -251,7 +251,7 @@ export default function EntryView() {
               >
                 <Building2 className="h-4 w-4 shrink-0" />
                 <span>All Buildings</span>
-                <span className="ml-auto text-xs vault-mono text-muted-foreground">{finalized.length}</span>
+                <span className="ml-auto text-xs vault-mono text-muted-foreground">{filteredProperties.length}</span>
               </button>
             )}
             {filteredProperties.sort().filter((p) => !treeSearch || p.toLowerCase().includes(treeSearch.toLowerCase())).map((property) => {
