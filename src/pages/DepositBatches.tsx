@@ -1,9 +1,12 @@
-import { useQuery } from "@tanstack/react-query";
-import { fetchBatches, fetchReceipts } from "@/lib/api";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { fetchBatches, fetchReceipts, reverseBatch } from "@/lib/api";
 import { motion } from "framer-motion";
-import { Layers, Download, Mail, CheckCircle2, Clock, FileSpreadsheet, FileText as FileTextIcon } from "lucide-react";
+import { Layers, Download, Mail, CheckCircle2, Clock, FileSpreadsheet, FileText as FileTextIcon, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/hooks/use-toast";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import * as XLSX from "xlsx";
@@ -108,8 +111,19 @@ function generateBatchXLSX(batch: any, receipts: any[]) {
 }
 
 export default function DepositBatches() {
+  const queryClient = useQueryClient();
   const { data: batches = [], isLoading } = useQuery({ queryKey: ["batches"], queryFn: fetchBatches });
   const { data: allReceipts = [] } = useQuery({ queryKey: ["receipts"], queryFn: fetchReceipts });
+
+  const reverseMutation = useMutation({
+    mutationFn: (batchId: string) => reverseBatch(batchId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["batches"] });
+      queryClient.invalidateQueries({ queryKey: ["receipts"] });
+      toast({ title: "Batch reversed", description: "Receipts have been unlinked and are available for re-batching." });
+    },
+    onError: (e: Error) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
 
   if (isLoading) {
     return <div className="flex items-center justify-center py-20"><div className="h-8 w-8 border-2 border-accent border-t-transparent rounded-full animate-spin" /></div>;
@@ -163,6 +177,29 @@ export default function DepositBatches() {
                       <Button variant="outline" size="sm" title="Email report">
                         <Mail className="h-3.5 w-3.5" />
                       </Button>
+                      {batch.status !== "reversed" && (
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button variant="outline" size="sm" title="Reverse batch" className="text-destructive hover:text-destructive">
+                              <Undo2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Reverse Batch {batch.batch_id}?</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                This will unlink all {batch.receipt_count} receipt{batch.receipt_count !== 1 ? "s" : ""} from this batch, making them available for re-batching. The batch will be marked as reversed.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Cancel</AlertDialogCancel>
+                              <AlertDialogAction onClick={() => reverseMutation.mutate(batch.id)} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                                Reverse Batch
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      )}
                     </div>
                   </div>
                 </div>
