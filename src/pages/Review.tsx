@@ -156,16 +156,17 @@ function FilePreview({ filePath, fileName, originalText }: { filePath: string | 
   const fileExt = fileName?.split(".").pop()?.toLowerCase();
   const isImage = ["jpg", "jpeg", "png", "webp", "heic"].includes(fileExt || "");
   const isPdf = fileExt === "pdf";
-  const canPreview = isImage || isPdf;
+  const isXlsx = ["xlsx", "xls"].includes(fileExt || "");
+  const isEml = fileExt === "eml";
 
   useEffect(() => {
-    if (!filePath || !canPreview) return;
+    if (!filePath) return;
     setLoading(true);
     setError(false);
     getFilePreviewUrl(filePath)
       .then((url) => { setPreviewUrl(url); setLoading(false); })
       .catch(() => { setError(true); setLoading(false); });
-  }, [filePath, canPreview]);
+  }, [filePath]);
 
   if (loading) {
     return (
@@ -175,35 +176,53 @@ function FilePreview({ filePath, fileName, originalText }: { filePath: string | 
     );
   }
 
-  if (canPreview && previewUrl && !error) {
-    if (isImage) {
-      return (
-        <div className="rounded-lg bg-muted/50 border border-border overflow-hidden min-h-[400px] flex items-center justify-center">
-          <img src={previewUrl} alt={fileName || "Receipt"} className="max-w-full max-h-[600px] object-contain" />
-        </div>
-      );
-    }
-    if (isPdf) {
-      return (
-        <div className="rounded-lg border border-border overflow-hidden" style={{ minHeight: 500 }}>
-          <iframe src={previewUrl} title={fileName || "PDF Preview"} className="w-full" style={{ height: 500 }} />
-        </div>
-      );
-    }
+  // Image preview
+  if (isImage && previewUrl && !error) {
+    return (
+      <div className="rounded-lg bg-muted/50 border border-border overflow-hidden min-h-[400px] flex items-center justify-center">
+        <img src={previewUrl} alt={fileName || "Receipt"} className="max-w-full max-h-[600px] object-contain" />
+      </div>
+    );
   }
 
-  // Fallback: show extracted text
+  // PDF: open in new tab (iframes are blocked in sandboxed preview)
+  if (isPdf && previewUrl && !error) {
+    return (
+      <div className="rounded-lg bg-muted/50 border border-border p-6 min-h-[400px] flex flex-col items-center justify-center gap-4">
+        <FileText className="h-12 w-12 text-muted-foreground" />
+        <p className="text-sm font-medium text-foreground">{fileName}</p>
+        <Button variant="outline" size="sm" onClick={() => window.open(previewUrl, "_blank")}>
+          <Eye className="h-4 w-4 mr-2" /> Open PDF in New Tab
+        </Button>
+        {originalText && !originalText.startsWith("[") && (
+          <div className="w-full mt-4 border-t border-border pt-4">
+            <p className="text-xs font-medium text-muted-foreground mb-2">Extracted Text</p>
+            <pre className="text-xs text-muted-foreground whitespace-pre-wrap font-mono max-h-[300px] overflow-auto">{originalText}</pre>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // XLSX / EML / other non-previewable: show download link + extracted text
   return (
     <div className="rounded-lg bg-muted/50 border border-border p-4 min-h-[400px]">
-      {originalText ? (
-        <pre className="text-xs text-muted-foreground whitespace-pre-wrap font-mono">{originalText}</pre>
-      ) : (
-        <div className="flex items-center justify-center h-full text-muted-foreground text-center">
-          <div>
-            <Eye className="h-8 w-8 mx-auto mb-2 opacity-40" />
-            <p className="text-sm">No preview available</p>
-            <p className="text-xs mt-1">{fileName}</p>
-          </div>
+      <div className="flex flex-col items-center justify-center gap-3 py-4">
+        <FileText className="h-10 w-10 text-muted-foreground" />
+        <p className="text-sm font-medium text-foreground">{fileName || "Unknown file"}</p>
+        <span className="text-xs text-muted-foreground">
+          {isXlsx ? "Spreadsheet" : isEml ? "Email" : "Document"} — inline preview not available
+        </span>
+        {previewUrl && !error && (
+          <Button variant="outline" size="sm" onClick={() => window.open(previewUrl, "_blank")}>
+            <Eye className="h-4 w-4 mr-2" /> Download Source File
+          </Button>
+        )}
+      </div>
+      {originalText && !originalText.startsWith("[") && (
+        <div className="mt-4 border-t border-border pt-4">
+          <p className="text-xs font-medium text-muted-foreground mb-2">Extracted Text</p>
+          <pre className="text-xs text-muted-foreground whitespace-pre-wrap font-mono max-h-[300px] overflow-auto">{originalText}</pre>
         </div>
       )}
     </div>
