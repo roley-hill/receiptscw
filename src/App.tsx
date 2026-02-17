@@ -14,6 +14,7 @@ import DepositBatches from "@/pages/DepositBatches";
 import BrowseFiles from "@/pages/BrowseFiles";
 import SearchPage from "@/pages/SearchPage";
 import Exceptions from "@/pages/Exceptions";
+import Duplicates from "@/pages/Duplicates";
 import Auth from "@/pages/Auth";
 import ResetPassword from "@/pages/ResetPassword";
 import NotFound from "@/pages/NotFound";
@@ -48,6 +49,7 @@ function ProtectedRoutes() {
         <Route path="/browse" element={<BrowseFiles />} />
         <Route path="/search" element={<SearchPage />} />
         <Route path="/exceptions" element={<Exceptions />} />
+        <Route path="/duplicates" element={<Duplicates />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
     </AppLayout>

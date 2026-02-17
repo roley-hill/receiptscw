@@ -492,6 +492,31 @@ You MUST call the extract_receipts function.`;
             receipt_date: item.receipt_date,
             existing_receipt_id: existing[0].receipt_id,
           });
+          // Store in skipped_duplicates for user review
+          await supabase.from("skipped_duplicates").insert({
+            user_id: userId,
+            tenant: item.tenant || "",
+            property: item.property || "",
+            unit: item.unit || "",
+            amount: item.amount || 0,
+            receipt_date: item.receipt_date || null,
+            rent_month: item.rent_month || null,
+            payment_type: item.payment_type || "",
+            reference: item.reference || "",
+            memo: item.memo || "",
+            file_name: file.name,
+            file_path: filePath,
+            existing_receipt_id: existing[0].receipt_id,
+            existing_receipt_uuid: existing[0].id,
+            confidence_scores: {
+              property: item.property_confidence || 0,
+              unit: item.unit_confidence || 0,
+              tenant: item.tenant_confidence || 0,
+              amount: item.amount_confidence || 0,
+              receiptDate: item.receipt_date_confidence || 0,
+              paymentType: item.payment_type_confidence || 0,
+            },
+          });
           continue; // skip duplicate
         }
       }
@@ -518,6 +543,31 @@ You MUST call the extract_receipts function.`;
             receipt_date: item.receipt_date,
             existing_receipt_id: fileExisting[0].receipt_id,
             reason: "same_file_reupload",
+          });
+          // Store in skipped_duplicates for user review
+          await supabase.from("skipped_duplicates").insert({
+            user_id: userId,
+            tenant: item.tenant || "",
+            property: item.property || "",
+            unit: item.unit || "",
+            amount: item.amount || 0,
+            receipt_date: item.receipt_date || null,
+            rent_month: item.rent_month || null,
+            payment_type: item.payment_type || "",
+            reference: item.reference || "",
+            memo: item.memo || "",
+            file_name: file.name,
+            file_path: filePath,
+            existing_receipt_id: fileExisting[0].receipt_id,
+            existing_receipt_uuid: fileExisting[0].id,
+            confidence_scores: {
+              property: item.property_confidence || 0,
+              unit: item.unit_confidence || 0,
+              tenant: item.tenant_confidence || 0,
+              amount: item.amount_confidence || 0,
+              receiptDate: item.receipt_date_confidence || 0,
+              paymentType: item.payment_type_confidence || 0,
+            },
           });
           continue;
         }

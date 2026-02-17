@@ -217,6 +217,75 @@ export type Database = {
           },
         ]
       }
+      skipped_duplicates: {
+        Row: {
+          amount: number
+          confidence_scores: Json | null
+          created_at: string
+          existing_receipt_id: string
+          existing_receipt_uuid: string | null
+          file_name: string | null
+          file_path: string | null
+          id: string
+          memo: string | null
+          payment_type: string | null
+          property: string
+          receipt_date: string | null
+          reference: string | null
+          rent_month: string | null
+          resolved_at: string | null
+          resolved_by: string | null
+          status: string
+          tenant: string
+          unit: string
+          user_id: string | null
+        }
+        Insert: {
+          amount?: number
+          confidence_scores?: Json | null
+          created_at?: string
+          existing_receipt_id: string
+          existing_receipt_uuid?: string | null
+          file_name?: string | null
+          file_path?: string | null
+          id?: string
+          memo?: string | null
+          payment_type?: string | null
+          property?: string
+          receipt_date?: string | null
+          reference?: string | null
+          rent_month?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          status?: string
+          tenant?: string
+          unit?: string
+          user_id?: string | null
+        }
+        Update: {
+          amount?: number
+          confidence_scores?: Json | null
+          created_at?: string
+          existing_receipt_id?: string
+          existing_receipt_uuid?: string | null
+          file_name?: string | null
+          file_path?: string | null
+          id?: string
+          memo?: string | null
+          payment_type?: string | null
+          property?: string
+          receipt_date?: string | null
+          reference?: string | null
+          rent_month?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          status?: string
+          tenant?: string
+          unit?: string
+          user_id?: string | null
+        }
+        Relationships: []
+      }
       upload_batches: {
         Row: {
           created_at: string
