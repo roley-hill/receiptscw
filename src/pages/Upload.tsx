@@ -24,6 +24,7 @@ export default function UploadPage() {
   const [isDragging, setIsDragging] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
   const { session } = useAuth();
   const queryClient = useQueryClient();
 
@@ -149,14 +150,29 @@ export default function UploadPage() {
           <p className="text-sm font-medium text-foreground">Drop receipt files or remittance details here</p>
           <p className="text-xs text-muted-foreground mt-1">PDF, JPG, PNG, XLSX, EML — each line item will become a separate receipt</p>
         </div>
-        <Button variant="outline" size="sm" className="mt-2">
-          <FolderOpen className="h-4 w-4 mr-2" /> Browse Files
-        </Button>
+        <div className="flex gap-2 mt-2">
+          <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); inputRef.current?.click(); }}>
+            <FolderOpen className="h-4 w-4 mr-2" /> Browse Files
+          </Button>
+          <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); folderInputRef.current?.click(); }}>
+            <FolderOpen className="h-4 w-4 mr-2" /> Browse Folder
+          </Button>
+        </div>
         <input
           ref={inputRef}
           type="file"
           multiple
           accept=".pdf,.jpg,.jpeg,.png,.heic,.xlsx,.xls,.eml"
+          className="hidden"
+          onChange={(e) => e.target.files && handleFiles(e.target.files)}
+        />
+        <input
+          ref={folderInputRef}
+          type="file"
+          multiple
+          // @ts-ignore
+          webkitdirectory=""
+          directory=""
           className="hidden"
           onChange={(e) => e.target.files && handleFiles(e.target.files)}
         />
