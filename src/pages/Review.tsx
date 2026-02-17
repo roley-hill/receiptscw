@@ -194,7 +194,7 @@ function FilePreview({ filePath, fileName, originalText }: { filePath: string | 
         <Button variant="outline" size="sm" onClick={() => window.open(previewUrl, "_blank")}>
           <Eye className="h-4 w-4 mr-2" /> Open PDF in New Tab
         </Button>
-        {originalText && !originalText.startsWith("[") && (
+        {originalText && (
           <div className="w-full mt-4 border-t border-border pt-4">
             <p className="text-xs font-medium text-muted-foreground mb-2">Extracted Text</p>
             <pre className="text-xs text-muted-foreground whitespace-pre-wrap font-mono max-h-[300px] overflow-auto">{originalText}</pre>
@@ -219,7 +219,7 @@ function FilePreview({ filePath, fileName, originalText }: { filePath: string | 
           </Button>
         )}
       </div>
-      {originalText && !originalText.startsWith("[") && (
+      {originalText && (
         <div className="mt-4 border-t border-border pt-4">
           <p className="text-xs font-medium text-muted-foreground mb-2">Extracted Text</p>
           <pre className="text-xs text-muted-foreground whitespace-pre-wrap font-mono max-h-[300px] overflow-auto">{originalText}</pre>
