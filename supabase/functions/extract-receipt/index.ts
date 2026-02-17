@@ -573,6 +573,17 @@ You MUST call the extract_receipts function.`;
         }
       }
 
+      // Infer payment_type from reference if not already set or generic
+      if (item.reference && (!item.payment_type || item.payment_type === "" || item.payment_type === "other")) {
+        const ref = item.reference.toUpperCase();
+        if (ref.startsWith("ACH")) item.payment_type = "ACH";
+        else if (ref.startsWith("EFT")) item.payment_type = "EFT";
+        else if (ref.startsWith("CHK") || ref.startsWith("CHECK")) item.payment_type = "Check";
+        else if (ref.startsWith("WIRE")) item.payment_type = "Wire";
+        else if (ref.startsWith("MO-") || ref.startsWith("MO ")) item.payment_type = "Money Order";
+        else if (ref.startsWith("CASH")) item.payment_type = "Cash";
+      }
+
       // Determine status based on confidence
       const confidences = [
         item.property_confidence || 0,
