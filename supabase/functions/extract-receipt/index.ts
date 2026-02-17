@@ -217,15 +217,61 @@ You MUST call the extract_receipts function.`;
 
         // --- Robust MIME HTML extraction ---
         function extractHtmlFromEml(eml: string): string | null {
-          // Find the HTML MIME part by looking for Content-Type: text/html
-          // then decode it (base64 or quoted-printable)
-          const parts = eml.split(/--[\w\-\.]+/);
-          for (const part of parts) {
+          // 1. Try to find MIME boundary from Content-Type header
+          const boundaryMatch = eml.match(/boundary="?([^\s";\r\n]+)"?/i);
+          
+          if (boundaryMatch) {
+            const boundary = boundaryMatch[1];
+            const parts = eml.split("--" + boundary);
+            for (const part of parts) {
+              if (!/content-type:\s*text\/html/i.test(part)) continue;
+              const encodingMatch = part.match(/content-transfer-encoding:\s*(\S+)/i);
+              const encoding = encodingMatch?.[1]?.toLowerCase() || "7bit";
+              const blankLine = part.indexOf("\r\n\r\n");
+              const blankLine2 = part.indexOf("\n\n");
+              const bodyStart = blankLine > 0 ? blankLine + 4 : (blankLine2 > 0 ? blankLine2 + 2 : -1);
+              if (bodyStart < 0) continue;
+              let body = part.substring(bodyStart).trim();
+              // Remove trailing boundary markers
+              body = body.replace(/--[\s\S]*$/, "").trim();
+              if (encoding === "base64") {
+                try { body = atob(body.replace(/\s/g, "")); } catch { continue; }
+              } else if (encoding === "quoted-printable") {
+                body = body
+                  .replace(/=\r?\n/g, "")
+                  .replace(/=([0-9A-Fa-f]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+              }
+              if (body.length > 50) return body;
+            }
+            // Try nested boundaries (multipart within multipart)
+            for (const part of parts) {
+              const nestedBoundary = part.match(/boundary="?([^\s";\r\n]+)"?/i);
+              if (!nestedBoundary) continue;
+              const nestedParts = part.split("--" + nestedBoundary[1]);
+              for (const np of nestedParts) {
+                if (!/content-type:\s*text\/html/i.test(np)) continue;
+                const enc = np.match(/content-transfer-encoding:\s*(\S+)/i)?.[1]?.toLowerCase() || "7bit";
+                const bl = np.indexOf("\r\n\r\n");
+                const bl2 = np.indexOf("\n\n");
+                const bs = bl > 0 ? bl + 4 : (bl2 > 0 ? bl2 + 2 : -1);
+                if (bs < 0) continue;
+                let body = np.substring(bs).trim().replace(/--[\s\S]*$/, "").trim();
+                if (enc === "base64") {
+                  try { body = atob(body.replace(/\s/g, "")); } catch { continue; }
+                } else if (enc === "quoted-printable") {
+                  body = body.replace(/=\r?\n/g, "").replace(/=([0-9A-Fa-f]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+                }
+                if (body.length > 50) return body;
+              }
+            }
+          }
+
+          // 2. Fallback: split by any boundary-like pattern
+          const parts2 = eml.split(/--[\w\-\.=\/+]+/);
+          for (const part of parts2) {
             if (!/content-type:\s*text\/html/i.test(part)) continue;
-            // Determine encoding
             const encodingMatch = part.match(/content-transfer-encoding:\s*(\S+)/i);
             const encoding = encodingMatch?.[1]?.toLowerCase() || "7bit";
-            // Get the body (after the blank line separating headers from content)
             const blankLine = part.indexOf("\r\n\r\n");
             const blankLine2 = part.indexOf("\n\n");
             const bodyStart = blankLine > 0 ? blankLine + 4 : (blankLine2 > 0 ? blankLine2 + 2 : -1);
@@ -234,13 +280,12 @@ You MUST call the extract_receipts function.`;
             if (encoding === "base64") {
               try { body = atob(body.replace(/\s/g, "")); } catch { continue; }
             } else if (encoding === "quoted-printable") {
-              body = body
-                .replace(/=\r?\n/g, "") // soft line breaks
-                .replace(/=([0-9A-Fa-f]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+              body = body.replace(/=\r?\n/g, "").replace(/=([0-9A-Fa-f]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
             }
             if (body.length > 50) return body;
           }
-          // Fallback: direct regex for <html> (non-MIME or inline HTML)
+
+          // 3. Last resort: extract <html>...</html> directly
           const htmlMatch = eml.match(/<html[\s\S]*<\/html>/i);
           if (htmlMatch) return htmlMatch[0];
           return null;
