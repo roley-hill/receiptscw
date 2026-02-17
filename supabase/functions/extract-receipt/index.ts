@@ -41,11 +41,25 @@ serve(async (req) => {
     const arrayBuffer = await file.arrayBuffer();
     const fileBytes = new Uint8Array(arrayBuffer);
 
+    // Helper: encode Uint8Array to base64 without stack overflow
+    function uint8ToBase64(bytes: Uint8Array): string {
+      let binary = "";
+      const chunkSize = 8192;
+      for (let i = 0; i < bytes.length; i += chunkSize) {
+        const chunk = bytes.subarray(i, Math.min(i + chunkSize, bytes.length));
+        binary += String.fromCharCode(...chunk);
+      }
+      return btoa(binary);
+    }
+
     const { error: uploadError } = await supabase.storage
       .from("receipts")
-      .upload(filePath, fileBytes, { contentType: file.type });
+      .upload(filePath, fileBytes, { contentType: file.type, upsert: true });
 
-    if (uploadError) throw new Error(`Upload failed: ${uploadError.message}`);
+    if (uploadError) {
+      console.error("Storage upload error:", uploadError);
+      throw new Error(`Storage upload failed: ${uploadError.message}`);
+    }
 
     // Tool definition for MULTI-receipt extraction
     const extractMultiReceiptTool = {
@@ -118,7 +132,7 @@ You MUST call the extract_receipts function.`;
     const isPdf = fileExt === "pdf" || file.type === "application/pdf";
 
     if (isImage || isPdf) {
-      const base64 = btoa(String.fromCharCode(...fileBytes));
+      const base64 = uint8ToBase64(fileBytes);
       const dataUrl = `data:${file.type};base64,${base64}`;
 
       const messages: any[] = [
@@ -177,7 +191,7 @@ You MUST call the extract_receipts function.`;
         textContent = decoder.decode(fileBytes);
         if (textContent.length > 30000) textContent = textContent.substring(0, 30000);
       } else {
-        const base64 = btoa(String.fromCharCode(...fileBytes));
+        const base64 = uint8ToBase64(fileBytes);
         textContent = `[XLSX file base64 - first 20000 chars]: ${base64.substring(0, 20000)}`;
       }
 
