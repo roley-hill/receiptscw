@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { Copy, CheckCircle2, XCircle, ChevronDown, ChevronUp, Loader2, Trash2 } from "lucide-react";
+import { getFilePreviewUrl } from "@/lib/api";
+import { Copy, CheckCircle2, XCircle, ChevronDown, ChevronUp, Loader2, Trash2, Eye } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -17,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
+import { FilePreviewOverlay } from "@/components/FilePreview";
 
 interface SkippedDuplicate {
   id: string;
@@ -52,6 +54,8 @@ interface ExistingReceipt {
   memo: string | null;
   status: string;
   file_name: string | null;
+  file_path: string | null;
+  original_text: string | null;
 }
 
 async function fetchPendingDuplicates() {
@@ -77,6 +81,36 @@ export default function Duplicates() {
   const [loadingExisting, setLoadingExisting] = useState<Set<string>>(new Set());
   const [processing, setProcessing] = useState<Set<string>>(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
+
+  // Preview state
+  const [previewFileName, setPreviewFileName] = useState<string>("");
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewOriginalText, setPreviewOriginalText] = useState<string | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
+
+  const openPreview = async (filePath: string | null, fileName: string | null, originalText?: string | null) => {
+    if (!filePath) return;
+    setPreviewFileName(fileName || "Attachment");
+    setPreviewLoading(true);
+    setPreviewUrl(null);
+    setPreviewOriginalText(originalText ?? null);
+    setPreviewOpen(true);
+    try {
+      const url = await getFilePreviewUrl(filePath);
+      setPreviewUrl(url);
+    } catch {
+      toast.error("Could not load file preview");
+      setPreviewOpen(false);
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  const closePreview = () => {
+    setPreviewOpen(false);
+    setPreviewUrl(null);
+  };
 
   const handleBulkDelete = async () => {
     setBulkDeleting(true);
@@ -105,7 +139,7 @@ export default function Duplicates() {
       setLoadingExisting((prev) => new Set(prev).add(dup.id));
       const { data } = await supabase
         .from("receipts")
-        .select("id, receipt_id, tenant, property, unit, amount, receipt_date, rent_month, payment_type, reference, memo, status, file_name")
+        .select("id, receipt_id, tenant, property, unit, amount, receipt_date, rent_month, payment_type, reference, memo, status, file_name, file_path, original_text")
         .eq("id", dup.existing_receipt_uuid)
         .single();
       if (data) {
@@ -223,7 +257,7 @@ export default function Duplicates() {
   if (duplicates.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-20 text-center">
-        <CheckCircle2 className="h-12 w-12 text-vault-emerald mb-4" />
+        <CheckCircle2 className="h-12 w-12 text-accent mb-4" />
         <h2 className="text-xl font-bold text-foreground">No Pending Duplicates</h2>
         <p className="text-sm text-muted-foreground mt-1">All duplicate detections have been reviewed.</p>
       </div>
@@ -232,6 +266,17 @@ export default function Duplicates() {
 
   return (
     <div className="space-y-6 max-w-5xl">
+      {/* File Preview Overlay */}
+      {previewOpen && (
+        <FilePreviewOverlay
+          fileName={previewFileName}
+          fileUrl={previewUrl}
+          loading={previewLoading}
+          originalText={previewOriginalText}
+          onClose={closePreview}
+        />
+      )}
+
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Duplicate Review</h1>
@@ -281,8 +326,8 @@ export default function Duplicates() {
                 className="w-full px-4 py-3 flex items-center justify-between hover:bg-muted/30 transition-colors"
               >
                 <div className="flex items-center gap-3 text-left">
-                  <div className="h-9 w-9 rounded-lg bg-amber-500/10 flex items-center justify-center">
-                    <Copy className="h-4 w-4 text-amber-500" />
+                  <div className="h-9 w-9 rounded-lg bg-accent/10 flex items-center justify-center">
+                    <Copy className="h-4 w-4 text-accent" />
                   </div>
                   <div>
                     <div className="flex items-center gap-2">
@@ -307,8 +352,8 @@ export default function Duplicates() {
                     <div className="px-4 pb-4 border-t border-border pt-3">
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         {/* New (skipped) record */}
-                        <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 space-y-2">
-                          <p className="text-xs font-semibold text-amber-600 uppercase tracking-wide">New (Skipped)</p>
+                        <div className="rounded-lg border border-accent/30 bg-accent/5 p-3 space-y-2">
+                          <p className="text-xs font-semibold text-accent uppercase tracking-wide">New (Skipped)</p>
                           <CompareField label="Tenant" value={dup.tenant} />
                           <CompareField label="Property" value={dup.property} />
                           <CompareField label="Unit" value={dup.unit} />
@@ -317,7 +362,12 @@ export default function Duplicates() {
                           <CompareField label="Rent Month" value={dup.rent_month || "—"} />
                           <CompareField label="Payment" value={dup.payment_type || "—"} />
                           <CompareField label="Reference" value={dup.reference || "—"} />
-                          <CompareField label="File" value={dup.file_name || "—"} />
+                          <FileField
+                            label="File"
+                            value={dup.file_name || "—"}
+                            hasFile={!!dup.file_path}
+                            onView={() => openPreview(dup.file_path, dup.file_name)}
+                          />
                         </div>
 
                         {/* Existing record */}
@@ -337,7 +387,12 @@ export default function Duplicates() {
                               <CompareField label="Rent Month" value={existing.rent_month || "—"} />
                               <CompareField label="Payment" value={existing.payment_type || "—"} />
                               <CompareField label="Reference" value={existing.reference || "—"} />
-                              <CompareField label="File" value={existing.file_name || "—"} />
+                              <FileField
+                                label="File"
+                                value={existing.file_name || "—"}
+                                hasFile={!!existing.file_path}
+                                onView={() => openPreview(existing.file_path, existing.file_name, existing.original_text)}
+                              />
                             </>
                           ) : (
                             <p className="text-xs text-muted-foreground py-4">Could not load existing record.</p>
@@ -395,3 +450,22 @@ function CompareField({ label, value }: { label: string; value: string }) {
   );
 }
 
+function FileField({ label, value, hasFile, onView }: { label: string; value: string; hasFile: boolean; onView: () => void }) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <span className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">{label}</span>
+      <div className="flex items-center gap-1.5">
+        <span className="text-xs text-foreground font-medium text-right truncate max-w-[120px]">{value}</span>
+        {hasFile && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onView(); }}
+            className="flex items-center gap-1 text-[10px] text-primary hover:text-primary/80 font-medium transition-colors"
+          >
+            <Eye className="h-3 w-3" />
+            View
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
