@@ -21,6 +21,7 @@ import {
   FolderOpen,
   Search,
   AlertTriangle,
+  Copy,
   Menu,
 } from "lucide-react";
 
@@ -33,6 +34,7 @@ const navItems = [
   { title: "Deposit Batches", url: "/batches", icon: Layers },
   { title: "Browse Files", url: "/browse", icon: FolderOpen },
   { title: "Exceptions", url: "/exceptions", icon: AlertTriangle },
+  { title: "Duplicates", url: "/duplicates", icon: Copy },
 ];
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {

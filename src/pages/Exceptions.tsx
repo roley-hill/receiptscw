@@ -147,7 +147,7 @@ export default function Exceptions() {
                     </div>
                   </div>
                 </div>
-                <Link to="/review">
+                <Link to={`/review?receiptId=${r.id}`}>
                   <Button variant="outline" size="sm">Review & Fix</Button>
                 </Link>
               </div>

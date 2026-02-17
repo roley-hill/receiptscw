@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useSearchParams } from "react-router-dom";
 import { fetchReceipts, updateReceipt, getFilePreviewUrl } from "@/lib/api";
 import { motion } from "framer-motion";
 import { CheckCircle2, AlertTriangle, ChevronLeft, ChevronRight, Eye, Edit3, Save, FileText, Image as ImageIcon, Loader2, ZoomIn, ZoomOut, RotateCcw } from "lucide-react";
@@ -8,6 +9,8 @@ import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 
 export default function ReviewPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const targetReceiptId = searchParams.get("receiptId");
   const { data: allReceipts = [], isLoading } = useQuery({
     queryKey: ["receipts"],
     queryFn: fetchReceipts,
@@ -15,6 +18,19 @@ export default function ReviewPage() {
   const queryClient = useQueryClient();
   const reviewable = allReceipts.filter((r) => r.status === "needs_review" || r.status === "exception");
   const [currentIdx, setCurrentIdx] = useState(0);
+
+  // Navigate to specific receipt if receiptId is in URL
+  useEffect(() => {
+    if (targetReceiptId && reviewable.length > 0) {
+      const idx = reviewable.findIndex((r) => r.id === targetReceiptId);
+      if (idx >= 0) {
+        setCurrentIdx(idx);
+        // Clear the param so subsequent navigation works normally
+        setSearchParams({}, { replace: true });
+      }
+    }
+  }, [targetReceiptId, reviewable.length]);
+
   const receipt = reviewable[currentIdx];
   const [edits, setEdits] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
