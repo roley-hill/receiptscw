@@ -137,9 +137,18 @@ serve(async (req) => {
 CRITICAL RULES:
 - "property" must be a STREET ADDRESS (e.g. "9034 Orion Ave"), never an owner entity or LP name like "9010 Tobias Owner LP"
 - "tenant" must be an INDIVIDUAL PERSON's name (e.g. "Maria Rodriguez"), never an organization, agency, or LP name
+- "tenant" must NEVER include invoice codes, descriptions, rent periods, or unit numbers. Extract ONLY the person's name.
+  - BAD: "CIS-SS8-FEB'26-M.VALENCIA#363" (this is an invoice description, not a tenant name)
+  - GOOD: "M. Valencia" (just the person's name extracted from the description)
+- When parsing invoice descriptions like "CIS-SS8-FEB'26-M.VALENCIA#363", separate out:
+  - The tenant name (e.g. "M. Valencia")
+  - The unit number (e.g. "#363")
+  - The rent month (e.g. "2026-02" from "FEB'26")
+  - The memo/reference info (e.g. "CIS-SS8")
 - "payer" is the organization or person who sent the payment (may differ from tenant)
 - "amount" MUST be a single numeric dollar value for that line item's payment (e.g. 1250.00). Do NOT concatenate digits from unrelated columns. Do NOT include reference numbers, check numbers, or dates in the amount.
 - "memo" is ONLY for notes, comments, or remarks — NOT for amounts, dates, or reference numbers
+- "receipt_date" should be the PAY DATE or payment date, not the invoice date
 
 COLUMN MAPPING FOR SPREADSHEETS:
 - Look at the column HEADERS to determine what each column contains
@@ -148,6 +157,12 @@ COLUMN MAPPING FOR SPREADSHEETS:
 - The column labeled "Notes", "Memo", "Comments", "Remarks" → "memo"
 - Do NOT put dollar amounts into the memo field
 - Do NOT put partial amounts or concatenated values into any field
+
+EMAIL REMITTANCE RULES:
+- For payment notification emails, look for PAYEE information, invoice tables, and voucher details
+- The "Vou#" or "Voucher Number" is the "reference"
+- Parse invoice description fields carefully to separate tenant name, unit, and rent period
+- "ID#" fields are internal references, not receipt references
 
 MULTI-LINE ITEM RULES:
 - If this is a REMITTANCE DETAIL or ACH payment covering MULTIPLE tenants/units, extract EACH line item as a separate entry in the items array
@@ -216,52 +231,62 @@ You MUST call the extract_receipts function.`;
         const rawEml = decoder.decode(fileBytes);
 
         // --- Robust MIME HTML extraction ---
-        function extractHtmlFromEml(eml: string): string | null {
+        function extractMimePartByType(eml: string, mimeType: string): string | null {
           // 1. Try to find MIME boundary from Content-Type header
           const boundaryMatch = eml.match(/boundary="?([^\s";\r\n]+)"?/i);
+          console.log("EML boundary found:", boundaryMatch?.[1] || "NONE");
           
+          function decodePart(part: string): string | null {
+            const encodingMatch = part.match(/content-transfer-encoding:\s*(\S+)/i);
+            const encoding = encodingMatch?.[1]?.toLowerCase() || "7bit";
+            const blankLine = part.indexOf("\r\n\r\n");
+            const blankLine2 = part.indexOf("\n\n");
+            const bodyStart = blankLine > 0 ? blankLine + 4 : (blankLine2 > 0 ? blankLine2 + 2 : -1);
+            if (bodyStart < 0) return null;
+            let body = part.substring(bodyStart).trim();
+            // Remove trailing boundary markers
+            const nextBoundary = body.indexOf("\r\n--");
+            if (nextBoundary > 0) body = body.substring(0, nextBoundary).trim();
+            if (encoding === "base64") {
+              try { body = atob(body.replace(/\s/g, "")); } catch { return null; }
+            } else if (encoding === "quoted-printable") {
+              body = body.replace(/=\r?\n/g, "").replace(/=([0-9A-Fa-f]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+            }
+            return body.length > 20 ? body : null;
+          }
+
+          const typeRegex = new RegExp(`content-type:\\s*${mimeType.replace("/", "\\/")}`, "i");
+
           if (boundaryMatch) {
             const boundary = boundaryMatch[1];
             const parts = eml.split("--" + boundary);
+            console.log(`EML split into ${parts.length} parts for type ${mimeType}`);
             for (const part of parts) {
-              if (!/content-type:\s*text\/html/i.test(part)) continue;
-              const encodingMatch = part.match(/content-transfer-encoding:\s*(\S+)/i);
-              const encoding = encodingMatch?.[1]?.toLowerCase() || "7bit";
-              const blankLine = part.indexOf("\r\n\r\n");
-              const blankLine2 = part.indexOf("\n\n");
-              const bodyStart = blankLine > 0 ? blankLine + 4 : (blankLine2 > 0 ? blankLine2 + 2 : -1);
-              if (bodyStart < 0) continue;
-              let body = part.substring(bodyStart).trim();
-              // Remove trailing boundary markers
-              body = body.replace(/--[\s\S]*$/, "").trim();
-              if (encoding === "base64") {
-                try { body = atob(body.replace(/\s/g, "")); } catch { continue; }
-              } else if (encoding === "quoted-printable") {
-                body = body
-                  .replace(/=\r?\n/g, "")
-                  .replace(/=([0-9A-Fa-f]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
-              }
-              if (body.length > 50) return body;
+              if (!typeRegex.test(part)) continue;
+              const decoded = decodePart(part);
+              if (decoded) return decoded;
             }
-            // Try nested boundaries (multipart within multipart)
+            // Try nested boundaries
             for (const part of parts) {
               const nestedBoundary = part.match(/boundary="?([^\s";\r\n]+)"?/i);
               if (!nestedBoundary) continue;
+              console.log("Trying nested boundary:", nestedBoundary[1]);
               const nestedParts = part.split("--" + nestedBoundary[1]);
               for (const np of nestedParts) {
-                if (!/content-type:\s*text\/html/i.test(np)) continue;
-                const enc = np.match(/content-transfer-encoding:\s*(\S+)/i)?.[1]?.toLowerCase() || "7bit";
-                const bl = np.indexOf("\r\n\r\n");
-                const bl2 = np.indexOf("\n\n");
-                const bs = bl > 0 ? bl + 4 : (bl2 > 0 ? bl2 + 2 : -1);
-                if (bs < 0) continue;
-                let body = np.substring(bs).trim().replace(/--[\s\S]*$/, "").trim();
-                if (enc === "base64") {
-                  try { body = atob(body.replace(/\s/g, "")); } catch { continue; }
-                } else if (enc === "quoted-printable") {
-                  body = body.replace(/=\r?\n/g, "").replace(/=([0-9A-Fa-f]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+                if (!typeRegex.test(np)) continue;
+                const decoded = decodePart(np);
+                if (decoded) return decoded;
+              }
+              // Try 3rd level nesting
+              for (const np of nestedParts) {
+                const nb3 = np.match(/boundary="?([^\s";\r\n]+)"?/i);
+                if (!nb3) continue;
+                const parts3 = np.split("--" + nb3[1]);
+                for (const p3 of parts3) {
+                  if (!typeRegex.test(p3)) continue;
+                  const decoded = decodePart(p3);
+                  if (decoded) return decoded;
                 }
-                if (body.length > 50) return body;
               }
             }
           }
@@ -269,40 +294,39 @@ You MUST call the extract_receipts function.`;
           // 2. Fallback: split by any boundary-like pattern
           const parts2 = eml.split(/--[\w\-\.=\/+]+/);
           for (const part of parts2) {
-            if (!/content-type:\s*text\/html/i.test(part)) continue;
-            const encodingMatch = part.match(/content-transfer-encoding:\s*(\S+)/i);
-            const encoding = encodingMatch?.[1]?.toLowerCase() || "7bit";
-            const blankLine = part.indexOf("\r\n\r\n");
-            const blankLine2 = part.indexOf("\n\n");
-            const bodyStart = blankLine > 0 ? blankLine + 4 : (blankLine2 > 0 ? blankLine2 + 2 : -1);
-            if (bodyStart < 0) continue;
-            let body = part.substring(bodyStart).trim();
-            if (encoding === "base64") {
-              try { body = atob(body.replace(/\s/g, "")); } catch { continue; }
-            } else if (encoding === "quoted-printable") {
-              body = body.replace(/=\r?\n/g, "").replace(/=([0-9A-Fa-f]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
-            }
-            if (body.length > 50) return body;
+            if (!typeRegex.test(part)) continue;
+            const decoded = decodePart(part);
+            if (decoded) return decoded;
           }
 
-          // 3. Last resort: extract <html>...</html> directly
-          const htmlMatch = eml.match(/<html[\s\S]*<\/html>/i);
-          if (htmlMatch) return htmlMatch[0];
+          // 3. Last resort for HTML: extract <html>...</html> directly
+          if (mimeType === "text/html") {
+            const htmlMatch = eml.match(/<html[\s\S]*<\/html>/i);
+            if (htmlMatch) return htmlMatch[0];
+          }
           return null;
         }
 
-        const htmlBody = extractHtmlFromEml(rawEml);
+        // Try HTML first, then plain text
+        const htmlBody = extractMimePartByType(rawEml, "text/html");
+        const plainBody = !htmlBody ? extractMimePartByType(rawEml, "text/plain") : null;
+        console.log("EML extraction result - HTML:", !!htmlBody, "Plain:", !!plainBody);
 
         // For AI: send the raw EML (headers help with extraction context)
         textContent = rawEml;
         if (textContent.length > 30000) textContent = textContent.substring(0, 30000);
 
-        // Store extracted HTML for preview, or fallback to body text without routing headers
+        // Store for preview: prefer HTML, then wrap plain text in basic HTML
         if (htmlBody) {
           extractedText = htmlBody.substring(0, 80000);
+        } else if (plainBody) {
+          extractedText = `<html><body><pre style="font-family:Arial,sans-serif;white-space:pre-wrap;padding:20px;">${plainBody.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</pre></body></html>`;
         } else {
-          const headerEnd = rawEml.indexOf("\n\n");
-          extractedText = headerEnd > 0 ? rawEml.substring(headerEnd + 2, headerEnd + 50002) : rawEml.substring(0, 50000);
+          // Last fallback: skip all headers, show body text
+          // Find the end of the top-level headers
+          const headerEnd = rawEml.search(/\r?\n\r?\n/);
+          const bodyText = headerEnd > 0 ? rawEml.substring(headerEnd + 2) : rawEml;
+          extractedText = `<html><body><pre style="font-family:Arial,sans-serif;white-space:pre-wrap;padding:20px;">${bodyText.substring(0, 50000).replace(/</g, "&lt;").replace(/>/g, "&gt;")}</pre></body></html>`;
         }
       } else {
         // Parse XLSX properly into CSV text so the AI can read actual cell values
