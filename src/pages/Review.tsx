@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchReceipts, updateReceipt, getFilePreviewUrl } from "@/lib/api";
 import { motion } from "framer-motion";
 import { CheckCircle2, AlertTriangle, ChevronLeft, ChevronRight, Eye, Edit3, Save, FileText, Image as ImageIcon, Loader2 } from "lucide-react";
+import PdfViewer from "@/components/PdfViewer";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 
@@ -188,12 +189,8 @@ function FilePreview({ filePath, fileName, originalText }: { filePath: string | 
   // PDF: open in new tab (iframes are blocked in sandboxed preview)
   if (isPdf && previewUrl && !error) {
     return (
-      <div className="rounded-lg bg-muted/50 border border-border p-6 min-h-[400px] flex flex-col items-center justify-center gap-4">
-        <FileText className="h-12 w-12 text-muted-foreground" />
-        <p className="text-sm font-medium text-foreground">{fileName}</p>
-        <Button variant="outline" size="sm" onClick={() => window.open(previewUrl, "_blank")}>
-          <Eye className="h-4 w-4 mr-2" /> Open PDF in New Tab
-        </Button>
+      <div className="rounded-lg bg-muted/50 border border-border p-4 min-h-[400px]">
+        <PdfViewer url={previewUrl} />
         {originalText && (
           <div className="w-full mt-4 border-t border-border pt-4">
             <p className="text-xs font-medium text-muted-foreground mb-2">Extracted Text</p>
