@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchReceipts, updateReceipt, getFilePreviewUrl } from "@/lib/api";
 import { motion } from "framer-motion";
@@ -302,18 +302,36 @@ function SpreadsheetPreview({ csv }: { csv: string }) {
 }
 
 function EmailPreview({ raw }: { raw: string }) {
-  // Parse basic email headers and body
-  const headerEnd = raw.indexOf("\n\n");
-  let headers = "";
-  let body = raw;
-  if (headerEnd > 0 && headerEnd < 2000) {
-    headers = raw.substring(0, headerEnd);
-    body = raw.substring(headerEnd + 2);
-  }
+  const iframeRef = useRef<HTMLIFrameElement>(null);
 
-  // Extract common headers
+  // Extract HTML body from MIME multipart EML
+  const extractHtmlBody = (emlText: string): string => {
+    // Find HTML part in multipart MIME
+    const htmlMatch = emlText.match(/Content-Type:\s*text\/html[^\n]*\n(?:Content-Transfer-Encoding:\s*[^\n]*\n)?(?:[^\n]*\n)*?\n([\s\S]*?)(?=\n--[^\n]+(?:--)?$|\n--[^\n]+\n|$)/mi);
+    if (htmlMatch) {
+      let html = htmlMatch[1].trim();
+      // Handle quoted-printable decoding
+      if (/Content-Transfer-Encoding:\s*quoted-printable/i.test(emlText)) {
+        html = html.replace(/=\r?\n/g, "").replace(/=([0-9A-Fa-f]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+      }
+      // Handle base64 decoding
+      if (/Content-Transfer-Encoding:\s*base64/i.test(emlText.substring(0, emlText.indexOf(html)))) {
+        try { html = atob(html.replace(/\s/g, "")); } catch { /* keep as is */ }
+      }
+      return html;
+    }
+    // Fallback: try to find raw HTML tags
+    const rawHtml = emlText.match(/<html[\s\S]*<\/html>/i);
+    if (rawHtml) return rawHtml[0];
+    // Last fallback: show plain text body
+    const headerEnd = emlText.indexOf("\n\n");
+    const body = headerEnd > 0 ? emlText.substring(headerEnd + 2) : emlText;
+    return `<html><body style="font-family:sans-serif;padding:16px;font-size:14px;white-space:pre-wrap">${body.substring(0, 10000).replace(/</g, "&lt;").replace(/>/g, "&gt;")}</body></html>`;
+  };
+
+  // Extract headers for the info bar
   const getHeader = (name: string) => {
-    const match = headers.match(new RegExp(`^${name}:\\s*(.+)$`, "mi"));
+    const match = raw.match(new RegExp(`^${name}:\\s*(.+?)$`, "mi"));
     return match?.[1]?.trim() || null;
   };
   const from = getHeader("From");
@@ -321,8 +339,19 @@ function EmailPreview({ raw }: { raw: string }) {
   const subject = getHeader("Subject");
   const date = getHeader("Date");
 
+  useEffect(() => {
+    if (!iframeRef.current) return;
+    const htmlContent = extractHtmlBody(raw);
+    const doc = iframeRef.current.contentDocument;
+    if (doc) {
+      doc.open();
+      doc.write(htmlContent);
+      doc.close();
+    }
+  }, [raw]);
+
   return (
-    <div className="space-y-3 max-h-[500px] overflow-auto">
+    <div className="space-y-3">
       {(from || to || subject || date) && (
         <div className="space-y-1 pb-3 border-b border-border">
           {subject && <p className="text-sm font-semibold text-foreground">{subject}</p>}
@@ -331,7 +360,13 @@ function EmailPreview({ raw }: { raw: string }) {
           {date && <p className="text-xs text-muted-foreground"><span className="font-medium">Date:</span> {date}</p>}
         </div>
       )}
-      <pre className="text-xs text-muted-foreground whitespace-pre-wrap font-mono">{body.substring(0, 10000)}</pre>
+      <iframe
+        ref={iframeRef}
+        title="Email preview"
+        sandbox="allow-same-origin"
+        className="w-full min-h-[400px] max-h-[600px] rounded-md border border-border bg-white"
+        style={{ height: "500px" }}
+      />
     </div>
   );
 }
