@@ -71,7 +71,6 @@ export async function getFilePreviewUrl(filePath: string): Promise<string> {
 }
 
 export async function createDepositBatch(property: string, receiptIds: string[], depositPeriod: string, userId: string) {
-  // Get receipt amounts
   const { data: receipts } = await supabase
     .from("receipts")
     .select("id, amount")
@@ -93,10 +92,25 @@ export async function createDepositBatch(property: string, receiptIds: string[],
 
   if (error) throw error;
 
-  // Link receipts to batch
   for (const rid of receiptIds) {
     await supabase.from("receipts").update({ batch_id: batch.id }).eq("id", rid);
   }
 
   return batch;
+}
+
+export async function markAppfolioRecorded(receiptId: string, recorded: boolean, userId: string) {
+  const updates: Record<string, any> = {
+    appfolio_recorded: recorded,
+    appfolio_recorded_at: recorded ? new Date().toISOString() : null,
+    appfolio_recorded_by: recorded ? userId : null,
+  };
+  const { data, error } = await supabase
+    .from("receipts")
+    .update(updates)
+    .eq("id", receiptId)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
 }
