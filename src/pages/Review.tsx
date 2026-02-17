@@ -201,15 +201,52 @@ function FilePreview({ filePath, fileName, originalText }: { filePath: string | 
     );
   }
 
-  // XLSX / EML / other non-previewable: show download link + extracted text
+  // XLSX: render as table from extracted CSV text
+  if (isXlsx && originalText) {
+    return (
+      <div className="rounded-lg bg-muted/50 border border-border p-4 min-h-[400px]">
+        <div className="flex items-center gap-2 mb-3">
+          <FileText className="h-5 w-5 text-muted-foreground" />
+          <p className="text-sm font-medium text-foreground">{fileName}</p>
+        </div>
+        <SpreadsheetPreview csv={originalText} />
+        {previewUrl && !error && (
+          <div className="mt-3 text-right">
+            <Button variant="ghost" size="sm" onClick={() => window.open(previewUrl, "_blank")}>
+              <Eye className="h-3 w-3 mr-1" /> Download Original
+            </Button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // EML: render formatted email preview
+  if (isEml && originalText) {
+    return (
+      <div className="rounded-lg bg-muted/50 border border-border p-4 min-h-[400px]">
+        <div className="flex items-center gap-2 mb-3">
+          <FileText className="h-5 w-5 text-muted-foreground" />
+          <p className="text-sm font-medium text-foreground">{fileName}</p>
+        </div>
+        <EmailPreview raw={originalText} />
+        {previewUrl && !error && (
+          <div className="mt-3 text-right">
+            <Button variant="ghost" size="sm" onClick={() => window.open(previewUrl, "_blank")}>
+              <Eye className="h-3 w-3 mr-1" /> Download Original
+            </Button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Fallback for other file types
   return (
     <div className="rounded-lg bg-muted/50 border border-border p-4 min-h-[400px]">
       <div className="flex flex-col items-center justify-center gap-3 py-4">
         <FileText className="h-10 w-10 text-muted-foreground" />
         <p className="text-sm font-medium text-foreground">{fileName || "Unknown file"}</p>
-        <span className="text-xs text-muted-foreground">
-          {isXlsx ? "Spreadsheet" : isEml ? "Email" : "Document"} — inline preview not available
-        </span>
         {previewUrl && !error && (
           <Button variant="outline" size="sm" onClick={() => window.open(previewUrl, "_blank")}>
             <Eye className="h-4 w-4 mr-2" /> Download Source File
@@ -222,6 +259,79 @@ function FilePreview({ filePath, fileName, originalText }: { filePath: string | 
           <pre className="text-xs text-muted-foreground whitespace-pre-wrap font-mono max-h-[300px] overflow-auto">{originalText}</pre>
         </div>
       )}
+    </div>
+  );
+}
+
+function SpreadsheetPreview({ csv }: { csv: string }) {
+  // Parse CSV text (may have sheet headers like "=== Sheet: Name ===")
+  const lines = csv.split("\n").filter((l) => l.trim());
+  const rows: string[][] = [];
+  for (const line of lines) {
+    if (line.startsWith("=== Sheet:")) continue; // skip sheet headers
+    // Simple CSV split (handles most cases)
+    rows.push(line.split(",").map((c) => c.trim()));
+  }
+  if (rows.length === 0) {
+    return <pre className="text-xs text-muted-foreground whitespace-pre-wrap font-mono max-h-[500px] overflow-auto">{csv}</pre>;
+  }
+  const headerRow = rows[0];
+  const dataRows = rows.slice(1);
+  return (
+    <div className="overflow-auto max-h-[500px] rounded-md border border-border">
+      <table className="w-full text-xs">
+        <thead className="bg-muted sticky top-0">
+          <tr>
+            {headerRow.map((h, i) => (
+              <th key={i} className="px-3 py-2 text-left font-semibold text-foreground border-b border-border whitespace-nowrap">{h || `Col ${i + 1}`}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {dataRows.map((row, ri) => (
+            <tr key={ri} className={ri % 2 === 0 ? "bg-background" : "bg-muted/30"}>
+              {headerRow.map((_, ci) => (
+                <td key={ci} className="px-3 py-1.5 text-muted-foreground border-b border-border/50 whitespace-nowrap">{row[ci] || ""}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function EmailPreview({ raw }: { raw: string }) {
+  // Parse basic email headers and body
+  const headerEnd = raw.indexOf("\n\n");
+  let headers = "";
+  let body = raw;
+  if (headerEnd > 0 && headerEnd < 2000) {
+    headers = raw.substring(0, headerEnd);
+    body = raw.substring(headerEnd + 2);
+  }
+
+  // Extract common headers
+  const getHeader = (name: string) => {
+    const match = headers.match(new RegExp(`^${name}:\\s*(.+)$`, "mi"));
+    return match?.[1]?.trim() || null;
+  };
+  const from = getHeader("From");
+  const to = getHeader("To");
+  const subject = getHeader("Subject");
+  const date = getHeader("Date");
+
+  return (
+    <div className="space-y-3 max-h-[500px] overflow-auto">
+      {(from || to || subject || date) && (
+        <div className="space-y-1 pb-3 border-b border-border">
+          {subject && <p className="text-sm font-semibold text-foreground">{subject}</p>}
+          {from && <p className="text-xs text-muted-foreground"><span className="font-medium">From:</span> {from}</p>}
+          {to && <p className="text-xs text-muted-foreground"><span className="font-medium">To:</span> {to}</p>}
+          {date && <p className="text-xs text-muted-foreground"><span className="font-medium">Date:</span> {date}</p>}
+        </div>
+      )}
+      <pre className="text-xs text-muted-foreground whitespace-pre-wrap font-mono">{body.substring(0, 10000)}</pre>
     </div>
   );
 }
