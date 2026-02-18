@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchReceipts } from "@/lib/api";
 import { supabase } from "@/integrations/supabase/client";
-import { AlertTriangle, CheckCircle2, Trash2, FileText, ChevronDown } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Trash2, FileText, ChevronDown, CheckCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -29,6 +29,7 @@ export default function Exceptions() {
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
+  const [finalizing, setFinalizing] = useState(false);
   const [fileFilter, setFileFilter] = useState<string>("all");
 
   // Group by file_name for the filter dropdown
@@ -108,6 +109,30 @@ export default function Exceptions() {
     setDeleting(false);
   };
 
+  const handleFinalizeByFile = async (fileName: string) => {
+    setFinalizing(true);
+    try {
+      const idsToFinalize = exceptions
+        .filter((r) => (r.file_name || "No file") === fileName)
+        .map((r) => r.id);
+      for (let i = 0; i < idsToFinalize.length; i += 100) {
+        const chunk = idsToFinalize.slice(i, i + 100);
+        const { error } = await supabase
+          .from("receipts")
+          .update({ status: "finalized" as any, finalized_at: new Date().toISOString() })
+          .in("id", chunk);
+        if (error) throw error;
+      }
+      toast.success(`Finalized ${idsToFinalize.length} receipt(s) from "${fileName}"`);
+      setSelected(new Set());
+      if (fileFilter === fileName) setFileFilter("all");
+      queryClient.invalidateQueries({ queryKey: ["receipts"] });
+    } catch (err: any) {
+      toast.error(err.message || "Finalize failed");
+    }
+    setFinalizing(false);
+  };
+
   if (isLoading) {
     return <div className="flex items-center justify-center py-20"><div className="h-8 w-8 border-2 border-accent border-t-transparent rounded-full animate-spin" /></div>;
   }
@@ -184,28 +209,52 @@ export default function Exceptions() {
           </Select>
         </div>
         {isAdmin && fileFilter !== "all" && (
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
-              <Button variant="destructive" size="sm" disabled={deleting}>
-                <Trash2 className="h-4 w-4 mr-1" />
-                Delete all from this file ({filteredExceptions.length})
-              </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Delete all {filteredExceptions.length} receipt(s) from this file?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  This will permanently remove all receipts extracted from "{fileFilter.replace(/^Receipts\//, "")}". You can then re-upload the file for clean extraction.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={() => handleDeleteByFile(fileFilter)} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-                  Delete All
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
+          <>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="outline" size="sm" disabled={finalizing}>
+                  <CheckCheck className="h-4 w-4 mr-1" />
+                  Finalize all from this file ({filteredExceptions.length})
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Finalize all {filteredExceptions.length} receipt(s) from this file?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This will mark all exception receipts from "{fileFilter.replace(/^Receipts\//, "")}" as finalized, even with missing or low-confidence fields.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={() => handleFinalizeByFile(fileFilter)}>
+                    Finalize All
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="destructive" size="sm" disabled={deleting}>
+                  <Trash2 className="h-4 w-4 mr-1" />
+                  Delete all from this file ({filteredExceptions.length})
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete all {filteredExceptions.length} receipt(s) from this file?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This will permanently remove all receipts extracted from "{fileFilter.replace(/^Receipts\//, "")}". You can then re-upload the file for clean extraction.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={() => handleDeleteByFile(fileFilter)} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                    Delete All
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </>
         )}
       </div>
 
