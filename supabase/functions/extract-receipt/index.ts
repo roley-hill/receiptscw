@@ -108,6 +108,9 @@ serve(async (req) => {
       duplicateContentCount = count ?? 0;
     }
 
+    // Build storage path
+    const filePath = `uploads/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+
     // Helper: encode Uint8Array to base64 without stack overflow
     function uint8ToBase64(bytes: Uint8Array): string {
       let binary = "";
