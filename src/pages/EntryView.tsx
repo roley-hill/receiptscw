@@ -2,7 +2,7 @@ import { useState, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchReceipts, markAppfolioRecorded, getFilePreviewUrl, createDepositBatch } from "@/lib/api";
 import { motion } from "framer-motion";
-import { Copy, Check, FileText, Layers, Loader2, ChevronRight, ChevronDown, Building2, Search, User } from "lucide-react";
+import { Copy, Check, FileText, Layers, Loader2, ChevronRight, ChevronDown, Building2, Search, User, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { DbReceipt } from "@/lib/api";
@@ -53,6 +53,7 @@ export default function EntryView() {
   const [previewReceipt, setPreviewReceipt] = useState<DbReceipt | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [expandedTableTenants, setExpandedTableTenants] = useState<Set<string>>(new Set());
 
   const filteredProperties = [...new Set(finalized.map((r) => r.property).filter(Boolean))];
 
@@ -290,46 +291,144 @@ export default function EntryView() {
                         </tr>
                       </thead>
                       <tbody>
-                        {receipts.sort((a, b) => (a.unit || "").localeCompare(b.unit || "")).map((r) => (
-                          <tr key={r.id} className="vault-table-row">
-                            <td className="px-3 py-2.5">
-                              <Checkbox checked={(r as any).appfolio_recorded || false} onCheckedChange={(checked) => toggleMutation.mutate({ id: r.id, recorded: !!checked })} disabled={toggleMutation.isPending} />
-                            </td>
-                            <td className="px-3 py-2.5"><CopyCell value={r.unit} mono id={`unit-${r.id}`} /></td>
-                            <td className="px-3 py-2.5">
-                              <div className="flex items-center gap-1.5">
-                                <CopyCell value={r.tenant} id={`tenant-${r.id}`} />
-                                {Number(r.amount) < 0 && <span className="vault-badge-deduction">Deduction</span>}
-                              </div>
-                            </td>
-                            <td className={`px-3 py-2.5 text-right ${Number(r.amount) < 0 ? "text-[hsl(var(--vault-red))]" : ""}`}><CopyCell value={`$${Number(r.amount).toFixed(2)}`} mono id={`amt-${r.id}`} /></td>
-                            <td className="px-3 py-2.5"><CopyCell value={r.receipt_date || "—"} mono id={`date-${r.id}`} /></td>
-                            <td className="px-3 py-2.5"><CopyCell value={r.rent_month || "—"} mono id={`month-${r.id}`} /></td>
-                            <td className="px-3 py-2.5"><CopyCell value={r.payment_type || "—"} id={`ptype-${r.id}`} /></td>
-                            <td className="px-3 py-2.5"><CopyCell value={r.reference || "—"} mono id={`ref-${r.id}`} /></td>
-                            <td className="px-3 py-2.5"><CopyCell value={r.memo || "—"} id={`memo-${r.id}`} /></td>
-                            <td className="px-3 py-2.5 text-xs vault-mono text-vault-blue">{r.receipt_id}</td>
-                            <td className="px-3 py-2.5">{r.transfer_status === "transferred" ? <span className="vault-badge-success">Transferred</span> : <span className="vault-badge-neutral">Pending</span>}</td>
-                            <td className="px-3 py-2.5">
-                              <div className="flex items-center justify-center gap-1">
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => copyRowAll(r)}><Copy className="h-3.5 w-3.5 text-muted-foreground" /></Button>
-                                  </TooltipTrigger>
-                                  <TooltipContent>Copy all fields</TooltipContent>
-                                </Tooltip>
-                                {r.file_path && (
-                                  <Tooltip>
-                                    <TooltipTrigger asChild>
-                                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => handleViewAttachment(r)}><FileText className="h-3.5 w-3.5 text-vault-blue" /></Button>
-                                    </TooltipTrigger>
-                                    <TooltipContent>View document</TooltipContent>
-                                  </Tooltip>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
+                        {(() => {
+                          // Group receipts by tenant
+                          const tenantGroups: Record<string, DbReceipt[]> = {};
+                          for (const r of receipts) {
+                            const key = r.tenant || "(No Tenant)";
+                            if (!tenantGroups[key]) tenantGroups[key] = [];
+                            tenantGroups[key].push(r);
+                          }
+                          // Sort tenants, then sort receipts within each group
+                          const sortedTenants = Object.keys(tenantGroups).sort();
+
+                          return sortedTenants.flatMap((tenant): React.ReactElement[] => {
+                            const group = tenantGroups[tenant].sort((a, b) => (a.unit || "").localeCompare(b.unit || ""));
+                            const tenantKey = `${property}::${tenant}`;
+                            const isMulti = group.length > 1;
+                            const isOpen = expandedTableTenants.has(tenantKey);
+
+                            // Detect same-month duplicates within this tenant
+                            const monthCounts: Record<string, number> = {};
+                            for (const r of group) {
+                              const m = r.rent_month || "none";
+                              monthCounts[m] = (monthCounts[m] || 0) + 1;
+                            }
+                            const hasSameMonthDups = Object.values(monthCounts).some((c) => c > 1);
+
+                            if (!isMulti) {
+                              // Single receipt for this tenant — render directly
+                              const r = group[0];
+                              return [(
+                                <tr key={r.id} className="vault-table-row">
+                                  <td className="px-3 py-2.5">
+                                    <Checkbox checked={(r as any).appfolio_recorded || false} onCheckedChange={(checked) => toggleMutation.mutate({ id: r.id, recorded: !!checked })} disabled={toggleMutation.isPending} />
+                                  </td>
+                                  <td className="px-3 py-2.5"><CopyCell value={r.unit} mono id={`unit-${r.id}`} /></td>
+                                  <td className="px-3 py-2.5">
+                                    <div className="flex items-center gap-1.5">
+                                      <CopyCell value={r.tenant} id={`tenant-${r.id}`} />
+                                      {Number(r.amount) < 0 && <span className="vault-badge-deduction">Deduction</span>}
+                                    </div>
+                                  </td>
+                                  <td className={`px-3 py-2.5 text-right ${Number(r.amount) < 0 ? "text-[hsl(var(--vault-red))]" : ""}`}><CopyCell value={`$${Number(r.amount).toFixed(2)}`} mono id={`amt-${r.id}`} /></td>
+                                  <td className="px-3 py-2.5"><CopyCell value={r.receipt_date || "—"} mono id={`date-${r.id}`} /></td>
+                                  <td className="px-3 py-2.5"><CopyCell value={r.rent_month || "—"} mono id={`month-${r.id}`} /></td>
+                                  <td className="px-3 py-2.5"><CopyCell value={r.payment_type || "—"} id={`ptype-${r.id}`} /></td>
+                                  <td className="px-3 py-2.5"><CopyCell value={r.reference || "—"} mono id={`ref-${r.id}`} /></td>
+                                  <td className="px-3 py-2.5"><CopyCell value={r.memo || "—"} id={`memo-${r.id}`} /></td>
+                                  <td className="px-3 py-2.5 text-xs vault-mono text-vault-blue">{r.receipt_id}</td>
+                                  <td className="px-3 py-2.5">{r.transfer_status === "transferred" ? <span className="vault-badge-success">Transferred</span> : <span className="vault-badge-neutral">Pending</span>}</td>
+                                  <td className="px-3 py-2.5">
+                                    <div className="flex items-center justify-center gap-1">
+                                      <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => copyRowAll(r)}><Copy className="h-3.5 w-3.5 text-muted-foreground" /></Button></TooltipTrigger><TooltipContent>Copy all fields</TooltipContent></Tooltip>
+                                      {r.file_path && (<Tooltip><TooltipTrigger asChild><Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => handleViewAttachment(r)}><FileText className="h-3.5 w-3.5 text-vault-blue" /></Button></TooltipTrigger><TooltipContent>View document</TooltipContent></Tooltip>)}
+                                    </div>
+                                  </td>
+                                </tr>
+                              )];
+                            }
+
+                            // Multi-receipt tenant — collapsible group
+                            const tenantTotal = group.reduce((s, r) => s + Number(r.amount), 0);
+                            const rows: React.ReactElement[] = [];
+
+                            // Tenant header row
+                            rows.push(
+                              <tr
+                                key={`tenant-header-${tenantKey}`}
+                                className="cursor-pointer hover:bg-muted/50 transition-colors border-b border-border"
+                                onClick={() => setExpandedTableTenants(prev => {
+                                  const next = new Set(prev);
+                                  if (next.has(tenantKey)) next.delete(tenantKey);
+                                  else next.add(tenantKey);
+                                  return next;
+                                })}
+                              >
+                                <td className="px-3 py-2.5" colSpan={2}>
+                                  <div className="flex items-center gap-1.5">
+                                    {isOpen ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />}
+                                  </div>
+                                </td>
+                                <td className="px-3 py-2.5">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-sm font-semibold text-foreground">{tenant}</span>
+                                    <span className="text-xs vault-mono text-muted-foreground bg-muted rounded-full px-2 py-0.5">{group.length} receipts</span>
+                                    {hasSameMonthDups && (
+                                      <Tooltip>
+                                        <TooltipTrigger asChild>
+                                          <span className="flex items-center gap-1 text-xs font-semibold text-[hsl(var(--vault-amber))] bg-[hsl(var(--vault-amber)/0.1)] rounded-full px-2 py-0.5">
+                                            <AlertTriangle className="h-3 w-3" /> Dup risk
+                                          </span>
+                                        </TooltipTrigger>
+                                        <TooltipContent>Multiple receipts for the same rent month — verify these are not duplicates</TooltipContent>
+                                      </Tooltip>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="px-3 py-2.5 text-right text-sm vault-mono font-semibold text-foreground">${tenantTotal.toLocaleString("en-US", { minimumFractionDigits: 2 })}</td>
+                                <td colSpan={8}></td>
+                              </tr>
+                            );
+
+                            // Child receipt rows (shown when expanded)
+                            if (isOpen) {
+                              for (const r of group) {
+                                const isDupMonth = monthCounts[r.rent_month || "none"] > 1;
+                                rows.push(
+                                  <tr key={r.id} className={`vault-table-row ${isDupMonth ? "bg-[hsl(var(--vault-amber)/0.05)]" : ""}`}>
+                                    <td className="px-3 py-2.5">
+                                      <Checkbox checked={(r as any).appfolio_recorded || false} onCheckedChange={(checked) => toggleMutation.mutate({ id: r.id, recorded: !!checked })} disabled={toggleMutation.isPending} />
+                                    </td>
+                                    <td className="px-3 py-2.5"><CopyCell value={r.unit} mono id={`unit-${r.id}`} /></td>
+                                    <td className="px-3 py-2.5">
+                                      <div className="flex items-center gap-1.5 pl-4">
+                                        <CopyCell value={r.tenant} id={`tenant-${r.id}`} />
+                                        {Number(r.amount) < 0 && <span className="vault-badge-deduction">Deduction</span>}
+                                        {isDupMonth && <AlertTriangle className="h-3 w-3 text-[hsl(var(--vault-amber))] shrink-0" />}
+                                      </div>
+                                    </td>
+                                    <td className={`px-3 py-2.5 text-right ${Number(r.amount) < 0 ? "text-[hsl(var(--vault-red))]" : ""}`}><CopyCell value={`$${Number(r.amount).toFixed(2)}`} mono id={`amt-${r.id}`} /></td>
+                                    <td className="px-3 py-2.5"><CopyCell value={r.receipt_date || "—"} mono id={`date-${r.id}`} /></td>
+                                    <td className={`px-3 py-2.5 ${isDupMonth ? "font-semibold" : ""}`}><CopyCell value={r.rent_month || "—"} mono id={`month-${r.id}`} /></td>
+                                    <td className="px-3 py-2.5"><CopyCell value={r.payment_type || "—"} id={`ptype-${r.id}`} /></td>
+                                    <td className="px-3 py-2.5"><CopyCell value={r.reference || "—"} mono id={`ref-${r.id}`} /></td>
+                                    <td className="px-3 py-2.5"><CopyCell value={r.memo || "—"} id={`memo-${r.id}`} /></td>
+                                    <td className="px-3 py-2.5 text-xs vault-mono text-vault-blue">{r.receipt_id}</td>
+                                    <td className="px-3 py-2.5">{r.transfer_status === "transferred" ? <span className="vault-badge-success">Transferred</span> : <span className="vault-badge-neutral">Pending</span>}</td>
+                                    <td className="px-3 py-2.5">
+                                      <div className="flex items-center justify-center gap-1">
+                                        <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => copyRowAll(r)}><Copy className="h-3.5 w-3.5 text-muted-foreground" /></Button></TooltipTrigger><TooltipContent>Copy all fields</TooltipContent></Tooltip>
+                                        {r.file_path && (<Tooltip><TooltipTrigger asChild><Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => handleViewAttachment(r)}><FileText className="h-3.5 w-3.5 text-vault-blue" /></Button></TooltipTrigger><TooltipContent>View document</TooltipContent></Tooltip>)}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              }
+                            }
+                            return rows;
+                          });
+                        })()}
                       </tbody>
                     </table>
                   </div>
