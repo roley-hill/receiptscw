@@ -813,14 +813,24 @@ ${knownTenantsList}` : ""}`;
           item.tenant = match.full_name;
           item.tenant_confidence = Math.max(item.tenant_confidence || 0, 0.95);
           item.tenant_status = match.status; // Store AppFolio status for UI display
+          item.tenant_verified = true; // Verified against tenant directory
           if (match.property_address) {
             item.property = match.property_address;
             item.property_confidence = Math.max(item.property_confidence || 0, 0.95);
+            item.property_verified = true;
           }
           if (match.unit_number) {
             item.unit = match.unit_number;
             item.unit_confidence = Math.max(item.unit_confidence || 0, 0.95);
           }
+        } else {
+          // No match in tenant directory — use receipt data but flag as unverified
+          console.log(`Tenant NOT matched in directory: "${item.tenant || "(no name)"}" — using receipt data, flagging as unverified`);
+          item.tenant_verified = false;
+          item.property_verified = false;
+          // Cap confidence for unverified tenant/property data from receipts
+          if ((item.tenant_confidence || 0) > 0.70) item.tenant_confidence = 0.70;
+          if ((item.property_confidence || 0) > 0.70) item.property_confidence = 0.70;
         }
       }
     }
@@ -897,6 +907,13 @@ ${knownTenantsList}` : ""}`;
             item.amount_confidence = Math.max(item.amount_confidence || 0, 0.80);
             console.log(`Amount partial match rent roll: $${itemAmount} vs expected charges for "${item.tenant}" (types: ${chargeTypes.join(", ")})`);
           }
+          item.amount_verified = true; // Had rent roll data to compare against
+        } else {
+          // No matching charges in rent roll — use receipt amount but flag as unverified
+          console.log(`Amount NOT matched in rent roll for "${item.tenant}" ($${itemAmount}) — using receipt data, flagging as unverified`);
+          item.amount_verified = false;
+          // Cap confidence for unverified amounts
+          if ((item.amount_confidence || 0) > 0.70) item.amount_confidence = 0.70;
         }
       }
     }
@@ -1067,6 +1084,9 @@ ${knownTenantsList}` : ""}`;
             paymentType: item.payment_type_confidence || 0,
             tenantStatus: item.tenant_status || null,
             chargeType: item.charge_type || null,
+            tenantVerified: item.tenant_verified ?? null,
+            propertyVerified: item.property_verified ?? null,
+            amountVerified: item.amount_verified ?? null,
           },
           status,
           file_path: extractedText.startsWith("PDF_ATTACHMENT:") ? extractedText.replace("PDF_ATTACHMENT:", "") : filePath,
