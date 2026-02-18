@@ -15,6 +15,7 @@ import {
 import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
+import { useAuth } from "@/hooks/useAuth";
 
 export default function Exceptions() {
   const { data: allReceipts = [], isLoading } = useQuery({
@@ -22,6 +23,8 @@ export default function Exceptions() {
     queryFn: fetchReceipts,
   });
   const queryClient = useQueryClient();
+  const { role } = useAuth();
+  const isAdmin = role === "admin";
   const exceptions = allReceipts.filter((r) => r.status === "exception");
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -127,33 +130,37 @@ export default function Exceptions() {
           <p className="text-sm text-muted-foreground mt-1">Receipts missing critical fields. Fix before batching.</p>
         </div>
         <div className="flex items-center gap-3">
-          <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
-            <Checkbox checked={allSelected} onCheckedChange={toggleAll} />
-            Select all
-          </label>
-          {selected.size > 0 && (
-            <AlertDialog>
-              <AlertDialogTrigger asChild>
-                <Button variant="destructive" size="sm" disabled={deleting}>
-                  <Trash2 className="h-4 w-4 mr-1" />
-                  Delete {selected.size}
-                </Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>Delete {selected.size} receipt(s)?</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    This will permanently remove the selected receipts. This action cannot be undone.
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                  <AlertDialogAction onClick={handleBulkDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-                    Delete
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
+          {isAdmin && (
+            <>
+              <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
+                <Checkbox checked={allSelected} onCheckedChange={toggleAll} />
+                Select all
+              </label>
+              {selected.size > 0 && (
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button variant="destructive" size="sm" disabled={deleting}>
+                      <Trash2 className="h-4 w-4 mr-1" />
+                      Delete {selected.size}
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Delete {selected.size} receipt(s)?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        This will permanently remove the selected receipts. This action cannot be undone.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                      <AlertDialogAction onClick={handleBulkDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                        Delete
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -176,7 +183,7 @@ export default function Exceptions() {
             </SelectContent>
           </Select>
         </div>
-        {fileFilter !== "all" && (
+        {isAdmin && fileFilter !== "all" && (
           <AlertDialog>
             <AlertDialogTrigger asChild>
               <Button variant="destructive" size="sm" disabled={deleting}>
@@ -217,11 +224,13 @@ export default function Exceptions() {
             <motion.div key={r.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }} className="vault-card p-4">
               <div className="flex items-start justify-between">
                 <div className="flex items-start gap-3">
-                  <Checkbox
-                    checked={selected.has(r.id)}
-                    onCheckedChange={() => toggle(r.id)}
-                    className="mt-1"
-                  />
+                  {isAdmin && (
+                    <Checkbox
+                      checked={selected.has(r.id)}
+                      onCheckedChange={() => toggle(r.id)}
+                      className="mt-1"
+                    />
+                  )}
                   <div className="h-9 w-9 rounded-lg bg-vault-red-light flex items-center justify-center mt-0.5">
                     <AlertTriangle className="h-4 w-4 text-vault-red" />
                   </div>
