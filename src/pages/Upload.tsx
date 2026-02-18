@@ -201,7 +201,7 @@ export default function UploadPage() {
         onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
         onDragLeave={() => setIsDragging(false)}
         onDrop={handleDrop}
-        onClick={() => inputRef.current?.click()}
+        onClick={(e) => { if ((e.target as HTMLElement).closest('button')) return; inputRef.current?.click(); }}
         className={`
           vault-card cursor-pointer border-2 border-dashed transition-all duration-200
           flex flex-col items-center justify-center py-16 gap-4
