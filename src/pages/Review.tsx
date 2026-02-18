@@ -8,7 +8,7 @@ import PdfViewer from "@/components/PdfViewer";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { useAdminDelete } from "@/hooks/useAdminDelete";
-import { TenantStatusBadge, ChargeTypeBadge } from "@/components/StatusBadges";
+import { TenantStatusBadge, ChargeTypeBadge, UnverifiedBadge } from "@/components/StatusBadges";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
@@ -149,12 +149,12 @@ export default function ReviewPage() {
           </div>
           <div className="space-y-3">
             <FieldRow label="Receipt ID" value={receipt.receipt_id} confidence={1} readOnly />
-            <FieldRow label="Property / Building" value={getVal("property", receipt.property)} confidence={conf.property || 0} required onChange={(v) => handleEdit("property", v)} />
+            <FieldRow label="Property / Building" value={getVal("property", receipt.property)} confidence={conf.property || 0} required onChange={(v) => handleEdit("property", v)} badge={conf.propertyVerified === false ? <UnverifiedBadge field="Property" /> : undefined} />
             <FieldRow label="Unit" value={getVal("unit", receipt.unit)} confidence={conf.unit || 0} required onChange={(v) => handleEdit("unit", v)} />
-            <FieldRow label="Tenant" value={getVal("tenant", receipt.tenant)} confidence={conf.tenant || 0} required onChange={(v) => handleEdit("tenant", v)} badge={<>{conf.tenantStatus ? <TenantStatusBadge status={conf.tenantStatus} /> : null}{conf.chargeType ? <ChargeTypeBadge chargeType={conf.chargeType} /> : null}</>} />
+            <FieldRow label="Tenant" value={getVal("tenant", receipt.tenant)} confidence={conf.tenant || 0} required onChange={(v) => handleEdit("tenant", v)} badge={<>{conf.tenantVerified === false ? <UnverifiedBadge field="Tenant" /> : null}{conf.tenantStatus ? <TenantStatusBadge status={conf.tenantStatus} /> : null}{conf.chargeType ? <ChargeTypeBadge chargeType={conf.chargeType} /> : null}</>} />
             <FieldRow label="Receipt Date" value={getVal("receipt_date", receipt.receipt_date || "")} confidence={conf.receiptDate || 0} required onChange={(v) => handleEdit("receipt_date", v)} />
             <FieldRow label="Rent Month" value={getVal("rent_month", receipt.rent_month || "")} confidence={0.85} onChange={(v) => handleEdit("rent_month", v)} />
-            <FieldRow label="Amount" value={getVal("amount", String(receipt.amount))} confidence={conf.amount || 0} required onChange={(v) => handleEdit("amount", v)} badge={conf.chargeType ? <ChargeTypeBadge chargeType={conf.chargeType} /> : undefined} />
+            <FieldRow label="Amount" value={getVal("amount", String(receipt.amount))} confidence={conf.amount || 0} required onChange={(v) => handleEdit("amount", v)} badge={<>{conf.amountVerified === false ? <UnverifiedBadge field="Amount" /> : null}{conf.chargeType ? <ChargeTypeBadge chargeType={conf.chargeType} /> : null}</>} />
             <FieldRow label="Payment Type" value={getVal("payment_type", receipt.payment_type || "")} confidence={conf.paymentType || 0} onChange={(v) => handleEdit("payment_type", v)} />
             <FieldRow label="Reference" value={getVal("reference", receipt.reference || "")} confidence={0.9} onChange={(v) => handleEdit("reference", v)} />
             <FieldRow label="Memo / Remarks" value={getVal("memo", receipt.memo || "")} confidence={0.88} onChange={(v) => handleEdit("memo", v)} />

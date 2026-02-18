@@ -141,10 +141,13 @@ serve(async (req) => {
 
         const appfolioId = String(t.id || t.Id || t.tenant_id || `tenant-${i + idx}`);
 
+        const fullName = `${firstName} ${lastName}`.trim();
+
         return {
           appfolio_id: appfolioId,
           first_name: firstName,
           last_name: lastName,
+          full_name: fullName || null,
           property_id: String(t.property_id || t.PropertyId || "") || null,
           unit_id: String(t.unit_id || t.UnitId || "") || null,
           property_address: t.property_address || t.PropertyAddress || t["Property Address"] || t.address || t.Address || null,
