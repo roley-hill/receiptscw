@@ -721,7 +721,7 @@ You MUST call the extract_receipts function.`;
             paymentType: item.payment_type_confidence || 0,
           },
           status,
-          file_path: filePath,
+          file_path: extractedText.startsWith("PDF_ATTACHMENT:") ? extractedText.replace("PDF_ATTACHMENT:", "") : filePath,
           file_name: file.name,
           file_content_hash: fileContentHash,
           original_text: extractedText,
