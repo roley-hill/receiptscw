@@ -2,7 +2,7 @@ import { useState, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchReceipts, markAppfolioRecorded, getFilePreviewUrl, createDepositBatch } from "@/lib/api";
 import { motion } from "framer-motion";
-import { Copy, Check, FileText, Layers, Loader2, ChevronRight, Building2, Search } from "lucide-react";
+import { Copy, Check, FileText, Layers, Loader2, ChevronRight, ChevronDown, Building2, Search, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { DbReceipt } from "@/lib/api";
@@ -44,6 +44,8 @@ export default function EntryView() {
   const finalized = allReceipts.filter((r) => r.status === "finalized" && !r.batch_id);
 
   const [selectedProperty, setSelectedProperty] = useState<string>("all");
+  const [selectedTenant, setSelectedTenant] = useState<string | null>(null);
+  const [expandedProperties, setExpandedProperties] = useState<Set<string>>(new Set());
   const [treeSearch, setTreeSearch] = useState("");
   const [batchDialogOpen, setBatchDialogOpen] = useState(false);
   const [batchProperty, setBatchProperty] = useState("");
@@ -53,7 +55,44 @@ export default function EntryView() {
   const [previewLoading, setPreviewLoading] = useState(false);
 
   const filteredProperties = [...new Set(finalized.map((r) => r.property).filter(Boolean))];
-  const filtered = selectedProperty === "all" ? finalized : finalized.filter((r) => r.property === selectedProperty);
+
+  // Build tenant map per property
+  const tenantsByProperty = finalized.reduce((acc, r) => {
+    if (!r.property) return acc;
+    if (!acc[r.property]) acc[r.property] = {};
+    const tenant = r.tenant || "(No Tenant)";
+    if (!acc[r.property][tenant]) acc[r.property][tenant] = [];
+    acc[r.property][tenant].push(r);
+    return acc;
+  }, {} as Record<string, Record<string, DbReceipt[]>>);
+
+  const filtered = selectedProperty === "all"
+    ? (selectedTenant ? finalized.filter(r => (r.tenant || "(No Tenant)") === selectedTenant) : finalized)
+    : selectedTenant
+      ? finalized.filter(r => r.property === selectedProperty && (r.tenant || "(No Tenant)") === selectedTenant)
+      : finalized.filter(r => r.property === selectedProperty);
+
+  const togglePropertyExpand = (property: string) => {
+    setExpandedProperties(prev => {
+      const next = new Set(prev);
+      if (next.has(property)) next.delete(property);
+      else next.add(property);
+      return next;
+    });
+  };
+
+  const handleSelectProperty = (property: string) => {
+    setSelectedProperty(property);
+    setSelectedTenant(null);
+    if (property !== "all") {
+      setExpandedProperties(prev => new Set(prev).add(property));
+    }
+  };
+
+  const handleSelectTenant = (property: string, tenant: string) => {
+    setSelectedProperty(property);
+    setSelectedTenant(tenant);
+  };
 
   const flatGrouped = filtered.reduce((acc, r) => {
     if (!acc[r.property]) acc[r.property] = [];
@@ -163,8 +202,8 @@ export default function EntryView() {
           <div className="divide-y divide-border max-h-[calc(100vh-260px)] overflow-auto">
             {!treeSearch && (
               <button
-                onClick={() => setSelectedProperty("all")}
-                className={`w-full flex items-center gap-2 px-4 py-3 text-sm transition-colors ${selectedProperty === "all" ? "bg-accent/10 text-accent font-semibold border-l-2 border-accent" : "text-foreground hover:bg-muted/50 border-l-2 border-transparent"}`}
+                onClick={() => { setSelectedProperty("all"); setSelectedTenant(null); }}
+                className={`w-full flex items-center gap-2 px-4 py-3 text-sm transition-colors ${selectedProperty === "all" && !selectedTenant ? "bg-accent/10 text-accent font-semibold border-l-2 border-accent" : "text-foreground hover:bg-muted/50 border-l-2 border-transparent"}`}
               >
                 <Building2 className="h-4 w-4 shrink-0" />
                 <span>All Buildings</span>
@@ -174,16 +213,37 @@ export default function EntryView() {
             {filteredProperties.sort().filter((p) => !treeSearch || p.toLowerCase().includes(treeSearch.toLowerCase())).map((property) => {
               const count = finalized.filter((r) => r.property === property).length;
               const recCount = finalized.filter((r) => r.property === property && (r as any).appfolio_recorded).length;
+              const isExpanded = expandedProperties.has(property);
+              const tenants = tenantsByProperty[property] || {};
+              const tenantNames = Object.keys(tenants).sort();
               return (
-                <button
-                  key={property}
-                  onClick={() => setSelectedProperty(property)}
-                  className={`w-full flex items-center gap-2 px-4 py-3 text-sm transition-colors ${selectedProperty === property ? "bg-accent/10 text-accent font-semibold border-l-2 border-accent" : "text-foreground hover:bg-muted/50 border-l-2 border-transparent"}`}
-                >
-                  <ChevronRight className={`h-3.5 w-3.5 shrink-0 transition-transform ${selectedProperty === property ? "rotate-90" : ""}`} />
-                  <span className="truncate text-left flex-1">{property}</span>
-                  <span className="text-xs vault-mono text-muted-foreground shrink-0">{recCount}/{count}</span>
-                </button>
+                <div key={property}>
+                  <button
+                    onClick={() => { handleSelectProperty(property); togglePropertyExpand(property); }}
+                    className={`w-full flex items-center gap-2 px-4 py-3 text-sm transition-colors ${selectedProperty === property && !selectedTenant ? "bg-accent/10 text-accent font-semibold border-l-2 border-accent" : "text-foreground hover:bg-muted/50 border-l-2 border-transparent"}`}
+                  >
+                    {isExpanded ? <ChevronDown className="h-3.5 w-3.5 shrink-0 transition-transform" /> : <ChevronRight className="h-3.5 w-3.5 shrink-0 transition-transform" />}
+                    <span className="truncate text-left flex-1">{property}</span>
+                    <span className="text-xs vault-mono text-muted-foreground shrink-0">{recCount}/{count}</span>
+                  </button>
+                  {isExpanded && tenantNames.map((tenant) => {
+                    const tReceipts = tenants[tenant];
+                    const tCount = tReceipts.length;
+                    const hasDuplicateRisk = tCount > 1;
+                    const isSelected = selectedProperty === property && selectedTenant === tenant;
+                    return (
+                      <button
+                        key={tenant}
+                        onClick={() => handleSelectTenant(property, tenant)}
+                        className={`w-full flex items-center gap-2 pl-9 pr-4 py-2 text-xs transition-colors ${isSelected ? "bg-accent/10 text-accent font-semibold border-l-2 border-accent" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground border-l-2 border-transparent"}`}
+                      >
+                        <User className="h-3 w-3 shrink-0" />
+                        <span className="truncate text-left flex-1">{tenant}</span>
+                        <span className={`text-xs vault-mono shrink-0 ${hasDuplicateRisk ? "text-[hsl(var(--vault-amber))] font-bold" : ""}`}>{tCount}</span>
+                      </button>
+                    );
+                  })}
+                </div>
               );
             })}
           </div>
