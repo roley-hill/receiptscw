@@ -757,39 +757,68 @@ ${knownTenantsList}` : ""}`;
     }
 
     // ---- POST-EXTRACTION TENANT MATCHING (fuzzy safety net) ----
+    // When a match is found, ALWAYS use the database values (source of truth)
+    // for tenant name, property address, and unit number.
     if (tenantLookup.length > 0) {
       for (const item of extractedItems) {
-        if (!item.tenant) continue;
-        const extracted = item.tenant.toLowerCase().trim();
-        // Try exact match first
-        let match = tenantLookup.find(t => t.full_name.toLowerCase() === extracted);
-        if (!match) {
-          // Try partial match: extracted name is contained in known name or vice versa
-          match = tenantLookup.find(t => {
-            const known = t.full_name.toLowerCase();
-            // Check if last names match and first initial matches
-            const eParts = extracted.split(/\s+/);
-            const kParts = known.split(/\s+/);
-            if (eParts.length >= 2 && kParts.length >= 2) {
-              const eLastName = eParts[eParts.length - 1];
-              const kLastName = kParts[kParts.length - 1];
-              if (eLastName === kLastName) return true;
-            }
-            return known.includes(extracted) || extracted.includes(known);
-          });
+        let match: typeof tenantLookup[0] | undefined;
+
+        // 1. Try matching by tenant name if present
+        if (item.tenant) {
+          const extracted = item.tenant.toLowerCase().trim();
+          // Exact match
+          match = tenantLookup.find(t => t.full_name.toLowerCase() === extracted);
+          if (!match) {
+            // Partial: last name match
+            match = tenantLookup.find(t => {
+              const known = t.full_name.toLowerCase();
+              const eParts = extracted.split(/\s+/);
+              const kParts = known.split(/\s+/);
+              if (eParts.length >= 1 && kParts.length >= 1) {
+                const eLastName = eParts[eParts.length - 1];
+                const kLastName = kParts[kParts.length - 1];
+                if (eLastName.length >= 3 && eLastName === kLastName) return true;
+              }
+              return known.includes(extracted) || extracted.includes(known);
+            });
+          }
         }
+
+        // 2. If no name match, try matching by unit number
+        if (!match && item.unit) {
+          const extractedUnit = item.unit.replace(/^#|^apt\s*/i, "").trim().toLowerCase();
+          if (extractedUnit) {
+            const unitMatches = tenantLookup.filter(t => {
+              const dbUnit = (t.unit_number || "").replace(/^#|^apt\s*/i, "").trim().toLowerCase();
+              return dbUnit === extractedUnit;
+            });
+            // If unit matches exactly one tenant (or one at the same property), use it
+            if (unitMatches.length === 1) {
+              match = unitMatches[0];
+            } else if (unitMatches.length > 1 && item.property) {
+              // Narrow by property address
+              const propLower = item.property.toLowerCase();
+              const propMatch = unitMatches.find(t =>
+                (t.property_address || "").toLowerCase().includes(propLower) ||
+                propLower.includes((t.property_address || "").toLowerCase())
+              );
+              if (propMatch) match = propMatch;
+            }
+          }
+        }
+
+        // 3. Apply database values as source of truth when matched
         if (match) {
-          console.log(`Tenant matched: "${item.tenant}" -> "${match.full_name}"`);
+          console.log(`Tenant matched: "${item.tenant || "(no name)"}" + unit "${item.unit || ""}" -> "${match.full_name}" @ ${match.property_address} Unit ${match.unit_number}`);
           item.tenant = match.full_name;
           item.tenant_confidence = Math.max(item.tenant_confidence || 0, 0.95);
-          // Also fill in property/unit from the match if missing
-          if (!item.property && match.property_address) {
+          if (match.property_address) {
             item.property = match.property_address;
-            item.property_confidence = Math.max(item.property_confidence || 0, 0.9);
+            item.property_confidence = Math.max(item.property_confidence || 0, 0.95);
           }
-          if (!item.unit && match.unit_number) {
+          if (match.unit_number) {
             item.unit = match.unit_number;
-            item.unit_confidence = Math.max(item.unit_confidence || 0, 0.9);
+            item.unit_confidence = Math.max(item.unit_confidence || 0, 0.95);
           }
         }
       }
