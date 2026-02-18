@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchReceipts } from "@/lib/api";
 import { Search as SearchIcon, X } from "lucide-react";
+import { TenantStatusBadge, ChargeTypeBadge } from "@/components/StatusBadges";
 
 export default function SearchPage() {
   const { data: allReceipts = [], isLoading } = useQuery({
@@ -71,13 +72,25 @@ export default function SearchPage() {
             {results.length === 0 ? (
               <tr><td colSpan={7} className="px-4 py-8 text-center text-sm text-muted-foreground">{allReceipts.length === 0 ? "No receipts yet. Upload some first." : "No matching results."}</td></tr>
             ) : (
-              results.map((r) => (
+              results.map((r) => {
+                const conf = (r.confidence_scores as any) || {};
+                return (
                 <tr key={r.id} className="vault-table-row">
                   <td className="px-4 py-3 text-xs vault-mono text-vault-blue">{r.receipt_id}</td>
-                  <td className="px-4 py-3 text-sm font-medium text-foreground">{r.tenant || "—"}</td>
+                  <td className="px-4 py-3 text-sm font-medium text-foreground">
+                    <div className="flex items-center gap-1.5">
+                      {r.tenant || "—"}
+                      {conf.tenantStatus && <TenantStatusBadge status={conf.tenantStatus} />}
+                    </div>
+                  </td>
                   <td className="px-4 py-3 text-sm text-foreground">{r.property || "—"}</td>
                   <td className="px-4 py-3 text-sm vault-mono text-muted-foreground">{r.unit || "—"}</td>
-                  <td className="px-4 py-3 text-sm text-right vault-mono font-semibold text-foreground">${Number(r.amount).toLocaleString("en-US", { minimumFractionDigits: 2 })}</td>
+                  <td className="px-4 py-3 text-sm text-right vault-mono font-semibold text-foreground">
+                    <div className="flex items-center justify-end gap-1.5">
+                      ${Number(r.amount).toLocaleString("en-US", { minimumFractionDigits: 2 })}
+                      {conf.chargeType && <ChargeTypeBadge chargeType={conf.chargeType} />}
+                    </div>
+                  </td>
                   <td className="px-4 py-3">
                     {r.status === "finalized" && <span className="vault-badge-success">Finalized</span>}
                     {r.status === "needs_review" && <span className="vault-badge-warning">Review</span>}
@@ -85,7 +98,8 @@ export default function SearchPage() {
                   </td>
                   <td className="px-4 py-3">{r.transfer_status === "transferred" ? <span className="vault-badge-success">Transferred</span> : <span className="vault-badge-neutral">Pending</span>}</td>
                 </tr>
-              ))
+                );
+              })
             )}
           </tbody>
         </table>

@@ -825,6 +825,82 @@ ${knownTenantsList}` : ""}`;
       }
     }
 
+    // ---- RENT ROLL CHARGE MATCHING ----
+    // Fetch rent roll charges to cross-reference amounts and determine charge types
+    let rentRollCharges: { tenant_name: string; property_address: string; unit_number: string | null; charge_type: string; monthly_amount: number; description: string }[] = [];
+    try {
+      const { data: charges } = await supabase
+        .from("rent_roll_charges")
+        .select("tenant_name, property_address, unit_number, charge_type, monthly_amount, description");
+      if (charges && charges.length > 0) {
+        rentRollCharges = charges;
+        console.log(`Loaded ${charges.length} rent roll charges for amount cross-referencing`);
+      }
+    } catch (e) {
+      console.warn("Could not load rent roll charges:", e);
+    }
+
+    // Cross-reference each extracted item's amount against rent roll
+    if (rentRollCharges.length > 0) {
+      for (const item of extractedItems) {
+        if (!item.amount || item.amount === 0) continue;
+
+        const itemAmount = Math.abs(item.amount);
+        const tenantLower = (item.tenant || "").toLowerCase().trim();
+        const unitLower = (item.unit || "").replace(/^#|^apt\s*/i, "").trim().toLowerCase();
+
+        // Find matching charges for this tenant/unit
+        const matchingCharges = rentRollCharges.filter(c => {
+          const cTenant = c.tenant_name.toLowerCase().trim();
+          const cUnit = (c.unit_number || "").replace(/^#|^apt\s*/i, "").trim().toLowerCase();
+
+          // Match by tenant name or unit
+          const tenantMatch = tenantLower && (cTenant === tenantLower || cTenant.includes(tenantLower) || tenantLower.includes(cTenant));
+          const unitMatch = unitLower && cUnit && cUnit === unitLower;
+
+          return tenantMatch || unitMatch;
+        });
+
+        if (matchingCharges.length > 0) {
+          // Check if amount matches any single charge (tenant charge, subsidy, etc.)
+          const exactMatch = matchingCharges.find(c => Math.abs(c.monthly_amount - itemAmount) < 0.01);
+          
+          // Check if amount matches combined total of multiple charges
+          const totalCharges = matchingCharges.reduce((sum, c) => sum + c.monthly_amount, 0);
+          const isCombined = Math.abs(totalCharges - itemAmount) < 0.01 && matchingCharges.length > 1;
+
+          // Check if it's a partial match (subsidy portion, tenant portion, etc.)
+          const chargeTypes = [...new Set(matchingCharges.map(c => c.charge_type))];
+
+          if (exactMatch) {
+            item.charge_type = exactMatch.charge_type === "rent" ? "Tenant Charge" :
+              exactMatch.charge_type === "subsidy" ? "Subsidy" :
+              exactMatch.charge_type === "utility" ? "Utility" :
+              exactMatch.charge_type === "fee" ? "Fee" : "Tenant Charge";
+            item.amount_confidence = Math.max(item.amount_confidence || 0, 0.95);
+            console.log(`Amount matched rent roll: $${itemAmount} = ${item.charge_type} for "${item.tenant}"`);
+          } else if (isCombined) {
+            item.charge_type = "Combined";
+            item.amount_confidence = Math.max(item.amount_confidence || 0, 0.95);
+            console.log(`Amount matched combined rent roll: $${itemAmount} = Combined (${matchingCharges.length} charges) for "${item.tenant}"`);
+          } else {
+            // Amount doesn't exactly match - might be partial or different period
+            // Still tag based on available charge types but don't boost confidence as much
+            if (chargeTypes.includes("subsidy") && chargeTypes.includes("rent")) {
+              item.charge_type = "Partial";
+            } else if (chargeTypes.length === 1) {
+              const ct = chargeTypes[0];
+              item.charge_type = ct === "rent" ? "Tenant Charge" :
+                ct === "subsidy" ? "Subsidy" : ct === "utility" ? "Utility" : "Other";
+            }
+            // Moderate confidence boost for partial matches
+            item.amount_confidence = Math.max(item.amount_confidence || 0, 0.80);
+            console.log(`Amount partial match rent roll: $${itemAmount} vs expected charges for "${item.tenant}" (types: ${chargeTypes.join(", ")})`);
+          }
+        }
+      }
+    }
+
     // ---- DUPLICATE DETECTION & INSERT ----
     const insertedReceipts: any[] = [];
     const duplicates: any[] = [];
@@ -990,6 +1066,7 @@ ${knownTenantsList}` : ""}`;
             receiptDate: item.receipt_date_confidence || 0,
             paymentType: item.payment_type_confidence || 0,
             tenantStatus: item.tenant_status || null,
+            chargeType: item.charge_type || null,
           },
           status,
           file_path: extractedText.startsWith("PDF_ATTACHMENT:") ? extractedText.replace("PDF_ATTACHMENT:", "") : filePath,

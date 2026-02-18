@@ -89,14 +89,19 @@ export default function UploadPage() {
       );
     }
 
-    // Sync tenants from AppFolio before extraction (on-demand)
+    // Sync tenants and rent roll from AppFolio before extraction (on-demand, in parallel)
     try {
-      console.log("Syncing tenants from AppFolio...");
-      const { error: syncError } = await supabase.functions.invoke("sync-tenants");
-      if (syncError) console.warn("Tenant sync warning:", syncError.message);
-      else console.log("Tenant sync completed");
+      console.log("Syncing tenants and rent roll from AppFolio...");
+      const [tenantResult, rentRollResult] = await Promise.allSettled([
+        supabase.functions.invoke("sync-tenants"),
+        supabase.functions.invoke("sync-rent-roll"),
+      ]);
+      if (tenantResult.status === "fulfilled" && !tenantResult.value.error) console.log("Tenant sync completed");
+      else console.warn("Tenant sync warning:", tenantResult.status === "rejected" ? tenantResult.reason : tenantResult.value.error?.message);
+      if (rentRollResult.status === "fulfilled" && !rentRollResult.value.error) console.log("Rent roll sync completed");
+      else console.warn("Rent roll sync warning:", rentRollResult.status === "rejected" ? rentRollResult.reason : rentRollResult.value.error?.message);
     } catch (e) {
-      console.warn("Tenant sync skipped:", e);
+      console.warn("AppFolio sync skipped:", e);
     }
 
     let processedCount = 0;
