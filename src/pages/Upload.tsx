@@ -198,7 +198,13 @@ export default function UploadPage() {
     queryClient.invalidateQueries({ queryKey: ["receipts"] });
     queryClient.invalidateQueries({ queryKey: ["pending_counts"] });
     setHistoryKey((k) => k + 1);
-    if (!cancelledRef.current) toast.success("Extraction complete!");
+    if (!cancelledRef.current) {
+      toast.success("Extraction complete!");
+      // Clear completed files from the upload list after a brief delay so user sees final state
+      setTimeout(() => {
+        setFiles((prev) => prev.filter((f) => f.status !== "done"));
+      }, 2000);
+    }
   };
 
   const getFileIcon = (type: string) => {
