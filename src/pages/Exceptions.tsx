@@ -1,14 +1,17 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchReceipts } from "@/lib/api";
 import { supabase } from "@/integrations/supabase/client";
-import { AlertTriangle, CheckCircle2, Trash2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Trash2, FileText, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
 import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
@@ -23,14 +26,32 @@ export default function Exceptions() {
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
+  const [fileFilter, setFileFilter] = useState<string>("all");
 
-  const allSelected = exceptions.length > 0 && selected.size === exceptions.length;
+  // Group by file_name for the filter dropdown
+  const fileGroups = useMemo(() => {
+    const groups: Record<string, number> = {};
+    for (const r of exceptions) {
+      const name = r.file_name || "No file";
+      groups[name] = (groups[name] || 0) + 1;
+    }
+    return Object.entries(groups).sort((a, b) => b[1] - a[1]);
+  }, [exceptions]);
+
+  const filteredExceptions = useMemo(
+    () => fileFilter === "all"
+      ? exceptions
+      : exceptions.filter((r) => (r.file_name || "No file") === fileFilter),
+    [exceptions, fileFilter]
+  );
+
+  const allSelected = filteredExceptions.length > 0 && filteredExceptions.every((r) => selected.has(r.id));
 
   const toggleAll = () => {
     if (allSelected) {
       setSelected(new Set());
     } else {
-      setSelected(new Set(exceptions.map((r) => r.id)));
+      setSelected(new Set(filteredExceptions.map((r) => r.id)));
     }
   };
 
@@ -47,13 +68,36 @@ export default function Exceptions() {
     if (selected.size === 0) return;
     setDeleting(true);
     try {
-      const { error } = await supabase
-        .from("receipts")
-        .delete()
-        .in("id", Array.from(selected));
-      if (error) throw error;
+      const ids = Array.from(selected);
+      // Supabase .in() has a limit, batch in chunks of 100
+      for (let i = 0; i < ids.length; i += 100) {
+        const chunk = ids.slice(i, i + 100);
+        const { error } = await supabase.from("receipts").delete().in("id", chunk);
+        if (error) throw error;
+      }
       toast.success(`Deleted ${selected.size} receipt(s)`);
       setSelected(new Set());
+      queryClient.invalidateQueries({ queryKey: ["receipts"] });
+    } catch (err: any) {
+      toast.error(err.message || "Delete failed");
+    }
+    setDeleting(false);
+  };
+
+  const handleDeleteByFile = async (fileName: string) => {
+    setDeleting(true);
+    try {
+      const idsToDelete = exceptions
+        .filter((r) => (r.file_name || "No file") === fileName)
+        .map((r) => r.id);
+      for (let i = 0; i < idsToDelete.length; i += 100) {
+        const chunk = idsToDelete.slice(i, i + 100);
+        const { error } = await supabase.from("receipts").delete().in("id", chunk);
+        if (error) throw error;
+      }
+      toast.success(`Deleted ${idsToDelete.length} receipt(s) from "${fileName}"`);
+      setSelected(new Set());
+      if (fileFilter === fileName) setFileFilter("all");
       queryClient.invalidateQueries({ queryKey: ["receipts"] });
     } catch (err: any) {
       toast.error(err.message || "Delete failed");
@@ -113,8 +157,53 @@ export default function Exceptions() {
           )}
         </div>
       </div>
+
+      {/* File filter + per-file delete */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex items-center gap-2">
+          <FileText className="h-4 w-4 text-muted-foreground" />
+          <Select value={fileFilter} onValueChange={setFileFilter}>
+            <SelectTrigger className="w-[320px] h-9 text-sm">
+              <SelectValue placeholder="Filter by file" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All files ({exceptions.length})</SelectItem>
+              {fileGroups.map(([name, count]) => (
+                <SelectItem key={name} value={name}>
+                  {name.replace(/^Receipts\//, "")} ({count})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        {fileFilter !== "all" && (
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="destructive" size="sm" disabled={deleting}>
+                <Trash2 className="h-4 w-4 mr-1" />
+                Delete all from this file ({filteredExceptions.length})
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete all {filteredExceptions.length} receipt(s) from this file?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This will permanently remove all receipts extracted from "{fileFilter.replace(/^Receipts\//, "")}". You can then re-upload the file for clean extraction.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction onClick={() => handleDeleteByFile(fileFilter)} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                  Delete All
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        )}
+      </div>
+
       <div className="space-y-3">
-        {exceptions.map((r, i) => {
+        {filteredExceptions.map((r, i) => {
           const conf = (r.confidence_scores as any) || {};
           const issues: string[] = [];
           if ((conf.property || 0) < 0.7) issues.push("Low confidence: Property");
