@@ -236,8 +236,13 @@ export default function EntryView() {
                               <Checkbox checked={(r as any).appfolio_recorded || false} onCheckedChange={(checked) => toggleMutation.mutate({ id: r.id, recorded: !!checked })} disabled={toggleMutation.isPending} />
                             </td>
                             <td className="px-3 py-2.5"><CopyCell value={r.unit} mono id={`unit-${r.id}`} /></td>
-                            <td className="px-3 py-2.5"><CopyCell value={r.tenant} id={`tenant-${r.id}`} /></td>
-                            <td className="px-3 py-2.5 text-right"><CopyCell value={`$${Number(r.amount).toFixed(2)}`} mono id={`amt-${r.id}`} /></td>
+                            <td className="px-3 py-2.5">
+                              <div className="flex items-center gap-1.5">
+                                <CopyCell value={r.tenant} id={`tenant-${r.id}`} />
+                                {Number(r.amount) < 0 && <span className="vault-badge-deduction">Deduction</span>}
+                              </div>
+                            </td>
+                            <td className={`px-3 py-2.5 text-right ${Number(r.amount) < 0 ? "text-[hsl(var(--vault-red))]" : ""}`}><CopyCell value={`$${Number(r.amount).toFixed(2)}`} mono id={`amt-${r.id}`} /></td>
                             <td className="px-3 py-2.5"><CopyCell value={r.receipt_date || "—"} mono id={`date-${r.id}`} /></td>
                             <td className="px-3 py-2.5"><CopyCell value={r.rent_month || "—"} mono id={`month-${r.id}`} /></td>
                             <td className="px-3 py-2.5"><CopyCell value={r.payment_type || "—"} id={`ptype-${r.id}`} /></td>

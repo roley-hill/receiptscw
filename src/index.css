@@ -142,6 +142,10 @@
     @apply vault-badge bg-muted text-muted-foreground;
   }
 
+  .vault-badge-deduction {
+    @apply vault-badge bg-[hsl(var(--vault-red-light))] text-[hsl(var(--vault-red))] border border-[hsl(var(--vault-red)/0.3)];
+  }
+
   .vault-mono {
     @apply font-mono text-sm tabular-nums;
   }

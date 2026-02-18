@@ -138,6 +138,7 @@ export default function ReviewPage() {
             <h3 className="text-sm font-semibold text-foreground flex items-center gap-2"><Edit3 className="h-4 w-4" />Extracted Fields</h3>
             {receipt.status === "needs_review" && <span className="vault-badge-warning">Needs Review</span>}
             {receipt.status === "exception" && <span className="vault-badge-error flex items-center gap-1"><AlertTriangle className="h-3 w-3" /> Exception</span>}
+            {Number(receipt.amount) < 0 && <span className="vault-badge-deduction">Deduction</span>}
           </div>
           <div className="space-y-3">
             <FieldRow label="Receipt ID" value={receipt.receipt_id} confidence={1} readOnly />

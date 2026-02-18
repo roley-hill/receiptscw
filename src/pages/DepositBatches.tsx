@@ -15,6 +15,10 @@ function generateBatchPDF(batch: any, receipts: any[]) {
   const doc = new jsPDF();
   const pageWidth = doc.internal.pageSize.getWidth();
 
+  const grossTotal = receipts.filter((r) => Number(r.amount) >= 0).reduce((s, r) => s + Number(r.amount), 0);
+  const deductions = receipts.filter((r) => Number(r.amount) < 0).reduce((s, r) => s + Number(r.amount), 0);
+  const netTotal = grossTotal + deductions;
+
   // Header
   doc.setFontSize(18);
   doc.text("Deposit Batch Report", 14, 20);
@@ -29,31 +33,47 @@ function generateBatchPDF(batch: any, receipts: any[]) {
   doc.text(`Batch ID: ${batch.batch_id}`, 14, 48);
   doc.text(`Period: ${batch.deposit_period || "—"}`, 14, 56);
   doc.text(`Status: ${batch.status}`, 14, 64);
-  doc.text(`Total Amount: $${Number(batch.total_amount).toLocaleString("en-US", { minimumFractionDigits: 2 })}`, 14, 72);
-  doc.text(`Receipt Count: ${batch.receipt_count}`, pageWidth / 2, 72);
+  doc.text(`Gross Total: $${grossTotal.toLocaleString("en-US", { minimumFractionDigits: 2 })}`, 14, 72);
+  doc.text(`Deductions: $${deductions.toLocaleString("en-US", { minimumFractionDigits: 2 })}`, pageWidth / 2, 72);
+  doc.text(`Net Total: $${netTotal.toLocaleString("en-US", { minimumFractionDigits: 2 })}`, 14, 80);
+  doc.text(`Receipt Count: ${batch.receipt_count}`, pageWidth / 2, 80);
 
   if (batch.transferred_at) {
-    doc.text(`Transferred: ${new Date(batch.transferred_at).toLocaleDateString()}`, 14, 80);
-    if (batch.transfer_method) doc.text(`Method: ${batch.transfer_method}`, pageWidth / 2, 80);
+    doc.text(`Transferred: ${new Date(batch.transferred_at).toLocaleDateString()}`, 14, 88);
+    if (batch.transfer_method) doc.text(`Method: ${batch.transfer_method}`, pageWidth / 2, 88);
   }
 
   // Receipt table
-  const startY = batch.transferred_at ? 90 : 82;
+  const startY = batch.transferred_at ? 98 : 90;
   autoTable(doc, {
     startY,
-    head: [["Tenant", "Unit", "Amount", "Receipt Date", "Reference", "Receipt ID"]],
+    head: [["Tenant", "Unit", "Amount", "Type", "Receipt Date", "Reference", "Receipt ID"]],
     body: receipts.map((r) => [
       r.tenant,
       r.unit,
       `$${Number(r.amount).toLocaleString("en-US", { minimumFractionDigits: 2 })}`,
+      Number(r.amount) < 0 ? "DEDUCTION" : "Payment",
       r.receipt_date || "—",
       r.reference || "—",
       r.receipt_id,
     ]),
-    foot: [["", "", `$${receipts.reduce((s, r) => s + Number(r.amount), 0).toLocaleString("en-US", { minimumFractionDigits: 2 })}`, "", "", `${receipts.length} receipts`]],
+    foot: [
+      ["", "", `Gross: $${grossTotal.toLocaleString("en-US", { minimumFractionDigits: 2 })}`, "", "", "", ""],
+      ["", "", `Deductions: $${deductions.toLocaleString("en-US", { minimumFractionDigits: 2 })}`, "", "", "", ""],
+      ["", "", `Net: $${netTotal.toLocaleString("en-US", { minimumFractionDigits: 2 })}`, "", "", "", `${receipts.length} receipts`],
+    ],
     styles: { fontSize: 9 },
     headStyles: { fillColor: [41, 50, 65] },
     footStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: "bold" },
+    didParseCell: (data: any) => {
+      // Highlight negative amounts in red
+      if (data.section === "body" && data.column.index === 2) {
+        const val = data.cell.raw as string;
+        if (val.includes("-")) {
+          data.cell.styles.textColor = [200, 50, 50];
+        }
+      }
+    },
   });
 
   // Transfer instructions
@@ -64,7 +84,7 @@ function generateBatchPDF(batch: any, receipts: any[]) {
     doc.text("Transfer Instructions", 14, finalY + 15);
     doc.setFontSize(9);
     doc.setTextColor(80);
-    doc.text(`Please transfer $${Number(batch.total_amount).toLocaleString("en-US", { minimumFractionDigits: 2 })} for property "${batch.property}".`, 14, finalY + 24);
+    doc.text(`Please transfer $${netTotal.toLocaleString("en-US", { minimumFractionDigits: 2 })} (net) for property "${batch.property}".`, 14, finalY + 24);
     if (batch.external_reference) doc.text(`Reference: ${batch.external_reference}`, 14, finalY + 32);
     if (batch.notes) doc.text(`Notes: ${batch.notes}`, 14, finalY + 40);
   }
@@ -74,6 +94,10 @@ function generateBatchPDF(batch: any, receipts: any[]) {
 }
 
 function generateBatchXLSX(batch: any, receipts: any[]) {
+  const grossTotal = receipts.filter((r) => Number(r.amount) >= 0).reduce((s, r) => s + Number(r.amount), 0);
+  const deductions = receipts.filter((r) => Number(r.amount) < 0).reduce((s, r) => s + Number(r.amount), 0);
+  const netTotal = grossTotal + deductions;
+
   const wb = XLSX.utils.book_new();
 
   // Detail sheet
@@ -81,6 +105,7 @@ function generateBatchXLSX(batch: any, receipts: any[]) {
     Tenant: r.tenant,
     Unit: r.unit,
     Amount: Number(r.amount),
+    Type: Number(r.amount) < 0 ? "Deduction" : "Payment",
     "Receipt Date": r.receipt_date || "",
     Reference: r.reference || "",
     "Receipt ID": r.receipt_id,
@@ -95,7 +120,9 @@ function generateBatchXLSX(batch: any, receipts: any[]) {
     { Field: "Batch ID", Value: batch.batch_id },
     { Field: "Period", Value: batch.deposit_period || "—" },
     { Field: "Status", Value: batch.status },
-    { Field: "Total Amount", Value: Number(batch.total_amount) },
+    { Field: "Gross Total (Payments)", Value: grossTotal },
+    { Field: "Deductions", Value: deductions },
+    { Field: "Net Total", Value: netTotal },
     { Field: "Receipt Count", Value: batch.receipt_count },
     { Field: "Created", Value: new Date(batch.created_at).toLocaleDateString() },
     { Field: "Transferred", Value: batch.transferred_at ? new Date(batch.transferred_at).toLocaleDateString() : "—" },
@@ -145,6 +172,10 @@ export default function DepositBatches() {
         <div className="space-y-4">
           {batches.map((batch, i) => {
             const receipts = allReceipts.filter((r) => r.batch_id === batch.id);
+            const grossTotal = receipts.filter((r) => Number(r.amount) >= 0).reduce((s, r) => s + Number(r.amount), 0);
+            const deductionTotal = receipts.filter((r) => Number(r.amount) < 0).reduce((s, r) => s + Number(r.amount), 0);
+            const netTotal = grossTotal + deductionTotal;
+            const hasDeductions = deductionTotal < 0;
             return (
               <motion.div key={batch.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }} className="vault-card overflow-hidden">
                 <div className="px-5 py-4 flex items-center justify-between">
@@ -164,7 +195,15 @@ export default function DepositBatches() {
                   </div>
                   <div className="flex items-center gap-4">
                     <div className="text-right">
-                      <p className="text-lg vault-mono font-bold text-foreground">${Number(batch.total_amount).toLocaleString("en-US", { minimumFractionDigits: 2 })}</p>
+                      {hasDeductions ? (
+                        <div className="space-y-0.5">
+                          <p className="text-xs text-muted-foreground">Gross: <span className="vault-mono font-medium text-foreground">${grossTotal.toLocaleString("en-US", { minimumFractionDigits: 2 })}</span></p>
+                          <p className="text-xs text-muted-foreground">Deductions: <span className="vault-mono font-medium text-[hsl(var(--vault-red))]">${deductionTotal.toLocaleString("en-US", { minimumFractionDigits: 2 })}</span></p>
+                          <p className="text-sm vault-mono font-bold text-foreground">Net: ${netTotal.toLocaleString("en-US", { minimumFractionDigits: 2 })}</p>
+                        </div>
+                      ) : (
+                        <p className="text-lg vault-mono font-bold text-foreground">${Number(batch.total_amount).toLocaleString("en-US", { minimumFractionDigits: 2 })}</p>
+                      )}
                       <BatchStatusBadge status={batch.status} />
                     </div>
                     <div className="flex gap-1">
@@ -218,6 +257,7 @@ export default function DepositBatches() {
                           <th className="px-5 py-2 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Tenant</th>
                           <th className="px-5 py-2 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Unit</th>
                           <th className="px-5 py-2 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wide">Amount</th>
+                          <th className="px-5 py-2 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Type</th>
                           <th className="px-5 py-2 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Receipt ID</th>
                         </tr>
                       </thead>
@@ -226,12 +266,20 @@ export default function DepositBatches() {
                           <tr key={r.id} className="vault-table-row">
                             <td className="px-5 py-2.5 text-sm font-medium text-foreground">{r.tenant}</td>
                             <td className="px-5 py-2.5 text-sm vault-mono text-muted-foreground">{r.unit}</td>
-                            <td className="px-5 py-2.5 text-sm text-right vault-mono font-semibold text-foreground">${Number(r.amount).toLocaleString("en-US", { minimumFractionDigits: 2 })}</td>
+                            <td className={`px-5 py-2.5 text-sm text-right vault-mono font-semibold ${Number(r.amount) < 0 ? "text-[hsl(var(--vault-red))]" : "text-foreground"}`}>${Number(r.amount).toLocaleString("en-US", { minimumFractionDigits: 2 })}</td>
+                            <td className="px-5 py-2.5">{Number(r.amount) < 0 ? <span className="vault-badge-deduction">Deduction</span> : <span className="text-xs text-muted-foreground">Payment</span>}</td>
                             <td className="px-5 py-2.5 text-xs vault-mono text-vault-blue">{r.receipt_id}</td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
+                    {hasDeductions && (
+                      <div className="px-5 py-3 border-t border-border bg-muted/20 flex items-center justify-end gap-6 text-xs">
+                        <span className="text-muted-foreground">Gross: <span className="vault-mono font-medium text-foreground">${grossTotal.toLocaleString("en-US", { minimumFractionDigits: 2 })}</span></span>
+                        <span className="text-muted-foreground">Deductions: <span className="vault-mono font-medium text-[hsl(var(--vault-red))]">${deductionTotal.toLocaleString("en-US", { minimumFractionDigits: 2 })}</span></span>
+                        <span className="text-muted-foreground">Net: <span className="vault-mono font-bold text-foreground">${netTotal.toLocaleString("en-US", { minimumFractionDigits: 2 })}</span></span>
+                      </div>
+                    )}
                   </div>
                 )}
               </motion.div>

@@ -81,6 +81,9 @@ export default function Receivables() {
       ) : (
         Object.entries(grouped).map(([property, receipts]) => {
           const subtotal = receipts.reduce((s, r) => s + Number(r.amount), 0);
+          const grossTotal = receipts.filter((r) => Number(r.amount) >= 0).reduce((s, r) => s + Number(r.amount), 0);
+          const deductionTotal = receipts.filter((r) => Number(r.amount) < 0).reduce((s, r) => s + Number(r.amount), 0);
+          const hasDeductions = deductionTotal < 0;
           const recorded = receipts.filter((r) => (r as any).appfolio_recorded);
           const recordedAmt = recorded.reduce((s, r) => s + Number(r.amount), 0);
           return (
@@ -89,7 +92,14 @@ export default function Receivables() {
                 <h3 className="text-sm font-bold text-foreground">{property}</h3>
                 <div className="flex items-center gap-4 text-xs">
                   <span className="text-muted-foreground">{recorded.length}/{receipts.length} recorded</span>
-                  <span className="vault-mono font-bold text-foreground">${subtotal.toLocaleString("en-US", { minimumFractionDigits: 2 })}</span>
+                  {hasDeductions ? (
+                    <>
+                      <span className="text-muted-foreground">Gross: <span className="vault-mono font-medium text-foreground">${grossTotal.toLocaleString("en-US", { minimumFractionDigits: 2 })}</span></span>
+                      <span className="vault-mono font-bold text-foreground">Net: ${subtotal.toLocaleString("en-US", { minimumFractionDigits: 2 })}</span>
+                    </>
+                  ) : (
+                    <span className="vault-mono font-bold text-foreground">${subtotal.toLocaleString("en-US", { minimumFractionDigits: 2 })}</span>
+                  )}
                 </div>
               </div>
               <table className="w-full">
@@ -109,9 +119,12 @@ export default function Receivables() {
                   {receipts.sort((a, b) => (a.unit || "").localeCompare(b.unit || "")).map((r) => (
                     <tr key={r.id} className="vault-table-row">
                       <td className="px-4 py-2.5 text-sm vault-mono text-foreground">{r.unit}</td>
-                      <td className="px-4 py-2.5 text-sm font-medium text-foreground">{r.tenant}</td>
+                      <td className="px-4 py-2.5 text-sm font-medium text-foreground">
+                        {r.tenant}
+                        {Number(r.amount) < 0 && <span className="vault-badge-deduction ml-2">Deduction</span>}
+                      </td>
                       <td className="px-4 py-2.5 text-sm vault-mono text-muted-foreground">{r.receipt_date || "—"}</td>
-                      <td className="px-4 py-2.5 text-sm text-right vault-mono font-semibold text-foreground">${Number(r.amount).toLocaleString("en-US", { minimumFractionDigits: 2 })}</td>
+                      <td className={`px-4 py-2.5 text-sm text-right vault-mono font-semibold ${Number(r.amount) < 0 ? "text-[hsl(var(--vault-red))]" : "text-foreground"}`}>${Number(r.amount).toLocaleString("en-US", { minimumFractionDigits: 2 })}</td>
                       <td className="px-4 py-2.5 text-sm vault-mono text-muted-foreground">{r.reference || "—"}</td>
                       <td className="px-4 py-2.5 text-xs vault-mono text-vault-blue">{r.receipt_id}</td>
                       <td className="px-4 py-2.5">{r.transfer_status === "transferred" ? <span className="vault-badge-success">Transferred</span> : <span className="vault-badge-neutral">Pending</span>}</td>
