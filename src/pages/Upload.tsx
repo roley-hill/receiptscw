@@ -194,6 +194,24 @@ export default function UploadPage() {
         </p>
       </div>
 
+      <input
+        ref={inputRef}
+        type="file"
+        multiple
+        accept=".pdf,.jpg,.jpeg,.png,.heic,.xlsx,.xls,.eml"
+        className="hidden"
+        onChange={(e) => e.target.files && handleFiles(e.target.files)}
+      />
+      <input
+        ref={folderInputRef}
+        type="file"
+        multiple
+        // @ts-ignore
+        webkitdirectory=""
+        directory=""
+        className="hidden"
+        onChange={(e) => e.target.files && handleFiles(e.target.files)}
+      />
       <motion.div
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
@@ -201,7 +219,7 @@ export default function UploadPage() {
         onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
         onDragLeave={() => setIsDragging(false)}
         onDrop={handleDrop}
-        onClick={(e) => { if ((e.target as HTMLElement).closest('button')) return; inputRef.current?.click(); }}
+        onClick={() => inputRef.current?.click()}
         className={`
           vault-card cursor-pointer border-2 border-dashed transition-all duration-200
           flex flex-col items-center justify-center py-16 gap-4
@@ -223,24 +241,6 @@ export default function UploadPage() {
             <FolderOpen className="h-4 w-4 mr-2" /> Browse Folder
           </Button>
         </div>
-        <input
-          ref={inputRef}
-          type="file"
-          multiple
-          accept=".pdf,.jpg,.jpeg,.png,.heic,.xlsx,.xls,.eml"
-          className="hidden"
-          onChange={(e) => e.target.files && handleFiles(e.target.files)}
-        />
-        <input
-          ref={folderInputRef}
-          type="file"
-          multiple
-          // @ts-ignore
-          webkitdirectory=""
-          directory=""
-          className="hidden"
-          onChange={(e) => e.target.files && handleFiles(e.target.files)}
-        />
       </motion.div>
 
       {files.length > 0 && (
