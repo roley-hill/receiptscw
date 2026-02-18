@@ -260,6 +260,14 @@ export default function UploadPage() {
 
   return (
     <div className="space-y-6 max-w-4xl">
+      {isProcessing && (
+        <div className="flex items-center gap-3 px-4 py-3 rounded-lg border border-amber-500/30 bg-amber-500/10 text-sm text-foreground">
+          <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />
+          <span>
+            <strong>Extraction in progress</strong> — Please do not navigate away from this app or close the tab, or progress will be lost.
+          </span>
+        </div>
+      )}
       <div>
         <h1 className="text-2xl font-bold text-foreground">Upload Receipts</h1>
         <p className="text-sm text-muted-foreground mt-1">
