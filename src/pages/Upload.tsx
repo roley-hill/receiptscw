@@ -121,6 +121,26 @@ export default function UploadPage() {
 
       try {
         const result = await uploadReceiptFile(f.file, session.access_token);
+        
+        if (result.skipped_already_processed) {
+          setFiles((prev) =>
+            prev.map((pf) =>
+              pf.id === f.id
+                ? { ...pf, status: "done", insertedCount: 0, duplicateCount: 0, totalLineItems: 0, error: `Already processed (${result.existing_count} receipt(s) exist)` }
+                : pf
+            )
+          );
+          processedCount++;
+          toast.info(`${f.name} already processed — skipped.`);
+          if (batchId) {
+            await supabase.from("upload_batch_files")
+              .update({ status: "skipped", error: "Already processed" } as any)
+              .eq("batch_id", batchId)
+              .eq("file_name", f.name);
+          }
+          continue;
+        }
+
         const insertedCount = result.inserted_count ?? 1;
         const duplicateCount = result.duplicate_count ?? 0;
         const totalLineItems = result.total_line_items ?? 1;
