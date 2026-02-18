@@ -152,14 +152,16 @@ export default function TeamManagement() {
         <div className="vault-card divide-y divide-border">
           {members.map((m) => {
             const Icon = roleIcons[m.role];
+            const hideEmail = m.role === "admin";
+            const avatarInitials = hideEmail ? "AD" : m.email.substring(0, 2).toUpperCase();
             return (
               <div key={m.user_id} className="flex items-center gap-3 p-4">
                 <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                  <span className="text-xs font-semibold text-primary">{m.email.substring(0, 2).toUpperCase()}</span>
+                  <span className="text-xs font-semibold text-primary">{avatarInitials}</span>
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-foreground truncate">{m.display_name || m.email}</p>
-                  <p className="text-xs text-muted-foreground truncate">{m.email}</p>
+                  <p className="text-sm font-medium text-foreground truncate">{hideEmail ? (m.display_name || "Admin") : (m.display_name || m.email)}</p>
+                  {!hideEmail && <p className="text-xs text-muted-foreground truncate">{m.email}</p>}
                 </div>
                 <Badge variant="outline" className={`${roleColors[m.role]} gap-1`}>
                   <Icon className="h-3 w-3" /> {m.role}
