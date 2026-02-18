@@ -402,36 +402,71 @@ You MUST call the extract_receipts function.`;
           return null;
         }
 
-        // --- Extract image attachment from EML (png, jpeg, gif) ---
+        // --- Extract image attachment from EML (png, jpeg, gif, or generic binary with image extension) ---
         function extractImageAttachment(eml: string): { bytes: Uint8Array; mimeType: string } | null {
           const boundaryMatches = [...eml.matchAll(/boundary="?([^\s";\r\n]+)"?/gi)];
           if (boundaryMatches.length === 0) return null;
 
           const seenBoundaries = new Set<string>();
-          const imageTypes = ["image/png", "image/jpeg", "image/jpg", "image/gif", "image/bmp", "image/tiff"];
 
           function findImageInParts(parts: string[], depth: number): { bytes: Uint8Array; mimeType: string } | null {
             if (depth > 3) return null;
-            for (const part of parts) {
-              const ctMatch = part.match(/content-type:\s*(image\/(?:png|jpe?g|gif|bmp|tiff))/i);
-              if (ctMatch) {
-                // Skip inline CID images that are just logos/icons (small) — only take substantial attachments
-                const isAttachment = /content-disposition:\s*attachment/i.test(part);
-                const hasFileName = /name="?[^"]+\.(png|jpe?g|gif|bmp|tiff)/i.test(part);
-                // Accept if it's an attachment OR has a filename (some EMLs don't mark disposition)
-                if (!isAttachment && !hasFileName) {
-                  // Check if it's a substantial inline image (>10KB base64 = likely a document scan)
-                  const bl = part.indexOf("\r\n\r\n");
-                  const bl2 = part.indexOf("\n\n");
-                  const bs = bl > 0 ? bl + 4 : (bl2 > 0 ? bl2 + 2 : -1);
-                  if (bs < 0) continue;
-                  let b64 = part.substring(bs).trim();
-                  const trailingBoundary = b64.indexOf("\r\n--");
-                  if (trailingBoundary > 0) b64 = b64.substring(0, trailingBoundary);
-                  b64 = b64.replace(/\s/g, "");
-                  if (b64.length < 13000) continue; // Skip small inline images (<10KB)
-                }
+            for (let pi = 0; pi < parts.length; pi++) {
+              const part = parts[pi];
+              // Log content-type of each part for debugging
+              const ctHeader = part.match(/content-type:\s*([^\r\n;]+)/i);
+              if (ctHeader) {
+                console.log(`  MIME part ${pi} (depth ${depth}): content-type=${ctHeader[1].trim()}, len=${part.length}`);
+              }
 
+              // Check for explicit image content-type
+              const ctMatch = part.match(/content-type:\s*(image\/(?:png|jpe?g|gif|bmp|tiff|x-png))/i);
+              // Also check for application/octet-stream with image filename
+              const isOctetStream = /content-type:\s*application\/octet-stream/i.test(part);
+              const fileNameMatch = part.match(/(?:file)?name="?([^"\r\n;]+)"?/i);
+              const hasImageFileName = fileNameMatch && /\.(png|jpe?g|gif|bmp|tiff)$/i.test(fileNameMatch[1]);
+              // Also check for application/pdf that wasn't caught by PDF extractor (sometimes PDFs are inline)
+              const isInlinePdf = /content-type:\s*application\/pdf/i.test(part);
+
+              if (ctMatch || (isOctetStream && hasImageFileName)) {
+                const mimeType = ctMatch ? ctMatch[1].toLowerCase() : `image/${fileNameMatch![1].split('.').pop()!.toLowerCase()}`;
+                console.log(`  Found image-like attachment: ${mimeType}, fileName=${fileNameMatch?.[1] || 'unknown'}`);
+                
+                const bl = part.indexOf("\r\n\r\n");
+                const bl2 = part.indexOf("\n\n");
+                const bs = bl > 0 ? bl + 4 : (bl2 > 0 ? bl2 + 2 : -1);
+                if (bs < 0) continue;
+                let b64 = part.substring(bs).trim();
+                const trailingBoundary = b64.indexOf("\r\n--");
+                if (trailingBoundary > 0) b64 = b64.substring(0, trailingBoundary);
+                b64 = b64.replace(/\s/g, "");
+                console.log(`  Base64 length: ${b64.length} chars`);
+                
+                // Skip tiny inline images (logos, icons) - less than ~7KB
+                if (b64.length < 10000) {
+                  console.log("  Skipping small image (likely icon/logo)");
+                  continue;
+                }
+                
+                try {
+                  const binary = atob(b64);
+                  const bytes = new Uint8Array(binary.length);
+                  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+                  
+                  // Check if this is actually a PDF masquerading as an image
+                  if (bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46) {
+                    console.log("  Image attachment is actually a PDF! Returning as PDF.");
+                    return { bytes, mimeType: "application/pdf" };
+                  }
+                  
+                  return { bytes, mimeType };
+                } catch (e) {
+                  console.log(`  Failed to decode base64: ${e}`);
+                  continue;
+                }
+              } else if (isInlinePdf) {
+                // PDF that wasn't caught by the main PDF extractor - try to extract it
+                console.log("  Found inline PDF in image search");
                 const bl = part.indexOf("\r\n\r\n");
                 const bl2 = part.indexOf("\n\n");
                 const bs = bl > 0 ? bl + 4 : (bl2 > 0 ? bl2 + 2 : -1);
@@ -445,12 +480,16 @@ You MUST call the extract_receipts function.`;
                   const binary = atob(b64);
                   const bytes = new Uint8Array(binary.length);
                   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-                  return { bytes, mimeType: ctMatch[1].toLowerCase() };
+                  if (bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46) {
+                    console.log("  Found valid PDF in fallback search");
+                    return { bytes, mimeType: "application/pdf" };
+                  }
                 } catch { continue; }
               } else {
                 const nested = part.match(/boundary="?([^\s";\r\n]+)"?/i);
                 if (nested && !seenBoundaries.has(nested[1])) {
                   seenBoundaries.add(nested[1]);
+                  console.log(`  Descending into nested boundary: ${nested[1]}`);
                   const result = findImageInParts(part.split("--" + nested[1]), depth + 1);
                   if (result) return result;
                 }
@@ -463,6 +502,7 @@ You MUST call the extract_receipts function.`;
             const boundary = match[1];
             if (seenBoundaries.has(boundary)) continue;
             seenBoundaries.add(boundary);
+            console.log(`Searching for image/attachment in boundary: ${boundary}`);
             const result = findImageInParts(eml.split("--" + boundary), 0);
             if (result) return result;
           }
@@ -534,10 +574,11 @@ You MUST call the extract_receipts function.`;
           // Jump directly to insert logic by setting textContent to empty
           textContent = "__PDF_EXTRACTED__";
         } else if (imageAttachment) {
-          // Image attachment found — use it for AI extraction (like a scanned document)
-          const imgBase64 = uint8ToBase64(imageAttachment.bytes);
-          const imgDataUrl = `data:${imageAttachment.mimeType};base64,${imgBase64}`;
-          console.log("Using image attachment for AI extraction");
+          // Check if the "image" is actually a PDF (detected by magic bytes)
+          const isActuallyPdf = imageAttachment.mimeType === "application/pdf";
+          const attachmentBase64 = uint8ToBase64(imageAttachment.bytes);
+          const attachmentDataUrl = `data:${isActuallyPdf ? "application/pdf" : imageAttachment.mimeType};base64,${attachmentBase64}`;
+          console.log(`Using ${isActuallyPdf ? "PDF (from image search)" : "image"} attachment for AI extraction`);
 
           const imgAiResponse = await fetchAIWithRetry("https://ai.gateway.lovable.dev/v1/chat/completions", {
             method: "POST",
@@ -552,8 +593,8 @@ You MUST call the extract_receipts function.`;
                 {
                   role: "user",
                   content: [
-                    { type: "text", text: "Extract ALL rent payment line items from this image attached to an email. If it is a remittance detail with multiple tenants/units, extract EACH line item separately. Carefully distinguish between: the property street address, each tenant's personal name, the paying organization/agency, the payment amount per tenant, and the payment method." },
-                    { type: "image_url", image_url: { url: imgDataUrl } },
+                    { type: "text", text: `Extract ALL rent payment line items from this ${isActuallyPdf ? "PDF document" : "image"} attached to an email. If it is a remittance detail with multiple tenants/units, extract EACH line item separately. Carefully distinguish between: the property street address, each tenant's personal name, the paying organization/agency, the payment amount per tenant, and the payment method.` },
+                    { type: "image_url", image_url: { url: attachmentDataUrl } },
                   ],
                 },
               ],
@@ -571,20 +612,33 @@ You MUST call the extract_receipts function.`;
             extractedItems = parsed.items || [];
           }
 
-          // Upload the image for preview
-          const ext = imageAttachment.mimeType.split("/")[1] || "png";
-          const imgPath = `uploads/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}_attachment.${ext}`;
-          const { error: imgUploadError } = await supabase.storage
-            .from("receipts")
-            .upload(imgPath, imageAttachment.bytes, { contentType: imageAttachment.mimeType, upsert: true });
-          if (!imgUploadError) {
-            extractedText = `IMAGE_ATTACHMENT:${imgPath}`;
-            console.log("Stored image attachment at:", imgPath);
+          // Upload the attachment for preview
+          if (isActuallyPdf) {
+            const pdfPath = `uploads/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}_attachment.pdf`;
+            const { error: uploadErr } = await supabase.storage
+              .from("receipts")
+              .upload(pdfPath, imageAttachment.bytes, { contentType: "application/pdf", upsert: true });
+            if (!uploadErr) {
+              extractedText = `PDF_ATTACHMENT:${pdfPath}`;
+              console.log("Stored PDF (from image search) at:", pdfPath);
+            } else {
+              console.error("PDF attachment upload error:", uploadErr);
+            }
+            textContent = "__PDF_EXTRACTED__";
           } else {
-            console.error("Image attachment upload error:", imgUploadError);
+            const ext = imageAttachment.mimeType.split("/")[1] || "png";
+            const imgPath = `uploads/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}_attachment.${ext}`;
+            const { error: imgUploadError } = await supabase.storage
+              .from("receipts")
+              .upload(imgPath, imageAttachment.bytes, { contentType: imageAttachment.mimeType, upsert: true });
+            if (!imgUploadError) {
+              extractedText = `IMAGE_ATTACHMENT:${imgPath}`;
+              console.log("Stored image attachment at:", imgPath);
+            } else {
+              console.error("Image attachment upload error:", imgUploadError);
+            }
+            textContent = "__IMAGE_EXTRACTED__";
           }
-
-          textContent = "__IMAGE_EXTRACTED__";
         } else {
           // No PDF or image attachment — use clean HTML/text body for AI
           if (htmlBody) {
