@@ -14,6 +14,72 @@ export type Database = {
   }
   public: {
     Tables: {
+      appfolio_tenants: {
+        Row: {
+          appfolio_id: string
+          company_name: string | null
+          created_at: string
+          email: string | null
+          first_name: string
+          full_name: string | null
+          id: string
+          last_name: string
+          move_in_on: string | null
+          move_out_on: string | null
+          phone: string | null
+          primary_tenant: boolean | null
+          property_address: string | null
+          property_id: string | null
+          status: string | null
+          synced_at: string
+          unit_id: string | null
+          unit_number: string | null
+          updated_at: string
+        }
+        Insert: {
+          appfolio_id: string
+          company_name?: string | null
+          created_at?: string
+          email?: string | null
+          first_name?: string
+          full_name?: string | null
+          id?: string
+          last_name?: string
+          move_in_on?: string | null
+          move_out_on?: string | null
+          phone?: string | null
+          primary_tenant?: boolean | null
+          property_address?: string | null
+          property_id?: string | null
+          status?: string | null
+          synced_at?: string
+          unit_id?: string | null
+          unit_number?: string | null
+          updated_at?: string
+        }
+        Update: {
+          appfolio_id?: string
+          company_name?: string | null
+          created_at?: string
+          email?: string | null
+          first_name?: string
+          full_name?: string | null
+          id?: string
+          last_name?: string
+          move_in_on?: string | null
+          move_out_on?: string | null
+          phone?: string | null
+          primary_tenant?: boolean | null
+          property_address?: string | null
+          property_id?: string | null
+          status?: string | null
+          synced_at?: string
+          unit_id?: string | null
+          unit_number?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       audit_logs: {
         Row: {
           action: string
