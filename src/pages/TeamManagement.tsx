@@ -49,8 +49,8 @@ export default function TeamManagement() {
       if (rolesErr) throw rolesErr;
 
       const { data: profiles, error: profErr } = await supabase
-        .from("profiles")
-        .select("user_id, email, display_name");
+        .from("profiles_safe" as any)
+        .select("user_id, email, display_name") as { data: { user_id: string; email: string; display_name: string | null }[] | null; error: any };
       if (profErr) throw profErr;
 
       const profileMap = new Map(profiles.map((p) => [p.user_id, p]));
