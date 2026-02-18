@@ -3,10 +3,15 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { fetchReceipts, updateReceipt, getFilePreviewUrl } from "@/lib/api";
 import { motion } from "framer-motion";
-import { CheckCircle2, AlertTriangle, ChevronLeft, ChevronRight, Eye, Edit3, Save, FileText, Image as ImageIcon, Loader2, ZoomIn, ZoomOut, RotateCcw } from "lucide-react";
+import { CheckCircle2, AlertTriangle, ChevronLeft, ChevronRight, Eye, Edit3, Save, FileText, Image as ImageIcon, Loader2, ZoomIn, ZoomOut, RotateCcw, Trash2 } from "lucide-react";
 import PdfViewer from "@/components/PdfViewer";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
+import { useAdminDelete } from "@/hooks/useAdminDelete";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
 export default function ReviewPage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -16,6 +21,7 @@ export default function ReviewPage() {
     queryFn: fetchReceipts,
   });
   const queryClient = useQueryClient();
+  const { isAdmin, deleteMutation } = useAdminDelete();
   const reviewable = allReceipts.filter((r) => r.status === "needs_review" || r.status === "exception");
   const [currentIdx, setCurrentIdx] = useState(0);
 
@@ -159,6 +165,32 @@ export default function ReviewPage() {
             <Button variant="outline" onClick={handleSaveDraft} disabled={saving}>
               <Save className="h-4 w-4 mr-2" /> Save Draft
             </Button>
+            {isAdmin && (
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="destructive" size="icon" disabled={deleteMutation.isPending}>
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Delete this receipt?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This will permanently remove {receipt.receipt_id}. This action cannot be undone.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      onClick={() => deleteMutation.mutate(receipt.id)}
+                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                    >
+                      Delete
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            )}
           </div>
         </motion.div>
       </div>
