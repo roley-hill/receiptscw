@@ -60,6 +60,33 @@ serve(async (req) => {
       userId = user?.id ?? null;
     }
 
+    // ---- FETCH KNOWN TENANTS FOR AI MATCHING ----
+    let knownTenantsList = "";
+    let tenantLookup: { full_name: string; property_address: string; unit_number: string }[] = [];
+    try {
+      const { data: tenants } = await supabase
+        .from("appfolio_tenants")
+        .select("full_name, property_address, unit_number, status")
+        .eq("status", "active")
+        .order("full_name");
+      if (tenants && tenants.length > 0) {
+        tenantLookup = tenants.map((t: any) => ({
+          full_name: t.full_name || "",
+          property_address: t.property_address || "",
+          unit_number: t.unit_number || "",
+        }));
+        knownTenantsList = tenants.map((t: any) => {
+          const parts = [t.full_name];
+          if (t.property_address) parts.push(`@ ${t.property_address}`);
+          if (t.unit_number) parts.push(`Unit ${t.unit_number}`);
+          return parts.join(" ");
+        }).join("\n");
+        console.log(`Loaded ${tenants.length} known tenants for AI matching`);
+      }
+    } catch (e) {
+      console.warn("Could not load tenants for matching:", e);
+    }
+
     // ---- READ FILE & COMPUTE CONTENT HASH ----
     const arrayBuffer = await file.arrayBuffer();
     const fileBytes = new Uint8Array(arrayBuffer);
@@ -214,7 +241,12 @@ MULTI-LINE ITEM RULES:
 - NEVER combine multiple line items into one — each tenant payment must be its own item
 - Make sure every line item on the remittance or spreadsheet is accounted for
 
-You MUST call the extract_receipts function.`;
+You MUST call the extract_receipts function.${knownTenantsList ? `
+
+KNOWN TENANTS LIST (from property management system):
+When you extract a tenant name, try to match it to one of these known tenants. Use the EXACT name from this list when there's a match (even partial — e.g. "M. Valencia" should match "Maria Valencia"). If no match is found, use the name as extracted from the document.
+
+${knownTenantsList}` : ""}`;
 
     let extractedItems: any[] = [];
     let extractedText = "";
@@ -722,6 +754,45 @@ You MUST call the extract_receipts function.`;
         amount: 0,
         amount_confidence: 0,
       }];
+    }
+
+    // ---- POST-EXTRACTION TENANT MATCHING (fuzzy safety net) ----
+    if (tenantLookup.length > 0) {
+      for (const item of extractedItems) {
+        if (!item.tenant) continue;
+        const extracted = item.tenant.toLowerCase().trim();
+        // Try exact match first
+        let match = tenantLookup.find(t => t.full_name.toLowerCase() === extracted);
+        if (!match) {
+          // Try partial match: extracted name is contained in known name or vice versa
+          match = tenantLookup.find(t => {
+            const known = t.full_name.toLowerCase();
+            // Check if last names match and first initial matches
+            const eParts = extracted.split(/\s+/);
+            const kParts = known.split(/\s+/);
+            if (eParts.length >= 2 && kParts.length >= 2) {
+              const eLastName = eParts[eParts.length - 1];
+              const kLastName = kParts[kParts.length - 1];
+              if (eLastName === kLastName) return true;
+            }
+            return known.includes(extracted) || extracted.includes(known);
+          });
+        }
+        if (match) {
+          console.log(`Tenant matched: "${item.tenant}" -> "${match.full_name}"`);
+          item.tenant = match.full_name;
+          item.tenant_confidence = Math.max(item.tenant_confidence || 0, 0.95);
+          // Also fill in property/unit from the match if missing
+          if (!item.property && match.property_address) {
+            item.property = match.property_address;
+            item.property_confidence = Math.max(item.property_confidence || 0, 0.9);
+          }
+          if (!item.unit && match.unit_number) {
+            item.unit = match.unit_number;
+            item.unit_confidence = Math.max(item.unit_confidence || 0, 0.9);
+          }
+        }
+      }
     }
 
     // ---- DUPLICATE DETECTION & INSERT ----

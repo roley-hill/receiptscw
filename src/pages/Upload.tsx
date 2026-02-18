@@ -89,6 +89,16 @@ export default function UploadPage() {
       );
     }
 
+    // Sync tenants from AppFolio before extraction (on-demand)
+    try {
+      console.log("Syncing tenants from AppFolio...");
+      const { error: syncError } = await supabase.functions.invoke("sync-tenants");
+      if (syncError) console.warn("Tenant sync warning:", syncError.message);
+      else console.log("Tenant sync completed");
+    } catch (e) {
+      console.warn("Tenant sync skipped:", e);
+    }
+
     let processedCount = 0;
     for (let i = 0; i < pending.length; i++) {
       if (cancelledRef.current) {
