@@ -6,7 +6,7 @@ export interface UploadedFile {
   size: number;
   type: string;
   file: File;
-  status: "pending" | "processing" | "done" | "error";
+  status: "pending" | "processing" | "done" | "error" | "cancelled";
   error?: string;
   insertedCount?: number;
   duplicateCount?: number;
@@ -31,7 +31,7 @@ export function UploadStoreProvider({ children }: { children: ReactNode }) {
   const cancelledRef = useRef(false);
 
   const clearCompleted = useCallback(() => {
-    setFiles((prev) => prev.filter((f) => f.status !== "done" && f.status !== "error"));
+    setFiles((prev) => prev.filter((f) => f.status !== "done" && f.status !== "error" && f.status !== "cancelled"));
   }, []);
 
   const cancelExtraction = useCallback(() => {

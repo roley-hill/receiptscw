@@ -1,6 +1,6 @@
 import { useState, useRef } from "react";
 import { motion } from "framer-motion";
-import { Upload as UploadIcon, FolderOpen, FileText, Image, AlertCircle, CheckCircle2, X, Loader2, Copy, Ban } from "lucide-react";
+import { Upload as UploadIcon, FolderOpen, FileText, Image, AlertCircle, CheckCircle2, X, Loader2, Copy, Ban, ChevronDown, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { uploadReceiptFile } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
@@ -9,6 +9,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useUploadStore } from "@/hooks/useUploadStore";
 import { supabase } from "@/integrations/supabase/client";
 import UploadHistory from "@/components/UploadHistory";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
 export default function UploadPage() {
   const { files, setFiles, isProcessing, setIsProcessing, cancelledRef, cancelExtraction } = useUploadStore();
@@ -18,6 +19,7 @@ export default function UploadPage() {
   const { session, user } = useAuth();
   const queryClient = useQueryClient();
   const [historyKey, setHistoryKey] = useState(0);
+  const [cancelledOpen, setCancelledOpen] = useState(false);
 
   const handleFiles = (fileList: FileList) => {
     const accepted = ["application/pdf", "image/jpeg", "image/png", "image/heic", "image/jpg", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.ms-excel", "message/rfc822", "application/octet-stream"];
@@ -91,7 +93,7 @@ export default function UploadPage() {
         setFiles((prev) =>
           prev.map((pf) =>
             remaining.some((r) => r.id === pf.id) && pf.status === "pending"
-              ? { ...pf, status: "error", error: "Cancelled" }
+              ? { ...pf, status: "cancelled", error: "Cancelled" }
               : pf
           )
         );
@@ -184,6 +186,8 @@ export default function UploadPage() {
 
   const pendingCount = files.filter((f) => f.status === "pending").length;
   const doneCount = files.filter((f) => f.status === "done").length;
+  const cancelledFiles = files.filter((f) => f.status === "cancelled");
+  const activeFiles = files.filter((f) => f.status !== "cancelled");
 
   return (
     <div className="space-y-6 max-w-4xl">
@@ -243,11 +247,11 @@ export default function UploadPage() {
         </div>
       </motion.div>
 
-      {files.length > 0 && (
+      {activeFiles.length > 0 && (
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-foreground">
-              {files.length} file{files.length !== 1 ? "s" : ""} · {doneCount} extracted · {pendingCount} pending
+              {activeFiles.length} file{activeFiles.length !== 1 ? "s" : ""} · {doneCount} extracted · {pendingCount} pending
             </h2>
             <div className="flex items-center gap-2">
               {isProcessing && (
@@ -268,7 +272,7 @@ export default function UploadPage() {
             </div>
           </div>
           <div className="vault-card divide-y divide-border">
-            {files.map((file) => (
+            {activeFiles.map((file) => (
               <div key={file.id} className="flex items-center gap-3 px-4 py-3">
                 {getFileIcon(file.type)}
                 <div className="flex-1 min-w-0">
@@ -303,6 +307,41 @@ export default function UploadPage() {
             ))}
           </div>
         </div>
+      )}
+
+      {cancelledFiles.length > 0 && (
+        <Collapsible open={cancelledOpen} onOpenChange={setCancelledOpen}>
+          <CollapsibleTrigger className="w-full">
+            <div className="vault-card flex items-center gap-3 px-4 py-3 hover:bg-muted/50 transition-colors cursor-pointer">
+              {cancelledOpen ? (
+                <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
+              ) : (
+                <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
+              )}
+              <Ban className="h-4 w-4 text-muted-foreground" />
+              <span className="text-sm font-medium text-muted-foreground">
+                {cancelledFiles.length} cancelled file{cancelledFiles.length !== 1 ? "s" : ""}
+              </span>
+            </div>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <div className="vault-card divide-y divide-border mt-1">
+              {cancelledFiles.map((file) => (
+                <div key={file.id} className="flex items-center gap-3 px-4 py-3">
+                  {getFileIcon(file.type)}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-foreground truncate">{file.name}</p>
+                    <p className="text-xs text-muted-foreground">{formatSize(file.size)}</p>
+                  </div>
+                  <span className="text-xs text-muted-foreground">Cancelled</span>
+                  <button onClick={() => removeFile(file.id)} className="p-1 rounded hover:bg-muted">
+                    <X className="h-3.5 w-3.5 text-muted-foreground" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
       )}
 
       {/* Upload History */}
