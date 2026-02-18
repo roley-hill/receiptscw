@@ -302,7 +302,7 @@ You MUST call the extract_receipts function.`;
 
           if (boundaryMatch) {
             const boundary = boundaryMatch[1];
-            const parts = eml.split("--" + boundary);
+            const parts = splitByBoundary(eml, boundary);
             console.log(`EML split into ${parts.length} parts for type ${mimeType}`);
             for (const part of parts) {
               if (!typeRegex.test(part)) continue;
@@ -314,7 +314,7 @@ You MUST call the extract_receipts function.`;
               const nestedBoundary = part.match(/boundary="?([^\s";\r\n]+)"?/i);
               if (!nestedBoundary) continue;
               console.log("Trying nested boundary:", nestedBoundary[1]);
-              const nestedParts = part.split("--" + nestedBoundary[1]);
+              const nestedParts = splitByBoundary(part, nestedBoundary[1]);
               for (const np of nestedParts) {
                 if (!typeRegex.test(np)) continue;
                 const decoded = decodePart(np);
@@ -324,7 +324,7 @@ You MUST call the extract_receipts function.`;
               for (const np of nestedParts) {
                 const nb3 = np.match(/boundary="?([^\s";\r\n]+)"?/i);
                 if (!nb3) continue;
-                const parts3 = np.split("--" + nb3[1]);
+                const parts3 = splitByBoundary(np, nb3[1]);
                 for (const p3 of parts3) {
                   if (!typeRegex.test(p3)) continue;
                   const decoded = decodePart(p3);
@@ -351,148 +351,118 @@ You MUST call the extract_receipts function.`;
         }
 
         // --- Extract PDF attachment from EML ---
-        function extractPdfAttachment(eml: string): Uint8Array | null {
-          // Find ALL boundaries in the EML, not just the first
+        // Helper: strip leading dashes from boundary values to normalize
+        function normalizeBoundary(b: string): string {
+          // Some headers include leading -- in the boundary value; strip them for consistency
+          return b.replace(/^-+/, "");
+        }
+
+        // Helper: split EML by boundary, handling both raw and --prefixed boundaries
+        function splitByBoundary(text: string, boundary: string): string[] {
+          // Try with -- prefix first (standard MIME)
+          const norm = normalizeBoundary(boundary);
+          let parts = text.split("--" + norm);
+          if (parts.length > 1) return parts;
+          // Fallback: try the raw boundary value
+          parts = text.split(boundary);
+          return parts;
+        }
+
+        // Universal attachment extractor: finds any substantial binary attachment
+        function extractAnyAttachment(eml: string): { bytes: Uint8Array; mimeType: string; fileName: string } | null {
           const boundaryMatches = [...eml.matchAll(/boundary="?([^\s";\r\n]+)"?/gi)];
-          if (boundaryMatches.length === 0) return null;
+          if (boundaryMatches.length === 0) {
+            console.log("No MIME boundaries found in EML");
+            return null;
+          }
+          console.log(`Found ${boundaryMatches.length} boundaries: ${boundaryMatches.map(m => m[1].substring(0, 40)).join(", ")}`);
 
           const seenBoundaries = new Set<string>();
 
-          function findPdfInParts(parts: string[], depth: number): Uint8Array | null {
-            if (depth > 3) return null;
+          function tryDecodePart(part: string): { bytes: Uint8Array; mimeType: string; fileName: string } | null {
+            const ctMatch = part.match(/content-type:\s*([^\r\n;]+)/i);
+            const ct = ctMatch ? ctMatch[1].trim().toLowerCase() : "";
+            const fnMatch = part.match(/(?:file)?name="?([^"\r\n;]+)"?/i);
+            const fileName = fnMatch ? fnMatch[1].trim() : "";
+            const isAttachment = /content-disposition:\s*attachment/i.test(part);
+            const hasTransferEncoding = /content-transfer-encoding:\s*base64/i.test(part);
+
+            // Log every part's details
+            if (ct) {
+              console.log(`  Part: ct=${ct}, fn=${fileName}, attachment=${isAttachment}, base64=${hasTransferEncoding}, len=${part.length}`);
+            }
+
+            // Skip text parts and multipart containers
+            if (ct.startsWith("text/") || ct.startsWith("multipart/") || !ct) return null;
+
+            // This is a binary attachment - try to decode it
+            const bl = part.indexOf("\r\n\r\n");
+            const bl2 = part.indexOf("\n\n");
+            const bs = bl > 0 ? bl + 4 : (bl2 > 0 ? bl2 + 2 : -1);
+            if (bs < 0) return null;
+            let b64 = part.substring(bs).trim();
+            const trailingBoundary = b64.indexOf("\r\n--");
+            if (trailingBoundary > 0) b64 = b64.substring(0, trailingBoundary);
+            // Also trim trailing boundary without \r\n
+            const trailingBoundary2 = b64.indexOf("\n--");
+            if (trailingBoundary2 > 0) b64 = b64.substring(0, trailingBoundary2);
+            b64 = b64.replace(/\s/g, "");
+            
+            console.log(`  Base64 payload: ${b64.length} chars`);
+            if (b64.length < 100) return null;
+
+            try {
+              const binary = atob(b64);
+              const bytes = new Uint8Array(binary.length);
+              for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+
+              // Detect actual type by magic bytes
+              let detectedType = ct;
+              if (bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46) {
+                detectedType = "application/pdf";
+                console.log(`  Detected PDF by magic bytes (${bytes.length} bytes)`);
+              } else if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4E && bytes[3] === 0x47) {
+                detectedType = "image/png";
+                console.log(`  Detected PNG by magic bytes (${bytes.length} bytes)`);
+              } else if (bytes[0] === 0xFF && bytes[1] === 0xD8) {
+                detectedType = "image/jpeg";
+                console.log(`  Detected JPEG by magic bytes (${bytes.length} bytes)`);
+              } else if (bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46) {
+                detectedType = "image/gif";
+                console.log(`  Detected GIF by magic bytes (${bytes.length} bytes)`);
+              } else {
+                console.log(`  Unknown magic bytes: ${bytes[0].toString(16)} ${bytes[1].toString(16)} ${bytes[2].toString(16)} ${bytes[3].toString(16)} (${bytes.length} bytes)`);
+              }
+
+              // Skip tiny images (likely inline icons) - but keep PDFs regardless
+              if (detectedType.startsWith("image/") && bytes.length < 5000) {
+                console.log(`  Skipping tiny image (${bytes.length} bytes)`);
+                return null;
+              }
+
+              return { bytes, mimeType: detectedType, fileName };
+            } catch (e) {
+              console.log(`  Base64 decode failed: ${e}`);
+              return null;
+            }
+          }
+
+          function findInParts(parts: string[], depth: number): { bytes: Uint8Array; mimeType: string; fileName: string } | null {
+            if (depth > 4) return null;
+            console.log(`  Scanning ${parts.length} parts at depth ${depth}`);
             for (const part of parts) {
-              if (/content-type:\s*application\/pdf/i.test(part)) {
-                const bl = part.indexOf("\r\n\r\n");
-                const bl2 = part.indexOf("\n\n");
-                const bs = bl > 0 ? bl + 4 : (bl2 > 0 ? bl2 + 2 : -1);
-                if (bs < 0) continue;
-                let b64 = part.substring(bs).trim();
-                const trailingBoundary = b64.indexOf("\r\n--");
-                if (trailingBoundary > 0) b64 = b64.substring(0, trailingBoundary);
-                b64 = b64.replace(/\s/g, "");
-                if (b64.length < 100) continue;
-                try {
-                  const binary = atob(b64);
-                  const bytes = new Uint8Array(binary.length);
-                  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-                  if (bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46) {
-                    return bytes;
-                  }
-                } catch { continue; }
-              } else {
-                const nested = part.match(/boundary="?([^\s";\r\n]+)"?/i);
-                if (nested && !seenBoundaries.has(nested[1])) {
-                  seenBoundaries.add(nested[1]);
-                  const result = findPdfInParts(part.split("--" + nested[1]), depth + 1);
-                  if (result) return result;
-                }
-              }
-            }
-            return null;
-          }
+              const result = tryDecodePart(part);
+              if (result) return result;
 
-          // Try each boundary as a top-level split
-          for (const match of boundaryMatches) {
-            const boundary = match[1];
-            if (seenBoundaries.has(boundary)) continue;
-            seenBoundaries.add(boundary);
-            const result = findPdfInParts(eml.split("--" + boundary), 0);
-            if (result) return result;
-          }
-          return null;
-        }
-
-        // --- Extract image attachment from EML (png, jpeg, gif, or generic binary with image extension) ---
-        function extractImageAttachment(eml: string): { bytes: Uint8Array; mimeType: string } | null {
-          const boundaryMatches = [...eml.matchAll(/boundary="?([^\s";\r\n]+)"?/gi)];
-          if (boundaryMatches.length === 0) return null;
-
-          const seenBoundaries = new Set<string>();
-
-          function findImageInParts(parts: string[], depth: number): { bytes: Uint8Array; mimeType: string } | null {
-            if (depth > 3) return null;
-            for (let pi = 0; pi < parts.length; pi++) {
-              const part = parts[pi];
-              // Log content-type of each part for debugging
-              const ctHeader = part.match(/content-type:\s*([^\r\n;]+)/i);
-              if (ctHeader) {
-                console.log(`  MIME part ${pi} (depth ${depth}): content-type=${ctHeader[1].trim()}, len=${part.length}`);
-              }
-
-              // Check for explicit image content-type
-              const ctMatch = part.match(/content-type:\s*(image\/(?:png|jpe?g|gif|bmp|tiff|x-png))/i);
-              // Also check for application/octet-stream with image filename
-              const isOctetStream = /content-type:\s*application\/octet-stream/i.test(part);
-              const fileNameMatch = part.match(/(?:file)?name="?([^"\r\n;]+)"?/i);
-              const hasImageFileName = fileNameMatch && /\.(png|jpe?g|gif|bmp|tiff)$/i.test(fileNameMatch[1]);
-              // Also check for application/pdf that wasn't caught by PDF extractor (sometimes PDFs are inline)
-              const isInlinePdf = /content-type:\s*application\/pdf/i.test(part);
-
-              if (ctMatch || (isOctetStream && hasImageFileName)) {
-                const mimeType = ctMatch ? ctMatch[1].toLowerCase() : `image/${fileNameMatch![1].split('.').pop()!.toLowerCase()}`;
-                console.log(`  Found image-like attachment: ${mimeType}, fileName=${fileNameMatch?.[1] || 'unknown'}`);
-                
-                const bl = part.indexOf("\r\n\r\n");
-                const bl2 = part.indexOf("\n\n");
-                const bs = bl > 0 ? bl + 4 : (bl2 > 0 ? bl2 + 2 : -1);
-                if (bs < 0) continue;
-                let b64 = part.substring(bs).trim();
-                const trailingBoundary = b64.indexOf("\r\n--");
-                if (trailingBoundary > 0) b64 = b64.substring(0, trailingBoundary);
-                b64 = b64.replace(/\s/g, "");
-                console.log(`  Base64 length: ${b64.length} chars`);
-                
-                // Skip tiny inline images (logos, icons) - less than ~7KB
-                if (b64.length < 10000) {
-                  console.log("  Skipping small image (likely icon/logo)");
-                  continue;
-                }
-                
-                try {
-                  const binary = atob(b64);
-                  const bytes = new Uint8Array(binary.length);
-                  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-                  
-                  // Check if this is actually a PDF masquerading as an image
-                  if (bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46) {
-                    console.log("  Image attachment is actually a PDF! Returning as PDF.");
-                    return { bytes, mimeType: "application/pdf" };
-                  }
-                  
-                  return { bytes, mimeType };
-                } catch (e) {
-                  console.log(`  Failed to decode base64: ${e}`);
-                  continue;
-                }
-              } else if (isInlinePdf) {
-                // PDF that wasn't caught by the main PDF extractor - try to extract it
-                console.log("  Found inline PDF in image search");
-                const bl = part.indexOf("\r\n\r\n");
-                const bl2 = part.indexOf("\n\n");
-                const bs = bl > 0 ? bl + 4 : (bl2 > 0 ? bl2 + 2 : -1);
-                if (bs < 0) continue;
-                let b64 = part.substring(bs).trim();
-                const trailingBoundary = b64.indexOf("\r\n--");
-                if (trailingBoundary > 0) b64 = b64.substring(0, trailingBoundary);
-                b64 = b64.replace(/\s/g, "");
-                if (b64.length < 100) continue;
-                try {
-                  const binary = atob(b64);
-                  const bytes = new Uint8Array(binary.length);
-                  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-                  if (bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46) {
-                    console.log("  Found valid PDF in fallback search");
-                    return { bytes, mimeType: "application/pdf" };
-                  }
-                } catch { continue; }
-              } else {
-                const nested = part.match(/boundary="?([^\s";\r\n]+)"?/i);
-                if (nested && !seenBoundaries.has(nested[1])) {
-                  seenBoundaries.add(nested[1]);
-                  console.log(`  Descending into nested boundary: ${nested[1]}`);
-                  const result = findImageInParts(part.split("--" + nested[1]), depth + 1);
-                  if (result) return result;
-                }
+              // Check for nested boundaries
+              const nested = part.match(/boundary="?([^\s";\r\n]+)"?/i);
+              if (nested && !seenBoundaries.has(normalizeBoundary(nested[1]))) {
+                const norm = normalizeBoundary(nested[1]);
+                seenBoundaries.add(norm);
+                console.log(`  Descending into nested boundary: ${norm.substring(0, 40)}`);
+                const sub = splitByBoundary(part, nested[1]);
+                const result2 = findInParts(sub, depth + 1);
+                if (result2) return result2;
               }
             }
             return null;
@@ -500,20 +470,22 @@ You MUST call the extract_receipts function.`;
 
           for (const match of boundaryMatches) {
             const boundary = match[1];
-            if (seenBoundaries.has(boundary)) continue;
-            seenBoundaries.add(boundary);
-            console.log(`Searching for image/attachment in boundary: ${boundary}`);
-            const result = findImageInParts(eml.split("--" + boundary), 0);
+            const norm = normalizeBoundary(boundary);
+            if (seenBoundaries.has(norm)) continue;
+            seenBoundaries.add(norm);
+            console.log(`Trying top-level boundary: ${norm.substring(0, 50)}`);
+            const parts = splitByBoundary(eml, boundary);
+            const result = findInParts(parts, 0);
             if (result) return result;
           }
           return null;
         }
 
-        const pdfBytes = extractPdfAttachment(rawEml);
-        console.log("EML PDF attachment found:", !!pdfBytes, pdfBytes ? `(${pdfBytes.length} bytes)` : "");
-
-        const imageAttachment = !pdfBytes ? extractImageAttachment(rawEml) : null;
-        console.log("EML image attachment found:", !!imageAttachment, imageAttachment ? `(${imageAttachment.bytes.length} bytes, ${imageAttachment.mimeType})` : "");
+        // Use the unified attachment extractor
+        const anyAttachment = extractAnyAttachment(rawEml);
+        const pdfBytes = anyAttachment?.mimeType === "application/pdf" ? anyAttachment.bytes : null;
+        const imageAttachment = anyAttachment && anyAttachment.mimeType !== "application/pdf" ? anyAttachment : null;
+        console.log("EML attachment found:", !!anyAttachment, anyAttachment ? `(${anyAttachment.bytes.length} bytes, ${anyAttachment.mimeType}, fn=${anyAttachment.fileName})` : "none");
 
         // Try HTML first, then plain text
         const htmlBody = extractMimePartByType(rawEml, "text/html");
