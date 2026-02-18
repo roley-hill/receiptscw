@@ -57,6 +57,9 @@ export async function uploadReceiptFile(file: File, token: string) {
 
   if (!resp.ok) {
     const err = await resp.json();
+    if (resp.status === 409 && err.already_processed) {
+      return { ...err, skipped_already_processed: true, inserted_count: 0, duplicate_count: 0, total_line_items: 0 };
+    }
     throw new Error(err.error || "Upload failed");
   }
   return resp.json();
