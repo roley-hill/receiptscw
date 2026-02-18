@@ -1,11 +1,11 @@
 import { useUploadStore } from "@/hooks/useUploadStore";
 import { useLocation } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { CheckCircle2, Loader2, AlertCircle, X, Upload } from "lucide-react";
+import { CheckCircle2, Loader2, AlertCircle, X, Upload, Ban } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 
 export default function UploadProgressFloat() {
-  const { files, clearCompleted } = useUploadStore();
+  const { files, clearCompleted, isProcessing, cancelExtraction } = useUploadStore();
   const location = useLocation();
 
   // Don't show on upload page itself
@@ -38,8 +38,13 @@ export default function UploadProgressFloat() {
               {processingCount > 0 ? "Extracting..." : "Upload Complete"}
             </span>
           </div>
+          {isProcessing && (
+            <button onClick={cancelExtraction} className="p-1 rounded hover:bg-destructive/10" title="Cancel extraction">
+              <Ban className="h-3.5 w-3.5 text-destructive" />
+            </button>
+          )}
           {allDone && (
-            <button onClick={clearCompleted} className="p-1 rounded hover:bg-muted">
+            <button onClick={clearCompleted} className="p-1 rounded hover:bg-muted" title="Dismiss">
               <X className="h-3.5 w-3.5 text-muted-foreground" />
             </button>
           )}
