@@ -361,26 +361,66 @@ You MUST call the extract_receipts function.`;
         const plainBody = !htmlBody ? extractMimePartByType(rawEml, "text/plain") : null;
         console.log("EML extraction result - HTML:", !!htmlBody, "Plain:", !!plainBody);
 
-        // For AI: send the raw EML (headers help with extraction context)
-        textContent = rawEml;
-        if (textContent.length > 30000) textContent = textContent.substring(0, 30000);
-
-        // If PDF attachment exists, upload it and store path for preview
+        // If PDF attachment exists, use the PDF image path for AI extraction (much more accurate)
         if (pdfBytes) {
+          const pdfBase64 = uint8ToBase64(pdfBytes);
+          const pdfDataUrl = `data:application/pdf;base64,${pdfBase64}`;
+          console.log("Using PDF attachment for AI extraction instead of raw EML text");
+
+          const pdfAiResponse = await fetchAIWithRetry("https://ai.gateway.lovable.dev/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${LOVABLE_API_KEY}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              model: "google/gemini-2.5-flash",
+              messages: [
+                { role: "system", content: systemPrompt },
+                {
+                  role: "user",
+                  content: [
+                    { type: "text", text: "Extract ALL rent payment line items from this PDF document attached to an email. If it is a remittance detail with multiple tenants/units, extract EACH line item separately. Carefully distinguish between: the property street address, each tenant's personal name, the paying organization/agency, the payment amount per tenant, and the payment method." },
+                    { type: "image_url", image_url: { url: pdfDataUrl } },
+                  ],
+                },
+              ],
+              tools: [extractMultiReceiptTool],
+              tool_choice: { type: "function", function: { name: "extract_receipts" } },
+            }),
+          }, corsHeaders);
+
+          if (!pdfAiResponse.ok) return pdfAiResponse;
+
+          const pdfAiData = await pdfAiResponse.json();
+          const pdfToolCall = pdfAiData.choices?.[0]?.message?.tool_calls?.[0];
+          if (pdfToolCall) {
+            const parsed = JSON.parse(pdfToolCall.function.arguments);
+            extractedItems = parsed.items || [];
+          }
+
+          // Upload the PDF for preview and set extractedText
           const pdfPath = `uploads/${timestamp}_${safeName}_attachment.pdf`;
           const { error: pdfUploadError } = await supabase.storage
             .from("receipts")
             .upload(pdfPath, pdfBytes, { contentType: "application/pdf", upsert: true });
-          if (pdfUploadError) {
-            console.error("PDF attachment upload error:", pdfUploadError);
-          } else {
-            // Store with prefix so frontend knows to render PdfViewer
+          if (!pdfUploadError) {
             extractedText = `PDF_ATTACHMENT:${pdfPath}`;
             console.log("Stored PDF attachment at:", pdfPath);
+          } else {
+            console.error("PDF attachment upload error:", pdfUploadError);
           }
+
+          // Skip the text-based AI extraction below since we already extracted from PDF
+          // Jump directly to insert logic by setting textContent to empty
+          textContent = "__PDF_EXTRACTED__";
+        } else {
+          // No PDF attachment — fall back to raw EML text for AI
+          textContent = rawEml;
+          if (textContent.length > 30000) textContent = textContent.substring(0, 30000);
         }
 
-        // If no PDF attachment (or upload failed), fall back to HTML/text preview
+        // If no PDF attachment, handle preview from HTML/text
         if (!extractedText.startsWith("PDF_ATTACHMENT:")) {
           if (htmlBody) {
             extractedText = htmlBody.substring(0, 80000);
@@ -412,36 +452,39 @@ You MUST call the extract_receipts function.`;
         }
       }
 
-      const aiResponse = await fetchAIWithRetry("https://ai.gateway.lovable.dev/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${LOVABLE_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "google/gemini-2.5-flash",
-          messages: [
-            { role: "system", content: systemPrompt },
-            {
-              role: "user",
-              content: `Extract ALL rent payment line items from this ${isEml ? "email" : "spreadsheet"}. EVERY row/line item in the ${isEml ? "remittance detail" : "spreadsheet"} represents a separate receipt for a different tenant — extract ALL of them as separate items.\n\n${textContent}`,
-            },
-          ],
-          tools: [extractMultiReceiptTool],
-          tool_choice: { type: "function", function: { name: "extract_receipts" } },
-        }),
-      }, corsHeaders);
+      // Only run text-based AI extraction if we haven't already extracted from a PDF attachment
+      if (textContent !== "__PDF_EXTRACTED__") {
+        const aiResponse = await fetchAIWithRetry("https://ai.gateway.lovable.dev/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${LOVABLE_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: "google/gemini-2.5-flash",
+            messages: [
+              { role: "system", content: systemPrompt },
+              {
+                role: "user",
+                content: `Extract ALL rent payment line items from this ${isEml ? "email" : "spreadsheet"}. EVERY row/line item in the ${isEml ? "remittance detail" : "spreadsheet"} represents a separate receipt for a different tenant — extract ALL of them as separate items.\n\n${textContent}`,
+              },
+            ],
+            tools: [extractMultiReceiptTool],
+            tool_choice: { type: "function", function: { name: "extract_receipts" } },
+          }),
+        }, corsHeaders);
 
-      if (!aiResponse.ok) return aiResponse;
+        if (!aiResponse.ok) return aiResponse;
 
-      const aiData = await aiResponse.json();
-      const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
-      if (toolCall) {
-        const parsed = JSON.parse(toolCall.function.arguments);
-        extractedItems = parsed.items || [];
-        // For EML, keep the HTML body we already extracted; for XLSX keep the CSV
-        if (!extractedText) {
-          extractedText = parsed.extracted_text || textContent.substring(0, 5000);
+        const aiData = await aiResponse.json();
+        const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
+        if (toolCall) {
+          const parsed = JSON.parse(toolCall.function.arguments);
+          extractedItems = parsed.items || [];
+          // For EML, keep the HTML body we already extracted; for XLSX keep the CSV
+          if (!extractedText) {
+            extractedText = parsed.extracted_text || textContent.substring(0, 5000);
+          }
         }
       }
     } else {
@@ -474,7 +517,7 @@ You MUST call the extract_receipts function.`;
     const duplicates: any[] = [];
 
     for (const item of extractedItems) {
-      // Check for duplicates: same tenant + amount + receipt_date + property + rent_month
+      // Check for duplicates: same tenant + amount + receipt_date + property + unit + rent_month
       if (item.tenant && item.amount && item.receipt_date) {
         let dupQuery = supabase
           .from("receipts")
@@ -482,7 +525,8 @@ You MUST call the extract_receipts function.`;
           .eq("tenant", item.tenant)
           .eq("amount", item.amount)
           .eq("receipt_date", item.receipt_date)
-          .eq("property", item.property || "");
+          .eq("property", item.property || "")
+          .eq("unit", item.unit || "");
 
         // Only match rent_month: if both have a value they must be equal, 
         // if the new item has a rent_month we filter by it
