@@ -67,7 +67,7 @@ serve(async (req) => {
       const { data: tenants } = await supabase
         .from("appfolio_tenants")
         .select("full_name, property_address, unit_number, status")
-        .eq("status", "active")
+        .in("status", ["current", "notice"])
         .order("full_name");
       if (tenants && tenants.length > 0) {
         tenantLookup = tenants.map((t: any) => ({
