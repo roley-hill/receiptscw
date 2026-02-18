@@ -464,9 +464,26 @@ You MUST call the extract_receipts function.`;
           // Jump directly to insert logic by setting textContent to empty
           textContent = "__PDF_EXTRACTED__";
         } else {
-          // No PDF attachment — fall back to raw EML text for AI
-          textContent = rawEml;
+          // No PDF attachment — use clean HTML/text body for AI (NOT raw EML with MIME noise)
+          if (htmlBody) {
+            // Strip HTML tags for AI text extraction, keep content
+            textContent = htmlBody.replace(/<style[\s\S]*?<\/style>/gi, "")
+              .replace(/<[^>]+>/g, " ")
+              .replace(/&nbsp;/g, " ")
+              .replace(/&amp;/g, "&")
+              .replace(/&lt;/g, "<")
+              .replace(/&gt;/g, ">")
+              .replace(/\s+/g, " ")
+              .trim();
+          } else if (plainBody) {
+            textContent = plainBody;
+          } else {
+            // Last resort: use raw EML but warn
+            console.warn("No HTML or plain text body found in EML, using raw EML");
+            textContent = rawEml;
+          }
           if (textContent.length > 30000) textContent = textContent.substring(0, 30000);
+          console.log("EML text content for AI (first 500 chars):", textContent.substring(0, 500));
         }
 
         // If no PDF attachment, handle preview from HTML/text
