@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
+import * as XLSX from "xlsx";
 import { FileText, ZoomIn, ZoomOut, RotateCcw, Loader2, Download, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { motion } from "framer-motion";
@@ -62,6 +63,33 @@ export function EmlPdfAttachment({ pdfPath }: { pdfPath: string }) {
   return <PdfViewer url={pdfUrl} />;
 }
 
+/* ─── XLSX fetcher: downloads and parses XLSX from URL ─── */
+function XlsxFetchPreview({ url }: { url: string }) {
+  const [csv, setCsv] = useState<string | null>(null);
+  const [error, setError] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch(url)
+      .then((r) => r.arrayBuffer())
+      .then((buf) => {
+        const wb = XLSX.read(new Uint8Array(buf), { type: "array" });
+        const parts: string[] = [];
+        for (const name of wb.SheetNames) {
+          parts.push(`=== Sheet: ${name} ===`);
+          parts.push(XLSX.utils.sheet_to_csv(wb.Sheets[name]));
+        }
+        setCsv(parts.join("\n"));
+      })
+      .catch(() => setError(true))
+      .finally(() => setLoading(false));
+  }, [url]);
+
+  if (loading) return <div className="flex items-center justify-center min-h-[300px]"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+  if (error || !csv) return <p className="text-sm text-muted-foreground text-center py-8">Could not parse spreadsheet.</p>;
+  return <ZoomablePreview><div className="p-4"><SpreadsheetPreview csv={csv} /></div></ZoomablePreview>;
+}
+
 export function AttachmentContent({ url, fileName, originalText }: { url: string; fileName: string; originalText: string | null }) {
   const fileExt = fileName?.split(".").pop()?.toLowerCase();
   const isImage = ["jpg", "jpeg", "png", "webp", "gif", "bmp", "tiff", "tif"].includes(fileExt || "");
@@ -71,6 +99,7 @@ export function AttachmentContent({ url, fileName, originalText }: { url: string
   if (isPdf) return <PdfViewer url={url} />;
   if (isImage) return <ZoomablePreview><div className="p-4 flex items-center justify-center min-h-[300px]"><img src={url} alt={fileName} className="max-w-full object-contain" /></div></ZoomablePreview>;
   if (isXlsx && originalText) return <ZoomablePreview><div className="p-4"><SpreadsheetPreview csv={originalText} /></div></ZoomablePreview>;
+  if (isXlsx) return <XlsxFetchPreview url={url} />;
   if (isEml && originalText?.startsWith("PDF_ATTACHMENT:")) { const pdfPath = originalText.replace("PDF_ATTACHMENT:", ""); return <EmlPdfAttachment pdfPath={pdfPath} />; }
   if (isEml && originalText) return <ZoomablePreview><EmailPreview raw={originalText} /></ZoomablePreview>;
   if (originalText) return <ZoomablePreview><pre className="text-xs text-muted-foreground whitespace-pre-wrap font-mono p-4 max-h-[60vh] overflow-auto">{originalText}</pre></ZoomablePreview>;
