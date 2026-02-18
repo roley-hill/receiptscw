@@ -443,7 +443,7 @@ You MUST call the extract_receipts function.`;
           }
 
           // Upload the PDF for preview and set extractedText
-          const pdfPath = `uploads/${timestamp}_${safeName}_attachment.pdf`;
+          const pdfPath = `uploads/${Date.now()}_${safeName}_attachment.pdf`;
           const { error: pdfUploadError } = await supabase.storage
             .from("receipts")
             .upload(pdfPath, pdfBytes, { contentType: "application/pdf", upsert: true });
