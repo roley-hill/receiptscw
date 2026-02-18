@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, ReactNode } from "react";
+import { createContext, useContext, useState, useCallback, useRef, ReactNode } from "react";
 
 export interface UploadedFile {
   id: string;
@@ -19,6 +19,8 @@ interface UploadStoreContextType {
   isProcessing: boolean;
   setIsProcessing: (v: boolean) => void;
   clearCompleted: () => void;
+  cancelledRef: React.MutableRefObject<boolean>;
+  cancelExtraction: () => void;
 }
 
 const UploadStoreContext = createContext<UploadStoreContextType | null>(null);
@@ -26,13 +28,18 @@ const UploadStoreContext = createContext<UploadStoreContextType | null>(null);
 export function UploadStoreProvider({ children }: { children: ReactNode }) {
   const [files, setFiles] = useState<UploadedFile[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
+  const cancelledRef = useRef(false);
 
   const clearCompleted = useCallback(() => {
     setFiles((prev) => prev.filter((f) => f.status !== "done" && f.status !== "error"));
   }, []);
 
+  const cancelExtraction = useCallback(() => {
+    cancelledRef.current = true;
+  }, []);
+
   return (
-    <UploadStoreContext.Provider value={{ files, setFiles, isProcessing, setIsProcessing, clearCompleted }}>
+    <UploadStoreContext.Provider value={{ files, setFiles, isProcessing, setIsProcessing, clearCompleted, cancelledRef, cancelExtraction }}>
       {children}
     </UploadStoreContext.Provider>
   );
