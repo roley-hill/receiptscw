@@ -88,6 +88,28 @@ export default function Exceptions() {
     setDeleting(false);
   };
 
+  const handleBulkFinalize = async () => {
+    if (selected.size === 0) return;
+    setFinalizing(true);
+    try {
+      const ids = Array.from(selected);
+      for (let i = 0; i < ids.length; i += 100) {
+        const chunk = ids.slice(i, i + 100);
+        const { error } = await supabase
+          .from("receipts")
+          .update({ status: "finalized" as any, finalized_at: new Date().toISOString() })
+          .in("id", chunk);
+        if (error) throw error;
+      }
+      toast.success(`Finalized ${selected.size} receipt(s)`);
+      setSelected(new Set());
+      queryClient.invalidateQueries({ queryKey: ["receipts"] });
+    } catch (err: any) {
+      toast.error(err.message || "Finalize failed");
+    }
+    setFinalizing(false);
+  };
+
   const handleDeleteByFile = async (fileName: string) => {
     setDeleting(true);
     try {
@@ -162,28 +184,52 @@ export default function Exceptions() {
                 Select all
               </label>
               {selected.size > 0 && (
-                <AlertDialog>
-                  <AlertDialogTrigger asChild>
-                    <Button variant="destructive" size="sm" disabled={deleting}>
-                      <Trash2 className="h-4 w-4 mr-1" />
-                      Delete {selected.size}
-                    </Button>
-                  </AlertDialogTrigger>
-                  <AlertDialogContent>
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>Delete {selected.size} receipt(s)?</AlertDialogTitle>
-                      <AlertDialogDescription>
-                        This will permanently remove the selected receipts. This action cannot be undone.
-                      </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel>Cancel</AlertDialogCancel>
-                      <AlertDialogAction onClick={handleBulkDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-                        Delete
-                      </AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
+                <>
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button variant="outline" size="sm" disabled={finalizing}>
+                        <CheckCheck className="h-4 w-4 mr-1" />
+                        Finalize {selected.size}
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Finalize {selected.size} receipt(s)?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          This will mark the selected receipts as finalized and move them into entry & recording, even with missing or low-confidence fields.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction onClick={handleBulkFinalize}>
+                          Finalize
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button variant="destructive" size="sm" disabled={deleting}>
+                        <Trash2 className="h-4 w-4 mr-1" />
+                        Delete {selected.size}
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Delete {selected.size} receipt(s)?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          This will permanently remove the selected receipts. This action cannot be undone.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction onClick={handleBulkDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                          Delete
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                </>
               )}
             </>
           )}
