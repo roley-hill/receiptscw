@@ -295,6 +295,53 @@ export type Database = {
         }
         Relationships: []
       }
+      upload_batch_files: {
+        Row: {
+          batch_id: string
+          created_at: string
+          duplicate_count: number | null
+          error: string | null
+          file_name: string
+          file_size: number
+          id: string
+          inserted_count: number | null
+          status: string
+          total_line_items: number | null
+        }
+        Insert: {
+          batch_id: string
+          created_at?: string
+          duplicate_count?: number | null
+          error?: string | null
+          file_name: string
+          file_size?: number
+          id?: string
+          inserted_count?: number | null
+          status?: string
+          total_line_items?: number | null
+        }
+        Update: {
+          batch_id?: string
+          created_at?: string
+          duplicate_count?: number | null
+          error?: string | null
+          file_name?: string
+          file_size?: number
+          id?: string
+          inserted_count?: number | null
+          status?: string
+          total_line_items?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "upload_batch_files_batch_id_fkey"
+            columns: ["batch_id"]
+            isOneToOne: false
+            referencedRelation: "upload_batches"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       upload_batches: {
         Row: {
           created_at: string
@@ -302,6 +349,8 @@ export type Database = {
           id: string
           processed_count: number
           status: string
+          uploaded_by_email: string | null
+          uploaded_by_name: string | null
           user_id: string | null
         }
         Insert: {
@@ -310,6 +359,8 @@ export type Database = {
           id?: string
           processed_count?: number
           status?: string
+          uploaded_by_email?: string | null
+          uploaded_by_name?: string | null
           user_id?: string | null
         }
         Update: {
@@ -318,6 +369,8 @@ export type Database = {
           id?: string
           processed_count?: number
           status?: string
+          uploaded_by_email?: string | null
+          uploaded_by_name?: string | null
           user_id?: string | null
         }
         Relationships: []

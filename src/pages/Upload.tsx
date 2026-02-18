@@ -1,20 +1,23 @@
 import { useState, useRef } from "react";
 import { motion } from "framer-motion";
-import { Upload as UploadIcon, FolderOpen, FileText, Image, AlertCircle, CheckCircle2, X, Loader2, Copy } from "lucide-react";
+import { Upload as UploadIcon, FolderOpen, FileText, Image, AlertCircle, CheckCircle2, X, Loader2, Copy, Ban } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { uploadReceiptFile } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { useUploadStore } from "@/hooks/useUploadStore";
+import { supabase } from "@/integrations/supabase/client";
+import UploadHistory from "@/components/UploadHistory";
 
 export default function UploadPage() {
-  const { files, setFiles, isProcessing, setIsProcessing } = useUploadStore();
+  const { files, setFiles, isProcessing, setIsProcessing, cancelledRef, cancelExtraction } = useUploadStore();
   const [isDragging, setIsDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
-  const { session } = useAuth();
+  const { session, user } = useAuth();
   const queryClient = useQueryClient();
+  const [historyKey, setHistoryKey] = useState(0);
 
   const handleFiles = (fileList: FileList) => {
     const accepted = ["application/pdf", "image/jpeg", "image/png", "image/heic", "image/jpg", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.ms-excel", "message/rfc822", "application/octet-stream"];
@@ -53,10 +56,58 @@ export default function UploadPage() {
       toast.error("Not authenticated");
       return;
     }
+    cancelledRef.current = false;
     setIsProcessing(true);
     const pending = files.filter((f) => f.status === "pending");
 
+    // Create upload batch record
+    const { data: profile } = await supabase.from("profiles").select("display_name, email").eq("user_id", user?.id ?? "").maybeSingle();
+    const { data: batch } = await supabase.from("upload_batches").insert({
+      file_count: pending.length,
+      user_id: user?.id ?? null,
+      uploaded_by_name: profile?.display_name ?? null,
+      uploaded_by_email: profile?.email ?? user?.email ?? null,
+    } as any).select().single();
+
+    const batchId = batch?.id;
+
+    // Insert file records
+    if (batchId) {
+      await supabase.from("upload_batch_files").insert(
+        pending.map((f) => ({
+          batch_id: batchId,
+          file_name: f.name,
+          file_size: f.size,
+          status: "pending",
+        } as any))
+      );
+    }
+
+    let processedCount = 0;
     for (let i = 0; i < pending.length; i++) {
+      if (cancelledRef.current) {
+        // Mark remaining as cancelled
+        const remaining = pending.slice(i);
+        setFiles((prev) =>
+          prev.map((pf) =>
+            remaining.some((r) => r.id === pf.id) && pf.status === "pending"
+              ? { ...pf, status: "error", error: "Cancelled" }
+              : pf
+          )
+        );
+        if (batchId) {
+          await supabase.from("upload_batch_files")
+            .update({ status: "cancelled", error: "Cancelled by user" } as any)
+            .eq("batch_id", batchId)
+            .eq("status", "pending");
+          await supabase.from("upload_batches")
+            .update({ status: "cancelled", processed_count: processedCount } as any)
+            .eq("id", batchId);
+        }
+        toast.info("Extraction cancelled.");
+        break;
+      }
+
       const f = pending[i];
       setFiles((prev) =>
         prev.map((pf) => (pf.id === f.id ? { ...pf, status: "processing" } : pf))
@@ -75,6 +126,14 @@ export default function UploadPage() {
               : pf
           )
         );
+        processedCount++;
+
+        if (batchId) {
+          await supabase.from("upload_batch_files")
+            .update({ status: "done", inserted_count: insertedCount, duplicate_count: duplicateCount, total_line_items: totalLineItems } as any)
+            .eq("batch_id", batchId)
+            .eq("file_name", f.name);
+        }
 
         if (duplicateCount > 0) {
           toast.warning(`${duplicateCount} duplicate(s) skipped in ${f.name}`);
@@ -87,13 +146,29 @@ export default function UploadPage() {
               : pf
           )
         );
+        processedCount++;
+
+        if (batchId) {
+          await supabase.from("upload_batch_files")
+            .update({ status: "error", error: err.message } as any)
+            .eq("batch_id", batchId)
+            .eq("file_name", f.name);
+        }
       }
     }
 
+    if (batchId && !cancelledRef.current) {
+      await supabase.from("upload_batches")
+        .update({ status: "completed", processed_count: processedCount } as any)
+        .eq("id", batchId);
+    }
+
     setIsProcessing(false);
+    cancelledRef.current = false;
     queryClient.invalidateQueries({ queryKey: ["receipts"] });
     queryClient.invalidateQueries({ queryKey: ["pending_counts"] });
-    toast.success("Extraction complete!");
+    setHistoryKey((k) => k + 1);
+    if (!cancelledRef.current) toast.success("Extraction complete!");
   };
 
   const getFileIcon = (type: string) => {
@@ -174,12 +249,23 @@ export default function UploadPage() {
             <h2 className="text-sm font-semibold text-foreground">
               {files.length} file{files.length !== 1 ? "s" : ""} · {doneCount} extracted · {pendingCount} pending
             </h2>
-            {pendingCount > 0 && (
-              <Button variant="default" size="sm" onClick={startExtraction} disabled={isProcessing}>
-                {isProcessing ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
-                {isProcessing ? "Extracting..." : "Start Extraction"}
-              </Button>
-            )}
+            <div className="flex items-center gap-2">
+              {isProcessing && (
+                <Button variant="outline" size="sm" onClick={cancelExtraction} className="text-destructive border-destructive/30 hover:bg-destructive/10">
+                  <Ban className="h-4 w-4 mr-1" /> Cancel
+                </Button>
+              )}
+              {pendingCount > 0 && !isProcessing && (
+                <Button variant="default" size="sm" onClick={startExtraction}>
+                  Start Extraction
+                </Button>
+              )}
+              {isProcessing && (
+                <Button variant="default" size="sm" disabled>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" /> Extracting...
+                </Button>
+              )}
+            </div>
           </div>
           <div className="vault-card divide-y divide-border">
             {files.map((file) => (
@@ -218,6 +304,12 @@ export default function UploadPage() {
           </div>
         </div>
       )}
+
+      {/* Upload History */}
+      <div className="pt-4 border-t border-border">
+        <h2 className="text-sm font-semibold text-foreground mb-3">Upload History</h2>
+        <UploadHistory key={historyKey} />
+      </div>
     </div>
   );
 }
