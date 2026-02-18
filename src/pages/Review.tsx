@@ -1,18 +1,23 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { fetchReceipts, updateReceipt, getFilePreviewUrl } from "@/lib/api";
+import { supabase } from "@/integrations/supabase/client";
 import { motion } from "framer-motion";
-import { CheckCircle2, AlertTriangle, ChevronLeft, ChevronRight, Eye, Edit3, Save, FileText, Image as ImageIcon, Loader2, ZoomIn, ZoomOut, RotateCcw, Trash2 } from "lucide-react";
+import { CheckCircle2, AlertTriangle, ChevronLeft, ChevronRight, Eye, Edit3, Save, FileText, Image as ImageIcon, Loader2, ZoomIn, ZoomOut, RotateCcw, Trash2, CheckCheck, ArrowLeft } from "lucide-react";
 import PdfViewer from "@/components/PdfViewer";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
-import { useAdminDelete } from "@/hooks/useAdminDelete";
+import { useAuth } from "@/hooks/useAuth";
 import { TenantStatusBadge, ChargeTypeBadge, UnverifiedBadge } from "@/components/StatusBadges";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
 
 export default function ReviewPage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -22,34 +27,375 @@ export default function ReviewPage() {
     queryFn: fetchReceipts,
   });
   const queryClient = useQueryClient();
-  const { isAdmin, deleteMutation } = useAdminDelete();
+  const { role } = useAuth();
+  const isAdmin = role === "admin";
   const reviewable = allReceipts.filter((r) => r.status === "needs_review" || r.status === "exception");
-  const [currentIdx, setCurrentIdx] = useState(0);
+
+  const [activeReceiptId, setActiveReceiptId] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [deleting, setDeleting] = useState(false);
+  const [finalizing, setFinalizing] = useState(false);
+  const [fileFilter, setFileFilter] = useState<string>("all");
 
   // Navigate to specific receipt if receiptId is in URL
   useEffect(() => {
     if (targetReceiptId && reviewable.length > 0) {
-      const idx = reviewable.findIndex((r) => r.id === targetReceiptId);
-      if (idx >= 0) {
-        setCurrentIdx(idx);
-        // Clear the param so subsequent navigation works normally
+      const found = reviewable.find((r) => r.id === targetReceiptId);
+      if (found) {
+        setActiveReceiptId(targetReceiptId);
         setSearchParams({}, { replace: true });
       }
     }
   }, [targetReceiptId, reviewable.length]);
 
-  const receipt = reviewable[currentIdx];
+  // File groups for filter
+  const fileGroups = useMemo(() => {
+    const groups: Record<string, number> = {};
+    for (const r of reviewable) {
+      const name = r.file_name || "No file";
+      groups[name] = (groups[name] || 0) + 1;
+    }
+    return Object.entries(groups).sort((a, b) => b[1] - a[1]);
+  }, [reviewable]);
+
+  const filteredReviewable = useMemo(
+    () => fileFilter === "all"
+      ? reviewable
+      : reviewable.filter((r) => (r.file_name || "No file") === fileFilter),
+    [reviewable, fileFilter]
+  );
+
+  const allSelected = filteredReviewable.length > 0 && filteredReviewable.every((r) => selected.has(r.id));
+
+  const toggleAll = () => {
+    if (allSelected) setSelected(new Set());
+    else setSelected(new Set(filteredReviewable.map((r) => r.id)));
+  };
+
+  const toggle = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const handleBulkDelete = async () => {
+    if (selected.size === 0) return;
+    setDeleting(true);
+    try {
+      const ids = Array.from(selected);
+      for (let i = 0; i < ids.length; i += 100) {
+        const chunk = ids.slice(i, i + 100);
+        const { error } = await supabase.from("receipts").delete().in("id", chunk);
+        if (error) throw error;
+      }
+      toast.success(`Deleted ${selected.size} receipt(s)`);
+      setSelected(new Set());
+      queryClient.invalidateQueries({ queryKey: ["receipts"] });
+    } catch (err: any) {
+      toast.error(err.message || "Delete failed");
+    }
+    setDeleting(false);
+  };
+
+  const handleBulkFinalize = async () => {
+    if (selected.size === 0) return;
+    setFinalizing(true);
+    try {
+      const ids = Array.from(selected);
+      for (let i = 0; i < ids.length; i += 100) {
+        const chunk = ids.slice(i, i + 100);
+        const { error } = await supabase
+          .from("receipts")
+          .update({ status: "finalized" as any, finalized_at: new Date().toISOString() })
+          .in("id", chunk);
+        if (error) throw error;
+      }
+      toast.success(`Finalized ${selected.size} receipt(s)`);
+      setSelected(new Set());
+      queryClient.invalidateQueries({ queryKey: ["receipts"] });
+    } catch (err: any) {
+      toast.error(err.message || "Finalize failed");
+    }
+    setFinalizing(false);
+  };
+
+  const handleDeleteByFile = async (fileName: string) => {
+    setDeleting(true);
+    try {
+      const idsToDelete = reviewable
+        .filter((r) => (r.file_name || "No file") === fileName)
+        .map((r) => r.id);
+      for (let i = 0; i < idsToDelete.length; i += 100) {
+        const chunk = idsToDelete.slice(i, i + 100);
+        const { error } = await supabase.from("receipts").delete().in("id", chunk);
+        if (error) throw error;
+      }
+      toast.success(`Deleted ${idsToDelete.length} receipt(s) from "${fileName}"`);
+      setSelected(new Set());
+      if (fileFilter === fileName) setFileFilter("all");
+      queryClient.invalidateQueries({ queryKey: ["receipts"] });
+    } catch (err: any) {
+      toast.error(err.message || "Delete failed");
+    }
+    setDeleting(false);
+  };
+
+  const handleFinalizeByFile = async (fileName: string) => {
+    setFinalizing(true);
+    try {
+      const idsToFinalize = reviewable
+        .filter((r) => (r.file_name || "No file") === fileName)
+        .map((r) => r.id);
+      for (let i = 0; i < idsToFinalize.length; i += 100) {
+        const chunk = idsToFinalize.slice(i, i + 100);
+        const { error } = await supabase
+          .from("receipts")
+          .update({ status: "finalized" as any, finalized_at: new Date().toISOString() })
+          .in("id", chunk);
+        if (error) throw error;
+      }
+      toast.success(`Finalized ${idsToFinalize.length} receipt(s) from "${fileName}"`);
+      setSelected(new Set());
+      if (fileFilter === fileName) setFileFilter("all");
+      queryClient.invalidateQueries({ queryKey: ["receipts"] });
+    } catch (err: any) {
+      toast.error(err.message || "Finalize failed");
+    }
+    setFinalizing(false);
+  };
+
+  if (isLoading) {
+    return <div className="flex items-center justify-center py-20"><div className="h-8 w-8 border-2 border-accent border-t-transparent rounded-full animate-spin" /></div>;
+  }
+
+  if (reviewable.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-center">
+        <CheckCircle2 className="h-12 w-12 text-vault-emerald mb-4" />
+        <h2 className="text-xl font-bold text-foreground">All caught up!</h2>
+        <p className="text-sm text-muted-foreground mt-1">No receipts pending review.</p>
+      </div>
+    );
+  }
+
+  // Detail view for a single receipt
+  const activeReceipt = activeReceiptId ? reviewable.find((r) => r.id === activeReceiptId) : null;
+  if (activeReceipt) {
+    return (
+      <ReviewDetail
+        receipt={activeReceipt}
+        reviewable={reviewable}
+        isAdmin={isAdmin}
+        onBack={() => setActiveReceiptId(null)}
+        queryClient={queryClient}
+      />
+    );
+  }
+
+  // List view
+  return (
+    <div className="space-y-6 max-w-5xl">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">Review Receipts</h1>
+          <p className="text-sm text-muted-foreground mt-1">{reviewable.length} receipt(s) pending review</p>
+        </div>
+        <div className="flex items-center gap-3">
+          {isAdmin && (
+            <>
+              <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
+                <Checkbox checked={allSelected} onCheckedChange={toggleAll} />
+                Select all
+              </label>
+              {selected.size > 0 && (
+                <>
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button variant="outline" size="sm" disabled={finalizing}>
+                        <CheckCheck className="h-4 w-4 mr-1" />
+                        Finalize {selected.size}
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Finalize {selected.size} receipt(s)?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          This will mark the selected receipts as finalized and move them into entry & recording.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction onClick={handleBulkFinalize}>Finalize</AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button variant="destructive" size="sm" disabled={deleting}>
+                        <Trash2 className="h-4 w-4 mr-1" />
+                        Delete {selected.size}
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Delete {selected.size} receipt(s)?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          This will permanently remove the selected receipts. This action cannot be undone.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction onClick={handleBulkDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                          Delete
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                </>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* File filter + per-file actions */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex items-center gap-2">
+          <FileText className="h-4 w-4 text-muted-foreground" />
+          <Select value={fileFilter} onValueChange={setFileFilter}>
+            <SelectTrigger className="w-[320px] h-9 text-sm">
+              <SelectValue placeholder="Filter by file" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All files ({reviewable.length})</SelectItem>
+              {fileGroups.map(([name, count]) => (
+                <SelectItem key={name} value={name}>
+                  {name.replace(/^Receipts\//, "")} ({count})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        {isAdmin && fileFilter !== "all" && (
+          <>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="outline" size="sm" disabled={finalizing}>
+                  <CheckCheck className="h-4 w-4 mr-1" />
+                  Finalize all from this file ({filteredReviewable.length})
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Finalize all {filteredReviewable.length} receipt(s) from this file?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This will mark all receipts from "{fileFilter.replace(/^Receipts\//, "")}" as finalized.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={() => handleFinalizeByFile(fileFilter)}>Finalize All</AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="destructive" size="sm" disabled={deleting}>
+                  <Trash2 className="h-4 w-4 mr-1" />
+                  Delete all from this file ({filteredReviewable.length})
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete all {filteredReviewable.length} receipt(s) from this file?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This will permanently remove all receipts from "{fileFilter.replace(/^Receipts\//, "")}". You can re-upload for clean extraction.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={() => handleDeleteByFile(fileFilter)} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                    Delete All
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </>
+        )}
+      </div>
+
+      {/* Scrollable receipt list */}
+      <div className="space-y-3">
+        {filteredReviewable.map((r, i) => {
+          const conf = (r.confidence_scores as any) || {};
+          return (
+            <motion.div key={r.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }} className="vault-card p-4">
+              <div className="flex items-start justify-between">
+                <div className="flex items-start gap-3">
+                  {isAdmin && (
+                    <Checkbox
+                      checked={selected.has(r.id)}
+                      onCheckedChange={() => toggle(r.id)}
+                      className="mt-1"
+                    />
+                  )}
+                  <div className={`h-9 w-9 rounded-lg flex items-center justify-center mt-0.5 ${r.status === "exception" ? "bg-vault-red-light" : "bg-vault-amber-light"}`}>
+                    {r.status === "exception"
+                      ? <AlertTriangle className="h-4 w-4 text-vault-red" />
+                      : <Eye className="h-4 w-4 text-vault-amber" />}
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-sm font-bold text-foreground">{r.tenant || "Unknown Tenant"}</h3>
+                      <span className="vault-mono text-xs text-muted-foreground">{r.receipt_id}</span>
+                      {r.status === "exception" && <span className="vault-badge-error text-[10px]">Exception</span>}
+                      {r.status === "needs_review" && <span className="vault-badge-warning text-[10px]">Needs Review</span>}
+                      {conf.tenantStatus && <TenantStatusBadge status={conf.tenantStatus} />}
+                      {conf.chargeType && <ChargeTypeBadge chargeType={conf.chargeType} />}
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {r.property || "Unknown Property"} · Unit {r.unit || "?"} · ${Number(r.amount).toLocaleString("en-US", { minimumFractionDigits: 2 })} · {r.file_name || "No file"}
+                    </p>
+                  </div>
+                </div>
+                <Button variant="outline" size="sm" onClick={() => setActiveReceiptId(r.id)}>
+                  Review & Fix
+                </Button>
+              </div>
+            </motion.div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── Detail View ───────────────────────────────────────────────
+
+function ReviewDetail({
+  receipt,
+  reviewable,
+  isAdmin,
+  onBack,
+  queryClient,
+}: {
+  receipt: any;
+  reviewable: any[];
+  isAdmin: boolean;
+  onBack: () => void;
+  queryClient: any;
+}) {
   const [edits, setEdits] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
 
   const handleEdit = (field: string, value: string) => {
     setEdits((prev) => ({ ...prev, [field]: value }));
   };
-
   const getVal = (field: string, fallback: string) => edits[field] ?? fallback;
 
   const handleFinalize = async () => {
-    if (!receipt) return;
     setSaving(true);
     try {
       await updateReceipt(receipt.id, {
@@ -68,6 +414,7 @@ export default function ReviewPage() {
       toast.success("Receipt finalized!");
       setEdits({});
       queryClient.invalidateQueries({ queryKey: ["receipts"] });
+      onBack();
     } catch (err: any) {
       toast.error(err.message);
     }
@@ -75,7 +422,6 @@ export default function ReviewPage() {
   };
 
   const handleSaveDraft = async () => {
-    if (!receipt) return;
     setSaving(true);
     try {
       await updateReceipt(receipt.id, {
@@ -98,36 +444,31 @@ export default function ReviewPage() {
     setSaving(false);
   };
 
-  if (isLoading) {
-    return <div className="flex items-center justify-center py-20"><div className="h-8 w-8 border-2 border-accent border-t-transparent rounded-full animate-spin" /></div>;
-  }
-
-  if (!receipt) {
-    return (
-      <div className="flex flex-col items-center justify-center py-20 text-center">
-        <CheckCircle2 className="h-12 w-12 text-vault-emerald mb-4" />
-        <h2 className="text-xl font-bold text-foreground">All caught up!</h2>
-        <p className="text-sm text-muted-foreground mt-1">No receipts pending review.</p>
-      </div>
-    );
-  }
+  const handleDelete = async () => {
+    try {
+      const { error } = await supabase.from("receipts").delete().eq("id", receipt.id);
+      if (error) throw error;
+      toast.success("Receipt deleted");
+      queryClient.invalidateQueries({ queryKey: ["receipts"] });
+      onBack();
+    } catch (err: any) {
+      toast.error(err.message);
+    }
+  };
 
   const conf = (receipt.confidence_scores as any) || {};
 
   return (
     <div className="space-y-4 max-w-7xl">
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Review Receipts</h1>
-          <p className="text-sm text-muted-foreground mt-1">{currentIdx + 1} of {reviewable.length} pending review</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => { setCurrentIdx((i) => Math.max(0, i - 1)); setEdits({}); }} disabled={currentIdx === 0}>
-            <ChevronLeft className="h-4 w-4" />
+        <div className="flex items-center gap-3">
+          <Button variant="ghost" size="sm" onClick={onBack}>
+            <ArrowLeft className="h-4 w-4 mr-1" /> Back to list
           </Button>
-          <Button variant="outline" size="sm" onClick={() => { setCurrentIdx((i) => Math.min(reviewable.length - 1, i + 1)); setEdits({}); }} disabled={currentIdx === reviewable.length - 1}>
-            <ChevronRight className="h-4 w-4" />
-          </Button>
+          <div>
+            <h1 className="text-2xl font-bold text-foreground">Review Receipt</h1>
+            <p className="text-sm text-muted-foreground mt-1">{receipt.receipt_id}</p>
+          </div>
         </div>
       </div>
 
@@ -169,7 +510,7 @@ export default function ReviewPage() {
             {isAdmin && (
               <AlertDialog>
                 <AlertDialogTrigger asChild>
-                  <Button variant="destructive" size="icon" disabled={deleteMutation.isPending}>
+                  <Button variant="destructive" size="icon">
                     <Trash2 className="h-4 w-4" />
                   </Button>
                 </AlertDialogTrigger>
@@ -182,10 +523,7 @@ export default function ReviewPage() {
                   </AlertDialogHeader>
                   <AlertDialogFooter>
                     <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction
-                      onClick={() => deleteMutation.mutate(receipt.id)}
-                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                    >
+                    <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
                       Delete
                     </AlertDialogAction>
                   </AlertDialogFooter>
@@ -198,6 +536,8 @@ export default function ReviewPage() {
     </div>
   );
 }
+
+// ─── Helper Components (unchanged) ─────────────────────────────
 
 function ZoomablePreview({ children }: { children: React.ReactNode }) {
   const [zoom, setZoom] = useState(1);
@@ -258,7 +598,6 @@ function FilePreview({ filePath, fileName, originalText }: { filePath: string | 
     );
   }
 
-  // Image preview
   if (isImage && previewUrl && !error) {
     return (
       <ZoomablePreview>
@@ -269,7 +608,6 @@ function FilePreview({ filePath, fileName, originalText }: { filePath: string | 
     );
   }
 
-  // PDF
   if (isPdf && previewUrl && !error) {
     return (
       <div className="rounded-lg bg-muted/50 border border-border p-4 min-h-[400px]">
@@ -284,7 +622,6 @@ function FilePreview({ filePath, fileName, originalText }: { filePath: string | 
     );
   }
 
-  // XLSX
   if (isXlsx && originalText) {
     return (
       <div className="p-4">
@@ -308,19 +645,16 @@ function FilePreview({ filePath, fileName, originalText }: { filePath: string | 
     );
   }
 
-  // EML with PDF attachment
   if (isEml && originalText?.startsWith("PDF_ATTACHMENT:")) {
     const pdfPath = originalText.replace("PDF_ATTACHMENT:", "");
     return <EmlPdfPreview pdfPath={pdfPath} fileName={fileName} emlPreviewUrl={previewUrl} error={error} />;
   }
 
-  // EML with image attachment
   if (isEml && originalText?.startsWith("IMAGE_ATTACHMENT:")) {
     const imgPath = originalText.replace("IMAGE_ATTACHMENT:", "");
     return <EmlImagePreview imgPath={imgPath} fileName={fileName} emlPreviewUrl={previewUrl} error={error} />;
   }
 
-  // EML: render formatted email preview
   if (isEml && originalText) {
     return (
       <div className="p-4">
@@ -342,7 +676,6 @@ function FilePreview({ filePath, fileName, originalText }: { filePath: string | 
     );
   }
 
-  // Fallback
   return (
     <div className="rounded-lg bg-muted/50 border border-border p-4 min-h-[400px]">
       <div className="flex flex-col items-center justify-center gap-3 py-4">
@@ -365,12 +698,10 @@ function FilePreview({ filePath, fileName, originalText }: { filePath: string | 
 }
 
 function SpreadsheetPreview({ csv }: { csv: string }) {
-  // Parse CSV text (may have sheet headers like "=== Sheet: Name ===")
   const lines = csv.split("\n").filter((l) => l.trim());
   const rows: string[][] = [];
   for (const line of lines) {
-    if (line.startsWith("=== Sheet:")) continue; // skip sheet headers
-    // Simple CSV split (handles most cases)
+    if (line.startsWith("=== Sheet:")) continue;
     rows.push(line.split(",").map((c) => c.trim()));
   }
   if (rows.length === 0) {
@@ -426,11 +757,7 @@ function EmlPdfPreview({ pdfPath, fileName, emlPreviewUrl, error }: { pdfPath: s
         <FileText className="h-5 w-5 text-muted-foreground" />
         <p className="text-sm font-medium text-foreground">{fileName} <span className="text-xs text-muted-foreground">(PDF attachment)</span></p>
       </div>
-      {pdfUrl ? (
-        <PdfViewer url={pdfUrl} />
-      ) : (
-        <p className="text-sm text-muted-foreground">Could not load PDF attachment</p>
-      )}
+      {pdfUrl ? <PdfViewer url={pdfUrl} /> : <p className="text-sm text-muted-foreground">Could not load PDF attachment</p>}
       {emlPreviewUrl && !error && (
         <div className="mt-3 text-right">
           <Button variant="ghost" size="sm" onClick={() => window.open(emlPreviewUrl, "_blank")}>
@@ -490,18 +817,10 @@ function EmailPreview({ raw }: { raw: string }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [iframeHeight, setIframeHeight] = useState(500);
 
-  // Try to extract usable HTML from the stored content
   const getHtmlContent = (text: string): string => {
-    // If it starts with an HTML doctype or tag, it's already extracted HTML
     const trimmed = text.trimStart();
-    if (/^<!doctype\s+html/i.test(trimmed) || /^<html[\s>]/i.test(trimmed)) {
-      return text;
-    }
-    // If it contains significant HTML structure (tables, divs, body), use it
-    if (/<body[\s>]/i.test(text) && (/<table[\s>]/i.test(text) || /<div[\s>]/i.test(text))) {
-      return text;
-    }
-    // Client-side fallback: try to parse MIME parts for HTML
+    if (/^<!doctype\s+html/i.test(trimmed) || /^<html[\s>]/i.test(trimmed)) return text;
+    if (/<body[\s>]/i.test(text) && (/<table[\s>]/i.test(text) || /<div[\s>]/i.test(text))) return text;
     const parts = text.split(/--[\w\-\.]+/);
     for (const part of parts) {
       if (!/content-type:\s*text\/html/i.test(part)) continue;
@@ -521,8 +840,7 @@ function EmailPreview({ raw }: { raw: string }) {
       }
       if (body.length > 50) return body;
     }
-    // Last resort: wrap as plain text
-    const stripped = text.replace(/^[\s\S]*?\n\n/, ""); // remove headers
+    const stripped = text.replace(/^[\s\S]*?\n\n/, "");
     return `<html><body style="font-family:sans-serif;padding:16px;font-size:14px;white-space:pre-wrap;background:#fff;color:#333">${stripped.substring(0, 10000).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</body></html>`;
   };
 
@@ -534,7 +852,6 @@ function EmailPreview({ raw }: { raw: string }) {
       doc.open();
       doc.write(htmlContent);
       doc.close();
-      // Auto-size iframe after a moment
       setTimeout(() => {
         try {
           const h = doc.documentElement?.scrollHeight || doc.body?.scrollHeight;
