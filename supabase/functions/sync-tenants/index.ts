@@ -62,9 +62,9 @@ serve(async (req) => {
       return JSON.parse(text);
     }
 
-    // Try tenant_directory report (Data API V1)
+    // Try v2 API first
     let allTenants: any[] = [];
-    let nextUrl: string | null = "/api/v1/reports/tenant_directory.json?paginate_results=true&per_page=200";
+    let nextUrl: string | null = "/api/v2/tenants.json?per_page=200";
 
     while (nextUrl) {
       const data = await appfolioFetch(nextUrl);
@@ -75,7 +75,6 @@ serve(async (req) => {
 
       // Handle pagination via next_page_url
       if (data.next_page_url) {
-        // next_page_url may be absolute or relative
         nextUrl = data.next_page_url.startsWith("http")
           ? data.next_page_url.replace(appfolioBase, "")
           : data.next_page_url;
@@ -84,12 +83,21 @@ serve(async (req) => {
       }
     }
 
-    // If tenant_directory returned no results, try Stack API
+    // Fallback: try v2 tenant_directory report
     if (allTenants.length === 0) {
-      console.log("Tenant directory empty, trying Stack API /api/v1/tenants.json...");
-      const stackData = await appfolioFetch("/api/v1/tenants.json?per_page=500");
-      if (stackData) {
-        allTenants = stackData.results || stackData.tenants || stackData.data || (Array.isArray(stackData) ? stackData : []);
+      console.log("v2 tenants empty, trying v2 tenant_directory report...");
+      const reportData = await appfolioFetch("/api/v2/reports/tenant_directory.json?paginate_results=true&per_page=200");
+      if (reportData) {
+        allTenants = reportData.results || reportData.tenants || reportData.data || (Array.isArray(reportData) ? reportData : []);
+      }
+    }
+
+    // Fallback: try v1 as last resort
+    if (allTenants.length === 0) {
+      console.log("v2 endpoints empty, falling back to v1...");
+      const v1Data = await appfolioFetch("/api/v1/reports/tenant_directory.json?paginate_results=true&per_page=200");
+      if (v1Data) {
+        allTenants = v1Data.results || v1Data.tenants || v1Data.data || (Array.isArray(v1Data) ? v1Data : []);
       }
     }
 
