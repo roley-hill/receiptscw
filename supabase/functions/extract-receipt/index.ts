@@ -69,12 +69,14 @@ serve(async (req) => {
         .select("full_name, property_address, unit_number, status")
         .order("full_name");
       if (tenants && tenants.length > 0) {
-        tenantLookup = tenants.map((t: any) => ({
-          full_name: t.full_name || "",
-          property_address: t.property_address || "",
-          unit_number: t.unit_number || "",
-          status: t.status || "unknown",
-        }));
+        tenantLookup = tenants
+          .filter((t: any) => (t.full_name || "").trim().length > 0)
+          .map((t: any) => ({
+            full_name: t.full_name || "",
+            property_address: t.property_address || "",
+            unit_number: t.unit_number || "",
+            status: t.status || "unknown",
+          }));
         knownTenantsList = tenants.map((t: any) => {
           const parts = [t.full_name];
           if (t.property_address) parts.push(`@ ${t.property_address}`);
