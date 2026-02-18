@@ -16,6 +16,7 @@ import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
+import { TenantStatusBadge, ChargeTypeBadge } from "@/components/StatusBadges";
 
 export default function Exceptions() {
   const { data: allReceipts = [], isLoading } = useQuery({
@@ -333,6 +334,8 @@ export default function Exceptions() {
                     <div className="flex items-center gap-2">
                       <h3 className="text-sm font-bold text-foreground">{r.tenant || "Unknown Tenant"}</h3>
                       <span className="vault-mono text-xs text-muted-foreground">{r.receipt_id}</span>
+                      {conf.tenantStatus && <TenantStatusBadge status={conf.tenantStatus} />}
+                      {conf.chargeType && <ChargeTypeBadge chargeType={conf.chargeType} />}
                     </div>
                     <p className="text-xs text-muted-foreground mt-0.5">{r.property || "Unknown Property"} · Unit {r.unit || "?"} · {r.file_name || "No file"}</p>
                     <div className="flex flex-wrap gap-1.5 mt-2">

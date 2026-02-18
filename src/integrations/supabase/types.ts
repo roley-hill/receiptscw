@@ -295,6 +295,54 @@ export type Database = {
           },
         ]
       }
+      rent_roll_charges: {
+        Row: {
+          appfolio_tenant_id: string | null
+          charge_type: string
+          created_at: string
+          description: string | null
+          effective_from: string | null
+          effective_to: string | null
+          id: string
+          monthly_amount: number
+          property_address: string
+          synced_at: string
+          tenant_name: string
+          unit_number: string | null
+          updated_at: string
+        }
+        Insert: {
+          appfolio_tenant_id?: string | null
+          charge_type?: string
+          created_at?: string
+          description?: string | null
+          effective_from?: string | null
+          effective_to?: string | null
+          id?: string
+          monthly_amount?: number
+          property_address?: string
+          synced_at?: string
+          tenant_name?: string
+          unit_number?: string | null
+          updated_at?: string
+        }
+        Update: {
+          appfolio_tenant_id?: string | null
+          charge_type?: string
+          created_at?: string
+          description?: string | null
+          effective_from?: string | null
+          effective_to?: string | null
+          id?: string
+          monthly_amount?: number
+          property_address?: string
+          synced_at?: string
+          tenant_name?: string
+          unit_number?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       skipped_duplicates: {
         Row: {
           amount: number

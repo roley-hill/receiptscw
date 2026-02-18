@@ -8,6 +8,7 @@ import PdfViewer from "@/components/PdfViewer";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { useAdminDelete } from "@/hooks/useAdminDelete";
+import { TenantStatusBadge, ChargeTypeBadge } from "@/components/StatusBadges";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
@@ -150,10 +151,10 @@ export default function ReviewPage() {
             <FieldRow label="Receipt ID" value={receipt.receipt_id} confidence={1} readOnly />
             <FieldRow label="Property / Building" value={getVal("property", receipt.property)} confidence={conf.property || 0} required onChange={(v) => handleEdit("property", v)} />
             <FieldRow label="Unit" value={getVal("unit", receipt.unit)} confidence={conf.unit || 0} required onChange={(v) => handleEdit("unit", v)} />
-            <FieldRow label="Tenant" value={getVal("tenant", receipt.tenant)} confidence={conf.tenant || 0} required onChange={(v) => handleEdit("tenant", v)} badge={conf.tenantStatus ? <TenantStatusBadge status={conf.tenantStatus} /> : undefined} />
+            <FieldRow label="Tenant" value={getVal("tenant", receipt.tenant)} confidence={conf.tenant || 0} required onChange={(v) => handleEdit("tenant", v)} badge={<>{conf.tenantStatus ? <TenantStatusBadge status={conf.tenantStatus} /> : null}{conf.chargeType ? <ChargeTypeBadge chargeType={conf.chargeType} /> : null}</>} />
             <FieldRow label="Receipt Date" value={getVal("receipt_date", receipt.receipt_date || "")} confidence={conf.receiptDate || 0} required onChange={(v) => handleEdit("receipt_date", v)} />
             <FieldRow label="Rent Month" value={getVal("rent_month", receipt.rent_month || "")} confidence={0.85} onChange={(v) => handleEdit("rent_month", v)} />
-            <FieldRow label="Amount" value={getVal("amount", String(receipt.amount))} confidence={conf.amount || 0} required onChange={(v) => handleEdit("amount", v)} />
+            <FieldRow label="Amount" value={getVal("amount", String(receipt.amount))} confidence={conf.amount || 0} required onChange={(v) => handleEdit("amount", v)} badge={conf.chargeType ? <ChargeTypeBadge chargeType={conf.chargeType} /> : undefined} />
             <FieldRow label="Payment Type" value={getVal("payment_type", receipt.payment_type || "")} confidence={conf.paymentType || 0} onChange={(v) => handleEdit("payment_type", v)} />
             <FieldRow label="Reference" value={getVal("reference", receipt.reference || "")} confidence={0.9} onChange={(v) => handleEdit("reference", v)} />
             <FieldRow label="Memo / Remarks" value={getVal("memo", receipt.memo || "")} confidence={0.88} onChange={(v) => handleEdit("memo", v)} />
@@ -590,11 +591,4 @@ function ConfidenceBadge({ score }: { score: number }) {
   return <span className="vault-badge-error vault-mono text-[10px]">{pct}%</span>;
 }
 
-function TenantStatusBadge({ status }: { status: string }) {
-  const s = status.toLowerCase();
-  if (s === "current") return <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 ring-1 ring-emerald-500/20">Current</span>;
-  if (s === "notice") return <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold bg-amber-500/15 text-amber-600 dark:text-amber-400 ring-1 ring-amber-500/20">Notice</span>;
-  if (s === "evict") return <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold bg-red-500/15 text-red-600 dark:text-red-400 ring-1 ring-red-500/20">Evict</span>;
-  if (s === "past") return <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold bg-muted text-muted-foreground ring-1 ring-border">Past</span>;
-  return <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold bg-muted text-muted-foreground ring-1 ring-border">{status}</span>;
-}
+// TenantStatusBadge and ChargeTypeBadge are now imported from @/components/StatusBadges
