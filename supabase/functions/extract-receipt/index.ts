@@ -352,8 +352,9 @@ You MUST call the extract_receipts function.`;
 
         // --- Extract PDF attachment from EML ---
         function extractPdfAttachment(eml: string): Uint8Array | null {
-          const boundaryMatch = eml.match(/boundary="?([^\s";\r\n]+)"?/i);
-          if (!boundaryMatch) return null;
+          // Find ALL boundaries in the EML, not just the first
+          const boundaryMatches = [...eml.matchAll(/boundary="?([^\s";\r\n]+)"?/gi)];
+          if (boundaryMatches.length === 0) return null;
 
           const seenBoundaries = new Set<string>();
 
@@ -361,7 +362,6 @@ You MUST call the extract_receipts function.`;
             if (depth > 3) return null;
             for (const part of parts) {
               if (/content-type:\s*application\/pdf/i.test(part)) {
-                // Found PDF part - extract base64 body
                 const bl = part.indexOf("\r\n\r\n");
                 const bl2 = part.indexOf("\n\n");
                 const bs = bl > 0 ? bl + 4 : (bl2 > 0 ? bl2 + 2 : -1);
@@ -380,7 +380,6 @@ You MUST call the extract_receipts function.`;
                   }
                 } catch { continue; }
               } else {
-                // Check nested multipart
                 const nested = part.match(/boundary="?([^\s";\r\n]+)"?/i);
                 if (nested && !seenBoundaries.has(nested[1])) {
                   seenBoundaries.add(nested[1]);
@@ -392,8 +391,15 @@ You MUST call the extract_receipts function.`;
             return null;
           }
 
-          seenBoundaries.add(boundaryMatch[1]);
-          return findPdfInParts(eml.split("--" + boundaryMatch[1]), 0);
+          // Try each boundary as a top-level split
+          for (const match of boundaryMatches) {
+            const boundary = match[1];
+            if (seenBoundaries.has(boundary)) continue;
+            seenBoundaries.add(boundary);
+            const result = findPdfInParts(eml.split("--" + boundary), 0);
+            if (result) return result;
+          }
+          return null;
         }
 
         const pdfBytes = extractPdfAttachment(rawEml);
