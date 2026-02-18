@@ -474,16 +474,25 @@ You MUST call the extract_receipts function.`;
     const duplicates: any[] = [];
 
     for (const item of extractedItems) {
-      // Check for duplicates: same tenant + amount + receipt_date + property
+      // Check for duplicates: same tenant + amount + receipt_date + property + rent_month
       if (item.tenant && item.amount && item.receipt_date) {
-        const { data: existing } = await supabase
+        let dupQuery = supabase
           .from("receipts")
           .select("id, receipt_id")
           .eq("tenant", item.tenant)
           .eq("amount", item.amount)
           .eq("receipt_date", item.receipt_date)
-          .eq("property", item.property || "")
-          .limit(1);
+          .eq("property", item.property || "");
+
+        // Only match rent_month: if both have a value they must be equal, 
+        // if the new item has a rent_month we filter by it
+        if (item.rent_month) {
+          dupQuery = dupQuery.eq("rent_month", item.rent_month);
+        } else {
+          dupQuery = dupQuery.is("rent_month", null);
+        }
+
+        const { data: existing } = await dupQuery.limit(1);
 
         if (existing && existing.length > 0) {
           duplicates.push({
@@ -523,7 +532,7 @@ You MUST call the extract_receipts function.`;
 
       // Also check by file_name + all key fields to catch re-uploads
       if (item.tenant && item.amount && item.receipt_date) {
-        const query = supabase
+        let reuploadQuery = supabase
           .from("receipts")
           .select("id, receipt_id")
           .eq("file_name", file.name)
@@ -531,8 +540,15 @@ You MUST call the extract_receipts function.`;
           .eq("amount", item.amount)
           .eq("receipt_date", item.receipt_date)
           .eq("property", item.property || "")
-          .eq("unit", item.unit || "")
-          .limit(1);
+          .eq("unit", item.unit || "");
+
+        if (item.rent_month) {
+          reuploadQuery = reuploadQuery.eq("rent_month", item.rent_month);
+        } else {
+          reuploadQuery = reuploadQuery.is("rent_month", null);
+        }
+
+        const query = reuploadQuery.limit(1);
 
         const { data: fileExisting } = await query;
 
