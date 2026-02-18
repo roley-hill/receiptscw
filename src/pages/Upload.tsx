@@ -1,15 +1,19 @@
 import { useState, useRef } from "react";
 import { motion } from "framer-motion";
-import { Upload as UploadIcon, FolderOpen, FileText, Image, AlertCircle, CheckCircle2, X, Loader2, Copy, Ban, ChevronDown, ChevronRight } from "lucide-react";
+import { Upload as UploadIcon, FolderOpen, FileText, Image, AlertCircle, CheckCircle2, X, Loader2, Copy, Ban, ChevronDown, ChevronRight, AlertTriangle, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { uploadReceiptFile } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
-import { useUploadStore } from "@/hooks/useUploadStore";
+import { useUploadStore, UploadedFile } from "@/hooks/useUploadStore";
 import { supabase } from "@/integrations/supabase/client";
 import UploadHistory from "@/components/UploadHistory";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
 export default function UploadPage() {
   const { files, setFiles, isProcessing, setIsProcessing, cancelledRef, cancelExtraction } = useUploadStore();
@@ -120,11 +124,15 @@ export default function UploadPage() {
         const insertedCount = result.inserted_count ?? 1;
         const duplicateCount = result.duplicate_count ?? 0;
         const totalLineItems = result.total_line_items ?? 1;
+        const duplicateContentWarning = result.duplicate_content_warning ?? false;
+        const duplicateContentFile = result.duplicate_content_file ?? null;
+        const duplicateContentCount = result.duplicate_content_count ?? 0;
+        const fileContentHash = result.file_content_hash ?? null;
 
         setFiles((prev) =>
           prev.map((pf) =>
             pf.id === f.id
-              ? { ...pf, status: "done", insertedCount, duplicateCount, totalLineItems }
+              ? { ...pf, status: "done", insertedCount, duplicateCount, totalLineItems, duplicateContentWarning, duplicateContentFile, duplicateContentCount, fileContentHash }
               : pf
           )
         );
@@ -188,6 +196,41 @@ export default function UploadPage() {
   const doneCount = files.filter((f) => f.status === "done").length;
   const cancelledFiles = files.filter((f) => f.status === "cancelled");
   const activeFiles = files.filter((f) => f.status !== "cancelled");
+
+  const handleDeleteDuplicateContent = async (fileContentHash: string, originalFileName: string) => {
+    try {
+      // Get all receipt IDs with this hash that belong to the ORIGINAL file (not the newly uploaded one)
+      const { data: toDelete } = await supabase
+        .from("receipts")
+        .select("id")
+        .eq("file_content_hash", fileContentHash)
+        .eq("file_name", originalFileName);
+      
+      if (!toDelete || toDelete.length === 0) {
+        toast.info("No duplicate receipts found to delete.");
+        return;
+      }
+
+      const ids = toDelete.map(r => r.id);
+      for (let i = 0; i < ids.length; i += 100) {
+        const chunk = ids.slice(i, i + 100);
+        const { error } = await supabase.from("receipts").delete().in("id", chunk);
+        if (error) throw error;
+      }
+
+      toast.success(`Deleted ${ids.length} duplicate receipt(s) from "${originalFileName.replace(/^Receipts\//, "")}"`);
+      queryClient.invalidateQueries({ queryKey: ["receipts"] });
+      
+      // Clear the warning from the file
+      setFiles(prev => prev.map(f => 
+        f.fileContentHash === fileContentHash 
+          ? { ...f, duplicateContentWarning: false, duplicateContentFile: undefined, duplicateContentCount: undefined }
+          : f
+      ));
+    } catch (err: any) {
+      toast.error(err.message || "Delete failed");
+    }
+  };
 
   return (
     <div className="space-y-6 max-w-4xl">
@@ -271,38 +314,83 @@ export default function UploadPage() {
               )}
             </div>
           </div>
-          <div className="vault-card divide-y divide-border">
+           <div className="vault-card divide-y divide-border">
             {activeFiles.map((file) => (
-              <div key={file.id} className="flex items-center gap-3 px-4 py-3">
-                {getFileIcon(file.type)}
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-foreground truncate">{file.name}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {formatSize(file.size)}
-                    {file.status === "done" && file.totalLineItems !== undefined && (
-                      <span className="ml-2 vault-mono text-accent">
-                        → {file.insertedCount} receipt{file.insertedCount !== 1 ? "s" : ""} extracted
-                        {(file.totalLineItems ?? 0) > 1 && ` (from ${file.totalLineItems} line items)`}
-                      </span>
+              <div key={file.id} className="px-4 py-3">
+                <div className="flex items-center gap-3">
+                  {getFileIcon(file.type)}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-foreground truncate">{file.name}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {formatSize(file.size)}
+                      {file.status === "done" && file.totalLineItems !== undefined && (
+                        <span className="ml-2 vault-mono text-accent">
+                          → {file.insertedCount} receipt{file.insertedCount !== 1 ? "s" : ""} extracted
+                          {(file.totalLineItems ?? 0) > 1 && ` (from ${file.totalLineItems} line items)`}
+                        </span>
+                      )}
+                      {file.status === "done" && (file.duplicateCount ?? 0) > 0 && (
+                        <span className="ml-2 vault-mono text-amber-500 flex items-center gap-1 inline-flex">
+                          <Copy className="h-3 w-3" /> {file.duplicateCount} duplicate{file.duplicateCount !== 1 ? "s" : ""} skipped
+                        </span>
+                      )}
+                      {file.error && <span className="ml-2 text-destructive">{file.error}</span>}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {file.status === "done" && <CheckCircle2 className="h-4 w-4 text-accent" />}
+                    {file.status === "processing" && <Loader2 className="h-4 w-4 text-primary animate-spin" />}
+                    {file.status === "error" && <AlertCircle className="h-4 w-4 text-destructive" />}
+                    {file.status === "pending" && (
+                      <button onClick={(e) => { e.stopPropagation(); removeFile(file.id); }} className="p-1 rounded hover:bg-muted">
+                        <X className="h-3.5 w-3.5 text-muted-foreground" />
+                      </button>
                     )}
-                    {file.status === "done" && (file.duplicateCount ?? 0) > 0 && (
-                      <span className="ml-2 vault-mono text-amber-500 flex items-center gap-1 inline-flex">
-                        <Copy className="h-3 w-3" /> {file.duplicateCount} duplicate{file.duplicateCount !== 1 ? "s" : ""} skipped
-                      </span>
-                    )}
-                    {file.error && <span className="ml-2 text-destructive">{file.error}</span>}
-                  </p>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  {file.status === "done" && <CheckCircle2 className="h-4 w-4 text-accent" />}
-                  {file.status === "processing" && <Loader2 className="h-4 w-4 text-primary animate-spin" />}
-                  {file.status === "error" && <AlertCircle className="h-4 w-4 text-destructive" />}
-                  {file.status === "pending" && (
-                    <button onClick={(e) => { e.stopPropagation(); removeFile(file.id); }} className="p-1 rounded hover:bg-muted">
-                      <X className="h-3.5 w-3.5 text-muted-foreground" />
-                    </button>
-                  )}
-                </div>
+                {file.duplicateContentWarning && file.duplicateContentFile && file.fileContentHash && (
+                  <div className="mt-2 ml-7 p-3 rounded-lg bg-muted/50 border border-border">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="h-4 w-4 text-amber-500 mt-0.5 shrink-0" />
+                      <div className="flex-1">
+                        <p className="text-xs font-medium text-foreground">
+                          Duplicate content detected
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          This file has identical content to "{file.duplicateContentFile.replace(/^Receipts\//, "")}" which has {file.duplicateContentCount} existing receipt(s). This may be a duplicate download with a different name.
+                        </p>
+                        <div className="mt-2">
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button variant="destructive" size="sm" className="h-7 text-xs">
+                                <Trash2 className="h-3 w-3 mr-1" />
+                                Delete {file.duplicateContentCount} receipt(s) from original file
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>Delete duplicate file's receipts?</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  This will delete all {file.duplicateContentCount} receipt(s) from "{file.duplicateContentFile.replace(/^Receipts\//, "")}". 
+                                  The receipts from this new upload ("{file.name}") will be kept.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                <AlertDialogAction 
+                                  onClick={() => handleDeleteDuplicateContent(file.fileContentHash!, file.duplicateContentFile!)}
+                                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                >
+                                  Delete Duplicates
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>

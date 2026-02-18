@@ -60,8 +60,14 @@ serve(async (req) => {
       userId = user?.id ?? null;
     }
 
-    // ---- FILE-LEVEL DUPLICATE CHECK ----
-    // Prevent the same file from being processed twice (already exists in receipts, any status)
+    // ---- READ FILE & COMPUTE CONTENT HASH ----
+    const arrayBuffer = await file.arrayBuffer();
+    const fileBytes = new Uint8Array(arrayBuffer);
+    const hashBuffer = await crypto.subtle.digest("SHA-256", arrayBuffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const fileContentHash = hashArray.map(b => b.toString(16).padStart(2, "0")).join("");
+
+    // ---- FILE-LEVEL DUPLICATE CHECK (by name) ----
     const { data: existingFileReceipts, error: fileCheckError } = await supabase
       .from("receipts")
       .select("id, receipt_id, status")
@@ -69,30 +75,38 @@ serve(async (req) => {
       .limit(1);
 
     if (!fileCheckError && existingFileReceipts && existingFileReceipts.length > 0) {
-      const existingCount = existingFileReceipts.length;
-      // Get full count
       const { count: totalExisting } = await supabase
         .from("receipts")
         .select("id", { count: "exact", head: true })
         .eq("file_name", file.name);
 
       return new Response(JSON.stringify({
-        error: `File "${file.name}" has already been processed (${totalExisting ?? existingCount} receipt(s) exist). Delete existing records first if you want to re-extract.`,
+        error: `File "${file.name}" has already been processed (${totalExisting ?? 1} receipt(s) exist). Delete existing records first if you want to re-extract.`,
         already_processed: true,
-        existing_count: totalExisting ?? existingCount,
+        existing_count: totalExisting ?? 1,
       }), {
         status: 409,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // Upload file to storage
-    const timestamp = Date.now();
-    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-    const filePath = `uploads/${timestamp}_${safeName}`;
-    
-    const arrayBuffer = await file.arrayBuffer();
-    const fileBytes = new Uint8Array(arrayBuffer);
+    // ---- DUPLICATE CONTENT CHECK (same content, different file name) ----
+    let duplicateContentFile: string | null = null;
+    let duplicateContentCount = 0;
+    const { data: existingHashReceipts } = await supabase
+      .from("receipts")
+      .select("file_name")
+      .eq("file_content_hash", fileContentHash)
+      .limit(1);
+
+    if (existingHashReceipts && existingHashReceipts.length > 0) {
+      duplicateContentFile = existingHashReceipts[0].file_name;
+      const { count } = await supabase
+        .from("receipts")
+        .select("id", { count: "exact", head: true })
+        .eq("file_content_hash", fileContentHash);
+      duplicateContentCount = count ?? 0;
+    }
 
     // Helper: encode Uint8Array to base64 without stack overflow
     function uint8ToBase64(bytes: Uint8Array): string {
@@ -706,6 +720,7 @@ You MUST call the extract_receipts function.`;
           status,
           file_path: filePath,
           file_name: file.name,
+          file_content_hash: fileContentHash,
           original_text: extractedText,
         })
         .select()
@@ -734,6 +749,12 @@ You MUST call the extract_receipts function.`;
       total_line_items: extractedItems.length,
       inserted_count: insertedReceipts.length,
       duplicate_count: duplicates.length,
+      ...(duplicateContentFile ? {
+        duplicate_content_warning: true,
+        duplicate_content_file: duplicateContentFile,
+        duplicate_content_count: duplicateContentCount,
+        file_content_hash: fileContentHash,
+      } : {}),
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

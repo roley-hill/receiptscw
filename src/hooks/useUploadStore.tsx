@@ -11,6 +11,10 @@ export interface UploadedFile {
   insertedCount?: number;
   duplicateCount?: number;
   totalLineItems?: number;
+  duplicateContentWarning?: boolean;
+  duplicateContentFile?: string;
+  duplicateContentCount?: number;
+  fileContentHash?: string;
 }
 
 interface UploadStoreContextType {
