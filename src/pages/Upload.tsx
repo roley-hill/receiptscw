@@ -346,7 +346,7 @@ export default function UploadPage() {
 
       {/* Upload History */}
       <div className="pt-4 border-t border-border">
-        <h2 className="text-sm font-semibold text-foreground mb-3">Upload History</h2>
+        <h2 className="text-sm font-semibold text-foreground mb-3">Extraction History</h2>
         <UploadHistory key={historyKey} />
       </div>
     </div>
