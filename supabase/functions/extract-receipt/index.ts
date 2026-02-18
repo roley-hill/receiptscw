@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "npm:@supabase/supabase-js@2";
-import * as XLSX from "npm:xlsx@0.18.5";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import * as XLSX from "https://esm.sh/xlsx@0.18.5";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -62,18 +62,18 @@ serve(async (req) => {
 
     // ---- FETCH KNOWN TENANTS FOR AI MATCHING ----
     let knownTenantsList = "";
-    let tenantLookup: { full_name: string; property_address: string; unit_number: string }[] = [];
+    let tenantLookup: { full_name: string; property_address: string; unit_number: string; status: string }[] = [];
     try {
       const { data: tenants } = await supabase
         .from("appfolio_tenants")
         .select("full_name, property_address, unit_number, status")
-        .in("status", ["current", "notice"])
         .order("full_name");
       if (tenants && tenants.length > 0) {
         tenantLookup = tenants.map((t: any) => ({
           full_name: t.full_name || "",
           property_address: t.property_address || "",
           unit_number: t.unit_number || "",
+          status: t.status || "unknown",
         }));
         knownTenantsList = tenants.map((t: any) => {
           const parts = [t.full_name];
@@ -809,9 +809,10 @@ ${knownTenantsList}` : ""}`;
 
         // 3. Apply database values as source of truth when matched
         if (match) {
-          console.log(`Tenant matched: "${item.tenant || "(no name)"}" + unit "${item.unit || ""}" -> "${match.full_name}" @ ${match.property_address} Unit ${match.unit_number}`);
+          console.log(`Tenant matched: "${item.tenant || "(no name)"}" + unit "${item.unit || ""}" -> "${match.full_name}" @ ${match.property_address} Unit ${match.unit_number} [${match.status}]`);
           item.tenant = match.full_name;
           item.tenant_confidence = Math.max(item.tenant_confidence || 0, 0.95);
+          item.tenant_status = match.status; // Store AppFolio status for UI display
           if (match.property_address) {
             item.property = match.property_address;
             item.property_confidence = Math.max(item.property_confidence || 0, 0.95);
@@ -988,6 +989,7 @@ ${knownTenantsList}` : ""}`;
             amount: item.amount_confidence || 0,
             receiptDate: item.receipt_date_confidence || 0,
             paymentType: item.payment_type_confidence || 0,
+            tenantStatus: item.tenant_status || null,
           },
           status,
           file_path: extractedText.startsWith("PDF_ATTACHMENT:") ? extractedText.replace("PDF_ATTACHMENT:", "") : filePath,
