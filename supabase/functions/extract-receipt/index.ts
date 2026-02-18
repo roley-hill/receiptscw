@@ -60,6 +60,32 @@ serve(async (req) => {
       userId = user?.id ?? null;
     }
 
+    // ---- FILE-LEVEL DUPLICATE CHECK ----
+    // Prevent the same file from being processed twice (already exists in receipts, any status)
+    const { data: existingFileReceipts, error: fileCheckError } = await supabase
+      .from("receipts")
+      .select("id, receipt_id, status")
+      .eq("file_name", file.name)
+      .limit(1);
+
+    if (!fileCheckError && existingFileReceipts && existingFileReceipts.length > 0) {
+      const existingCount = existingFileReceipts.length;
+      // Get full count
+      const { count: totalExisting } = await supabase
+        .from("receipts")
+        .select("id", { count: "exact", head: true })
+        .eq("file_name", file.name);
+
+      return new Response(JSON.stringify({
+        error: `File "${file.name}" has already been processed (${totalExisting ?? existingCount} receipt(s) exist). Delete existing records first if you want to re-extract.`,
+        already_processed: true,
+        existing_count: totalExisting ?? existingCount,
+      }), {
+        status: 409,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // Upload file to storage
     const timestamp = Date.now();
     const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
