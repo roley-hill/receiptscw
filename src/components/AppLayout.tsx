@@ -25,6 +25,7 @@ import {
   AlertTriangle,
   Copy,
   Menu,
+  Users,
 } from "lucide-react";
 
 const navItems = [
@@ -37,6 +38,7 @@ const navItems = [
   { title: "Browse Files", url: "/browse", icon: FolderOpen, countKey: null },
   { title: "Exceptions", url: "/exceptions", icon: AlertTriangle, countKey: "exceptions" as const },
   { title: "Duplicates", url: "/duplicates", icon: Copy, countKey: "duplicates" as const },
+  { title: "Team", url: "/team", icon: Users, countKey: null },
 ];
 
 function CountBadge({ count }: { count: number }) {
@@ -114,7 +116,18 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               </SidebarGroupLabel>
               <SidebarGroupContent>
                 <SidebarMenu>
-                  {navItems.slice(6).map(renderNavItem)}
+                  {navItems.slice(6, 9).map(renderNavItem)}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+
+            <SidebarGroup>
+              <SidebarGroupLabel className="text-sidebar-foreground/50 text-[10px] uppercase tracking-widest px-4">
+                Admin
+              </SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  {navItems.slice(9).map(renderNavItem)}
                 </SidebarMenu>
               </SidebarGroupContent>
             </SidebarGroup>
