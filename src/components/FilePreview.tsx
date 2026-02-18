@@ -63,6 +63,15 @@ export function EmlPdfAttachment({ pdfPath }: { pdfPath: string }) {
   return <PdfViewer url={pdfUrl} />;
 }
 
+export function EmlImageAttachment({ imgPath }: { imgPath: string }) {
+  const [imgUrl, setImgUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => { getFilePreviewUrl(imgPath).then((u) => { setImgUrl(u); setLoading(false); }).catch(() => setLoading(false)); }, [imgPath]);
+  if (loading) return <div className="flex items-center justify-center min-h-[300px]"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+  if (!imgUrl) return <p className="text-sm text-muted-foreground text-center py-8">Could not load image attachment</p>;
+  return <ZoomablePreview><div className="p-4 flex items-center justify-center min-h-[300px]"><img src={imgUrl} alt="Email attachment" className="max-w-full object-contain" /></div></ZoomablePreview>;
+}
+
 /* ─── XLSX fetcher: downloads and parses XLSX from URL ─── */
 function XlsxFetchPreview({ url }: { url: string }) {
   const [csv, setCsv] = useState<string | null>(null);
@@ -101,6 +110,7 @@ export function AttachmentContent({ url, fileName, originalText }: { url: string
   if (isXlsx && originalText) return <ZoomablePreview><div className="p-4"><SpreadsheetPreview csv={originalText} /></div></ZoomablePreview>;
   if (isXlsx) return <XlsxFetchPreview url={url} />;
   if (isEml && originalText?.startsWith("PDF_ATTACHMENT:")) { const pdfPath = originalText.replace("PDF_ATTACHMENT:", ""); return <EmlPdfAttachment pdfPath={pdfPath} />; }
+  if (isEml && originalText?.startsWith("IMAGE_ATTACHMENT:")) { const imgPath = originalText.replace("IMAGE_ATTACHMENT:", ""); return <EmlImageAttachment imgPath={imgPath} />; }
   if (isEml && originalText) return <ZoomablePreview><EmailPreview raw={originalText} /></ZoomablePreview>;
   if (originalText) return <ZoomablePreview><pre className="text-xs text-muted-foreground whitespace-pre-wrap font-mono p-4 max-h-[60vh] overflow-auto">{originalText}</pre></ZoomablePreview>;
   return <div className="flex flex-col items-center justify-center min-h-[300px] text-muted-foreground text-sm gap-2"><FileText className="h-10 w-10" /><p>Preview not available.</p></div>;

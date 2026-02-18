@@ -281,6 +281,12 @@ function FilePreview({ filePath, fileName, originalText }: { filePath: string | 
     return <EmlPdfPreview pdfPath={pdfPath} fileName={fileName} emlPreviewUrl={previewUrl} error={error} />;
   }
 
+  // EML with image attachment
+  if (isEml && originalText?.startsWith("IMAGE_ATTACHMENT:")) {
+    const imgPath = originalText.replace("IMAGE_ATTACHMENT:", "");
+    return <EmlImagePreview imgPath={imgPath} fileName={fileName} emlPreviewUrl={previewUrl} error={error} />;
+  }
+
   // EML: render formatted email preview
   if (isEml && originalText) {
     return (
@@ -391,6 +397,50 @@ function EmlPdfPreview({ pdfPath, fileName, emlPreviewUrl, error }: { pdfPath: s
         <PdfViewer url={pdfUrl} />
       ) : (
         <p className="text-sm text-muted-foreground">Could not load PDF attachment</p>
+      )}
+      {emlPreviewUrl && !error && (
+        <div className="mt-3 text-right">
+          <Button variant="ghost" size="sm" onClick={() => window.open(emlPreviewUrl, "_blank")}>
+            <Eye className="h-3 w-3 mr-1" /> Download Original EML
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EmlImagePreview({ imgPath, fileName, emlPreviewUrl, error }: { imgPath: string; fileName: string | null; emlPreviewUrl: string | null; error: boolean }) {
+  const [imgUrl, setImgUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    getFilePreviewUrl(imgPath)
+      .then((url) => { setImgUrl(url); setLoading(false); })
+      .catch(() => { setLoading(false); });
+  }, [imgPath]);
+
+  if (loading) {
+    return (
+      <div className="rounded-lg bg-muted/50 border border-border p-4 min-h-[400px] flex items-center justify-center">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-lg bg-muted/50 border border-border p-4 min-h-[400px]">
+      <div className="flex items-center gap-2 mb-3">
+        <FileText className="h-5 w-5 text-muted-foreground" />
+        <p className="text-sm font-medium text-foreground">{fileName} <span className="text-xs text-muted-foreground">(Image attachment)</span></p>
+      </div>
+      {imgUrl ? (
+        <ZoomablePreview>
+          <div className="p-4 flex items-center justify-center min-h-[300px]">
+            <img src={imgUrl} alt="Email attachment" className="max-w-full object-contain" />
+          </div>
+        </ZoomablePreview>
+      ) : (
+        <p className="text-sm text-muted-foreground">Could not load image attachment</p>
       )}
       {emlPreviewUrl && !error && (
         <div className="mt-3 text-right">
