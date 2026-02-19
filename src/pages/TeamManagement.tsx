@@ -101,7 +101,7 @@ export default function TeamManagement() {
           body: JSON.stringify({
             email: inviteEmail,
             role: inviteRole,
-            redirectTo: `${window.location.origin}/accept-invite`,
+            redirectTo: `https://receiptscw.lovable.app/accept-invite`,
           }),
         }
       );
@@ -128,7 +128,7 @@ export default function TeamManagement() {
         {
           method: "POST",
           headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ email, redirectTo: `${window.location.origin}/accept-invite` }),
+          body: JSON.stringify({ email, redirectTo: `https://receiptscw.lovable.app/accept-invite` }),
         }
       );
       if (!resp.ok) {
