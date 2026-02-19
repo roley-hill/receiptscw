@@ -12,7 +12,6 @@ Deno.serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  // Auth check
   const authHeader = req.headers.get("Authorization");
   if (!authHeader) {
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
@@ -39,12 +38,10 @@ Deno.serve(async (req) => {
     const formData = await req.formData();
     const uploadType = formData.get("upload_type") as string;
 
-    // Collect text content from all files
     const textChunks: { name: string; content: string }[] = [];
     const sourceFiles: string[] = [];
 
     const RELEVANT_EXTENSIONS = [".pdf", ".xlsx", ".xls", ".csv", ".docx", ".txt", ".eml"];
-
     const isRelevant = (name: string) =>
       RELEVANT_EXTENSIONS.some((ext) => name.toLowerCase().endsWith(ext)) ||
       name.toLowerCase().includes("rent roll") ||
@@ -54,31 +51,25 @@ Deno.serve(async (req) => {
     if (uploadType === "zip") {
       const zipFile = formData.get("file") as File;
       if (!zipFile) throw new Error("No zip file provided");
-
       const zipBuffer = await zipFile.arrayBuffer();
       const zip = await JSZip.loadAsync(zipBuffer);
-
       for (const [filename, zipEntry] of Object.entries(zip.files)) {
         if (zipEntry.dir) continue;
         const basename = filename.split("/").pop() || filename;
         if (!isRelevant(basename)) continue;
-
         try {
           const content = await zipEntry.async("string");
           textChunks.push({ name: basename, content: content.slice(0, 15000) });
           sourceFiles.push(basename);
         } catch {
-          // Binary file — skip text extraction
           sourceFiles.push(basename + " (binary)");
         }
       }
     } else {
-      // Folder: multiple files
       const files = formData.getAll("files") as File[];
       for (const f of files) {
         const basename = (f as any).name || "unknown";
         if (!isRelevant(basename)) continue;
-
         try {
           const text = await f.text();
           textChunks.push({ name: basename, content: text.slice(0, 15000) });
@@ -91,39 +82,140 @@ Deno.serve(async (req) => {
 
     if (textChunks.length === 0) {
       return new Response(
-        JSON.stringify({
-          error: "No readable documents found. Please include rent rolls, leases, or CSV/text files.",
-        }),
+        JSON.stringify({ error: "No readable documents found. Please include rent rolls, leases, or CSV/text files." }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    // Build a combined text for AI extraction (cap at ~80k chars total)
     const combinedText = textChunks
       .map((c) => `=== FILE: ${c.name} ===\n${c.content}`)
       .join("\n\n")
       .slice(0, 80000);
 
-    const prompt = `You are an expert real estate data extractor. Analyze the following documents from a Due Diligence package and extract structured data for an AppFolio import.
+    const prompt = `You are an expert real estate data extractor. Analyze these Due Diligence documents and extract structured data to populate an AppFolio import spreadsheet exactly.
 
-Extract as much data as possible for these four sheets:
+The AppFolio import template has these exact columns for each row (one row per unit/tenant):
 
-1. UNITS: unit_number, unit_type (e.g. 1BD/1BA), bedrooms, bathrooms, sqft, market_rent
-2. TENANTS: unit_number, first_name, last_name, email, phone, lease_start (YYYY-MM-DD), lease_end (YYYY-MM-DD), move_in (YYYY-MM-DD), rent_amount (number only), status (Current/Vacant/Month-to-Month)
-3. CHARGES: unit_number, tenant_name, charge_type (Rent/Pet Fee/Parking/Storage/etc.), amount (number only), frequency (Monthly/One-Time), effective_date (YYYY-MM-DD)
-4. DEPOSITS: unit_number, tenant_name, deposit_type (Security Deposit/Pet Deposit/etc.), amount (number only)
+- Unit Name: unit identifier (e.g. "101", "Unit 1", "A")
+- Unit Address1: street address of the unit
+- Unit Address2: apt/suite suffix if any
+- Unit City
+- Unit State: 2-letter state code
+- Unit Postal Code
+- Unit Tags: any tags (leave blank if unknown)
+- Market Rent: market rent number only
+- Square Feet: number only
+- Bedrooms: number only (0 for studio)
+- Bathrooms: number only
+- Cats Allowed: Yes or No
+- Dogs Allowed: Yes or No
+- Primary Tenant First Name
+- Primary Tenant Last Name
+- Primary Tenant Company Name: company if applicable
+- Primary Tenant Move In: MM/DD/YYYY format
+- Primary Tenant Move Out: MM/DD/YYYY format (blank if still active)
+- Lease From: MM/DD/YYYY format
+- Lease To: MM/DD/YYYY format
+- Unit Rent Charge: rent amount number only
+- Unit Rent Frequency: Monthly
+- Unit Rent Start Date: MM/DD/YYYY format
+- Unit Rent End Date: MM/DD/YYYY format (usually blank)
+- Primary Tenant Email Address
+- Primary Tenant Phone Number #1: phone number
+- Primary Tenant Phone Label #1: Home or Mobile or Work
+- Primary Tenant Phone Notes #1: blank usually
+- Tenant Tags: blank usually
+- Tenant Address1: tenant mailing address if different
+- Tenant Address2
+- Tenant City
+- Tenant State
+- Tenant Postal Code
+- Roommate First #1: first roommate/co-tenant first name
+- Roommate Last #1: first roommate/co-tenant last name
+- Roommate Email #1
+- Roommate #1 Phone #1
+- Roommate #1 Phone Label #1: Home or Mobile
+- Roommate Move In #1: MM/DD/YYYY
+- Roommate Move Out #1: MM/DD/YYYY
+- Addt Recurring GL Account #1: GL account name for additional recurring charge (e.g. "Parking", "Pet Fee", "Storage")
+- Addt Recurring Start Date #1: MM/DD/YYYY
+- Addt Recurring End Date #1: MM/DD/YYYY (blank usually)
+- Addt Recurring Charge Amount #1: number only
+- Addt Recurring Frequency #1: Monthly
+- 3300: Prepayment Amount: prepaid rent amount if any
+- 3300: Prepayment Date: MM/DD/YYYY
+- 3201: Security Deposits - Residential Amount: security deposit number only
+- 3201: Security Deposits - Residential Date: date collected MM/DD/YYYY
+- 3202: Security Deposits - Pets Amount: pet deposit number only
+- 3202: Security Deposits - Pets Date: MM/DD/YYYY
 
-Also identify:
-- property_name: the property name or address
-- warnings: list of data quality issues or missing fields
+Extract all data you can find. For vacant units, leave tenant fields blank. Use MM/DD/YYYY for all dates. Numbers should have no currency symbols.
 
-Respond ONLY with valid JSON in this exact schema:
+Also identify property_name and any warnings about missing or uncertain data.
+
+Respond ONLY with valid JSON:
 {
   "property_name": "string",
-  "units": [{"unit_number":"","unit_type":"","bedrooms":"","bathrooms":"","sqft":"","market_rent":""}],
-  "tenants": [{"unit_number":"","first_name":"","last_name":"","email":"","phone":"","lease_start":"","lease_end":"","move_in":"","rent_amount":"","status":""}],
-  "charges": [{"unit_number":"","tenant_name":"","charge_type":"","amount":"","frequency":"","effective_date":""}],
-  "deposits": [{"unit_number":"","tenant_name":"","deposit_type":"","amount":""}],
+  "property_address": "string",
+  "property_city": "string",
+  "property_state": "string",
+  "property_zip": "string",
+  "rows": [
+    {
+      "Unit Name": "",
+      "Unit Address1": "",
+      "Unit Address2": "",
+      "Unit City": "",
+      "Unit State": "",
+      "Unit Postal Code": "",
+      "Unit Tags": "",
+      "Market Rent": "",
+      "Square Feet": "",
+      "Bedrooms": "",
+      "Bathrooms": "",
+      "Cats Allowed": "",
+      "Dogs Allowed": "",
+      "Primary Tenant First Name": "",
+      "Primary Tenant Last Name": "",
+      "Primary Tenant Company Name": "",
+      "Primary Tenant Move In": "",
+      "Primary Tenant Move Out": "",
+      "Lease From": "",
+      "Lease To": "",
+      "Unit Rent Charge": "",
+      "Unit Rent Frequency": "",
+      "Unit Rent Start Date": "",
+      "Unit Rent End Date": "",
+      "Primary Tenant Email Address": "",
+      "Primary Tenant Phone Number #1": "",
+      "Primary Tenant Phone Label #1": "",
+      "Primary Tenant Phone Notes #1": "",
+      "Tenant Tags": "",
+      "Tenant Address1": "",
+      "Tenant Address2": "",
+      "Tenant City": "",
+      "Tenant State": "",
+      "Tenant Postal Code": "",
+      "Roommate First #1": "",
+      "Roommate Last #1": "",
+      "Roommate Email #1": "",
+      "Roommate #1 Phone #1": "",
+      "Roommate #1 Phone Label #1": "",
+      "Roommate Move In #1": "",
+      "Roommate Move Out #1": "",
+      "Addt Recurring GL Account #1": "",
+      "Addt Recurring Start Date #1": "",
+      "Addt Recurring End Date #1": "",
+      "Addt Recurring Charge Amount #1": "",
+      "Addt Recurring Frequency #1": "",
+      "3300: Prepayment Amount": "",
+      "3300: Prepayment Date": "",
+      "3201: Security Deposits - Residential Amount": "",
+      "3201: Security Deposits - Residential Date": "",
+      "3202: Security Deposits - Pets Amount": "",
+      "3202: Security Deposits - Pets Date": ""
+    }
+  ],
   "warnings": ["string"]
 }
 
@@ -143,7 +235,7 @@ ${combinedText}`;
         model: "google/gemini-2.5-flash",
         messages: [{ role: "user", content: prompt }],
         temperature: 0.1,
-        max_tokens: 8000,
+        max_tokens: 16000,
       }),
     });
 
@@ -155,14 +247,11 @@ ${combinedText}`;
     const aiData = await aiResp.json();
     const rawContent = aiData.choices?.[0]?.message?.content || "";
 
-    // Parse JSON from AI response
     let extracted: any = {};
     try {
-      // Strip markdown code fences if present
       const cleaned = rawContent.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
       extracted = JSON.parse(cleaned);
     } catch {
-      // Try to find JSON in response
       const match = rawContent.match(/\{[\s\S]*\}/);
       if (match) {
         extracted = JSON.parse(match[0]);
@@ -171,17 +260,13 @@ ${combinedText}`;
       }
     }
 
+    const rows = extracted.rows || [];
+
     const result = {
       property_name: extracted.property_name || "Unknown Property",
-      units: extracted.units || [],
-      tenants: extracted.tenants || [],
-      charges: extracted.charges || [],
-      deposits: extracted.deposits || [],
+      rows,
       summary: {
-        units_found: (extracted.units || []).length,
-        tenants_found: (extracted.tenants || []).length,
-        charges_found: (extracted.charges || []).length,
-        deposits_found: (extracted.deposits || []).length,
+        rows_found: rows.length,
         source_files: sourceFiles,
         warnings: extracted.warnings || [],
       },
