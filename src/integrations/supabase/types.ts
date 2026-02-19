@@ -558,16 +558,19 @@ export type Database = {
       user_roles: {
         Row: {
           id: string
+          nav_permissions: Json
           role: Database["public"]["Enums"]["app_role"]
           user_id: string
         }
         Insert: {
           id?: string
+          nav_permissions?: Json
           role?: Database["public"]["Enums"]["app_role"]
           user_id: string
         }
         Update: {
           id?: string
+          nav_permissions?: Json
           role?: Database["public"]["Enums"]["app_role"]
           user_id?: string
         }

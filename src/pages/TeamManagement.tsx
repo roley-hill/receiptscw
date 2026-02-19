@@ -6,11 +6,28 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
-import { Users, UserPlus, Trash2, Shield, ShieldCheck, Eye, Mail, Clock, RefreshCw } from "lucide-react";
+import { Users, UserPlus, Trash2, Shield, ShieldCheck, Eye, Mail, Clock, RefreshCw, ChevronDown, ChevronUp } from "lucide-react";
 import type { Database } from "@/integrations/supabase/types";
 
 type AppRole = Database["public"]["Enums"]["app_role"];
+
+interface NavPermissions {
+  pipeline: boolean;
+  reports_batches: boolean;
+  tools: boolean;
+  acquisitions: boolean;
+  admin: boolean;
+}
+
+const NAV_SECTIONS: { key: keyof NavPermissions; label: string }[] = [
+  { key: "pipeline", label: "Pipeline (Upload, Review, Entry…)" },
+  { key: "reports_batches", label: "Reports & Batches" },
+  { key: "tools", label: "Tools (Browse, Exceptions, Duplicates)" },
+  { key: "acquisitions", label: "Acquisitions (Due Diligence)" },
+  { key: "admin", label: "Admin (Team Management)" },
+];
 
 interface TeamMember {
   user_id: string;
@@ -37,11 +54,66 @@ const roleColors: Record<AppRole, string> = {
   viewer: "bg-muted text-muted-foreground border-border",
 };
 
+function NavPermissionsPanel({ userId }: { userId: string }) {
+  const queryClient = useQueryClient();
+
+  const { data: perms, isLoading } = useQuery<NavPermissions>({
+    queryKey: ["nav-perms", userId],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("user_roles")
+        .select("nav_permissions")
+        .eq("user_id", userId)
+        .maybeSingle();
+      return (data?.nav_permissions as unknown as NavPermissions) ?? {
+        pipeline: true, reports_batches: true, tools: true, acquisitions: true, admin: true,
+      };
+    },
+  });
+
+  const toggleMutation = useMutation({
+    mutationFn: async ({ key, value }: { key: keyof NavPermissions; value: boolean }) => {
+      const current = perms ?? { pipeline: true, reports_batches: true, tools: true, acquisitions: true, admin: true };
+      const updated = { ...current, [key]: value };
+      const { error } = await supabase
+        .from("user_roles")
+        .update({ nav_permissions: updated } as any)
+        .eq("user_id", userId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["nav-perms", userId] });
+      queryClient.invalidateQueries({ queryKey: ["nav-permissions"] });
+      toast.success("Navigation access updated");
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  if (isLoading) return <p className="text-xs text-muted-foreground px-4 pb-3">Loading…</p>;
+
+  return (
+    <div className="px-4 pb-4 pt-2 bg-muted/20 space-y-2.5 border-t border-border/50">
+      <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest pt-1">Sidebar Access</p>
+      {NAV_SECTIONS.map((s) => (
+        <div key={s.key} className="flex items-center justify-between">
+          <span className="text-xs text-muted-foreground">{s.label}</span>
+          <Switch
+            checked={perms?.[s.key] ?? true}
+            onCheckedChange={(v) => toggleMutation.mutate({ key: s.key, value: v })}
+            disabled={toggleMutation.isPending}
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function TeamManagement() {
   const { role, user } = useAuth();
   const queryClient = useQueryClient();
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<AppRole>("processor");
+  const [expandedNavFor, setExpandedNavFor] = useState<string | null>(null);
 
   const isAdmin = role === "admin";
 
@@ -80,9 +152,7 @@ export default function TeamManagement() {
         .select("user_id, email, display_name") as { data: { user_id: string; email: string; display_name: string | null }[] | null; error: any };
       if (profErr) throw profErr;
 
-      // Exclude users who haven't accepted their invite yet
       const pendingIds = new Set(pendingInvites.map((p) => p.id));
-
       const profileMap = new Map(profiles.map((p) => [p.user_id, p]));
       return roles
         .filter((r) => !pendingIds.has(r.user_id))
@@ -248,7 +318,7 @@ export default function TeamManagement() {
     <div className="space-y-6 max-w-4xl">
       <div>
         <h1 className="text-2xl font-bold text-foreground">Team Management</h1>
-        <p className="text-sm text-muted-foreground mt-1">Invite and manage team members.</p>
+        <p className="text-sm text-muted-foreground mt-1">Invite, manage team members, and control sidebar access per person.</p>
       </div>
 
       {/* Invite form */}
@@ -286,7 +356,6 @@ export default function TeamManagement() {
           </Button>
         </div>
       </div>
-
 
       {/* Pending invitations */}
       {(pendingInvites.length > 0 || pendingLoading) && (
@@ -356,50 +425,67 @@ export default function TeamManagement() {
           members.map((m) => {
             const Icon = roleIcons[m.role];
             const isSelf = m.user_id === user?.id;
+            const navExpanded = expandedNavFor === m.user_id;
             return (
-              <div key={m.user_id} className="flex items-center gap-3 p-4">
-                <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                  <span className="text-xs font-semibold text-primary">
-                    {m.email.substring(0, 2).toUpperCase()}
-                  </span>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-foreground truncate">
-                    {m.display_name || m.email} {isSelf && <span className="text-muted-foreground">(you)</span>}
-                  </p>
-                  <p className="text-xs text-muted-foreground truncate">{m.email}</p>
-                </div>
-                <Select
-                  value={m.role}
-                  onValueChange={(v) => updateRoleMutation.mutate({ userId: m.user_id, newRole: v as AppRole })}
-                  disabled={isSelf}
-                >
-                  <SelectTrigger className="w-32">
-                    <div className="flex items-center gap-1.5">
-                      <Icon className="h-3 w-3" />
-                      <SelectValue />
-                    </div>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="admin">Admin</SelectItem>
-                    <SelectItem value="processor">Processor</SelectItem>
-                    <SelectItem value="viewer">Viewer</SelectItem>
-                  </SelectContent>
-                </Select>
-                {!isSelf && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="text-destructive hover:text-destructive"
-                    onClick={() => {
-                      if (confirm(`Remove ${m.email} from the team?`)) {
-                        removeMutation.mutate(m.user_id);
-                      }
-                    }}
+              <div key={m.user_id} className="divide-y divide-border/50">
+                <div className="flex items-center gap-3 p-4">
+                  <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                    <span className="text-xs font-semibold text-primary">
+                      {m.email.substring(0, 2).toUpperCase()}
+                    </span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-foreground truncate">
+                      {m.display_name || m.email} {isSelf && <span className="text-muted-foreground">(you)</span>}
+                    </p>
+                    <p className="text-xs text-muted-foreground truncate">{m.email}</p>
+                  </div>
+                  <Select
+                    value={m.role}
+                    onValueChange={(v) => updateRoleMutation.mutate({ userId: m.user_id, newRole: v as AppRole })}
+                    disabled={isSelf}
                   >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                )}
+                    <SelectTrigger className="w-32">
+                      <div className="flex items-center gap-1.5">
+                        <Icon className="h-3 w-3" />
+                        <SelectValue />
+                      </div>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="admin">Admin</SelectItem>
+                      <SelectItem value="processor">Processor</SelectItem>
+                      <SelectItem value="viewer">Viewer</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {/* Nav access toggle button */}
+                  {!isSelf && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-xs text-muted-foreground gap-1"
+                      onClick={() => setExpandedNavFor(navExpanded ? null : m.user_id)}
+                      title="Manage sidebar access"
+                    >
+                      {navExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                      Nav
+                    </Button>
+                  )}
+                  {!isSelf && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="text-destructive hover:text-destructive"
+                      onClick={() => {
+                        if (confirm(`Remove ${m.email} from the team?`)) {
+                          removeMutation.mutate(m.user_id);
+                        }
+                      }}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
+                {navExpanded && <NavPermissionsPanel userId={m.user_id} />}
               </div>
             );
           })
