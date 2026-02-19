@@ -34,7 +34,6 @@ function useSubsidyLookup(unit: string, amount: number) {
       .not("subsidy_provider", "is", null)
       .then(({ data }) => {
         if (!data) return;
-        // Match by unit (normalized) and amount within $0.01
         const match = data.find((cd: any) => {
           const cdUnit = (cd.unit || "").replace(/^#/, "").trim().toLowerCase();
           const cdCents = Math.round(Math.abs(cd.charge_amount) * 100);
@@ -44,6 +43,24 @@ function useSubsidyLookup(unit: string, amount: number) {
       });
   }, [unit, amount]);
   return subsidy;
+}
+
+// Hook to fetch all distinct subsidy providers for the dropdown
+function useSubsidyProviders() {
+  const [providers, setProviders] = useState<string[]>([]);
+  useEffect(() => {
+    supabase
+      .from("charge_details")
+      .select("subsidy_provider")
+      .eq("is_subsidy", true)
+      .not("subsidy_provider", "is", null)
+      .then(({ data }) => {
+        if (!data) return;
+        const unique = [...new Set(data.map((d: any) => d.subsidy_provider as string))].sort();
+        setProviders(unique);
+      });
+  }, []);
+  return providers;
 }
 
 export default function ReviewPage() {
@@ -441,6 +458,7 @@ function ReviewDetail({
   const currentUnit = getVal("unit", receipt.unit);
   const currentAmount = parseFloat(getVal("amount", String(receipt.amount))) || receipt.amount;
   const chargeSubsidy = useSubsidyLookup(currentUnit, currentAmount);
+  const subsidyProviders = useSubsidyProviders();
 
   // Subsidy value: manual edit > existing receipt value > charge_details lookup
   const subsidyValue = edits["subsidy_provider"] !== undefined
@@ -587,7 +605,7 @@ function ReviewDetail({
             <FieldRow label="Payment Type" value={getVal("payment_type", receipt.payment_type || "")} confidence={conf.paymentType || 0} onChange={(v) => handleEdit("payment_type", v)} />
             <FieldRow label="Reference" value={getVal("reference", receipt.reference || "")} confidence={0.9} onChange={(v) => handleEdit("reference", v)} />
              <FieldRow label="Memo / Remarks" value={getVal("memo", receipt.memo || "")} confidence={0.88} onChange={(v) => handleEdit("memo", v)} />
-            {/* Subsidy Provider — sourced from charge_details, editable to allow manual override */}
+            {/* Subsidy Provider — sourced from charge_details, selectable dropdown */}
             <div className="space-y-1">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -597,7 +615,7 @@ function ReviewDetail({
                       <Shield className="h-2.5 w-2.5" /> From Charge Detail
                     </span>
                   )}
-                  {edits["subsidy_provider"] !== undefined && (
+                  {edits["subsidy_provider"] !== undefined && chargeSubsidy && (
                     <button
                       className="text-[10px] text-muted-foreground hover:text-accent underline"
                       onClick={() => setEdits((prev) => { const next = { ...prev }; delete next["subsidy_provider"]; return next; })}
@@ -605,13 +623,22 @@ function ReviewDetail({
                   )}
                 </div>
               </div>
-              <input
-                type="text"
-                value={subsidyValue}
-                placeholder={chargeSubsidy ? chargeSubsidy : "None (no matching subsidy charge)"}
-                onChange={(e) => handleEdit("subsidy_provider", e.target.value)}
-                className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-              />
+              <Select
+                value={subsidyValue || "__none__"}
+                onValueChange={(v) => handleEdit("subsidy_provider", v === "__none__" ? "" : v)}
+              >
+                <SelectTrigger className="w-full h-9 text-sm bg-background border-input">
+                  <SelectValue placeholder="None (no subsidy)" />
+                </SelectTrigger>
+                <SelectContent className="z-[200] bg-card border border-border shadow-lg">
+                  <SelectItem value="__none__">
+                    <span className="text-muted-foreground">None (no subsidy)</span>
+                  </SelectItem>
+                  {subsidyProviders.map((p) => (
+                    <SelectItem key={p} value={p}>{p}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
           <div className="flex gap-2 pt-4 border-t border-border">
