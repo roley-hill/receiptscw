@@ -41,26 +41,30 @@ function CopyCell({ value, mono, id }: { value: string; mono?: boolean; id: stri
 }
 
 /* ─── Normalize address abbreviations for grouping ─── */
-const ABBR_MAP: Record<string, string> = {
-  " ave ": " avenue ", " ave,": " avenue,",
-  " st ": " street ", " st,": " street,",
-  " blvd ": " boulevard ", " blvd,": " boulevard,",
-  " dr ": " drive ", " dr,": " drive,",
-  " rd ": " road ", " rd,": " road,",
-  " ln ": " lane ", " ln,": " lane,",
-  " ct ": " court ", " ct,": " court,",
-  " pl ": " place ", " pl,": " place,",
-  " n ": " north ", " s ": " south ", " e ": " east ", " w ": " west ",
-};
+const ABBR_MAP: [RegExp, string][] = [
+  [/\bave\b/gi, "avenue"],
+  [/\bst\b/gi, "street"],
+  [/\bblvd\b/gi, "boulevard"],
+  [/\bdr\b/gi, "drive"],
+  [/\brd\b/gi, "road"],
+  [/\bln\b/gi, "lane"],
+  [/\bct\b/gi, "court"],
+  [/\bpl\b/gi, "place"],
+  [/\bpkwy\b/gi, "parkway"],
+  [/\bhwy\b/gi, "highway"],
+  [/\bn\b/gi, "north"],
+  [/\bs\b/gi, "south"],
+  [/\be\b/gi, "east"],
+  [/\bw\b/gi, "west"],
+];
 
 function normalizeAddress(addr: string): string {
-  let s = " " + addr.toLowerCase().trim() + " ";
-  for (const [abbr, full] of Object.entries(ABBR_MAP)) {
-    // Replace only when the abbreviation appears as a word boundary
-    s = s.split(abbr).join(full);
+  // Strip commas and extra whitespace so "Ave," and "Avenue" match
+  let s = addr.toLowerCase().replace(/,/g, " ").replace(/\s+/g, " ").trim();
+  for (const [pattern, replacement] of ABBR_MAP) {
+    s = s.replace(pattern, replacement);
   }
-  // Also handle trailing abbreviations (end of string before city/state)
-  return s.trim();
+  return s.replace(/\s+/g, " ").trim();
 }
 
 // Map each raw property string to a canonical (normalized) key,
