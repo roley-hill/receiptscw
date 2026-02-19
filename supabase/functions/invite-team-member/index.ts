@@ -35,8 +35,10 @@ Deno.serve(async (req) => {
       .single();
     if (callerRole?.role !== "admin") throw new Error("Admin access required");
 
+    const body = await req.json();
+
     if (req.method === "DELETE") {
-      const { user_id } = await req.json();
+      const { user_id } = body;
       if (!user_id) throw new Error("user_id required");
       if (user_id === user.id) throw new Error("Cannot remove yourself");
 
@@ -49,14 +51,14 @@ Deno.serve(async (req) => {
     }
 
     // POST - invite user via email
-    const { email, role } = await req.json();
+    const { email, role, redirectTo } = body;
     if (!email) throw new Error("Email required");
     const validRoles = ["admin", "processor", "viewer"];
     if (role && !validRoles.includes(role)) throw new Error("Invalid role");
 
-    // Use inviteUserByEmail — sends a secure email with a sign-up link
+    // inviteUserByEmail sends a secure email link; user sets password on first login
     const { data: inviteData, error: inviteErr } = await adminClient.auth.admin.inviteUserByEmail(email, {
-      redirectTo: `${Deno.env.get("SUPABASE_URL")?.replace(".supabase.co", "") || ""}/`,
+      redirectTo: redirectTo || "https://receiptscw.lovable.app/accept-invite",
     });
     if (inviteErr) throw inviteErr;
 
