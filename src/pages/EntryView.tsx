@@ -278,11 +278,11 @@ export default function EntryView() {
                       </Button>
                     </div>
                   </div>
-                  <div className="overflow-x-auto">
+                  <div className="overflow-x-auto max-h-[70vh] overflow-y-auto">
                     <table className="w-full min-w-[1200px]">
-                      <thead>
+                      <thead className="sticky top-0 z-10 bg-card">
                         <tr className="border-b border-border">
-                          <th className="px-3 py-2.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide w-10">Rec.</th>
+                          <th className="px-3 py-2.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide w-10">Recorded in PM Software?</th>
                           <th className="px-3 py-2.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide w-[70px]">Unit</th>
                           <th className="px-3 py-2.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide w-[140px]">Tenant</th>
                           <th className="px-3 py-2.5 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wide w-[100px]">Amount</th>
