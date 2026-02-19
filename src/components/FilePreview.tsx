@@ -125,6 +125,19 @@ interface FilePreviewOverlayProps {
 }
 
 export function FilePreviewOverlay({ fileName, fileUrl, loading, originalText, onClose }: FilePreviewOverlayProps) {
+  // Derive the actual download name from the file URL path (which reflects the real file type)
+  // rather than the original upload name (which may be .eml while the stored file is .pdf)
+  const getDownloadFileName = () => {
+    if (fileUrl) {
+      try {
+        const urlPath = new URL(fileUrl).pathname;
+        const urlFileName = urlPath.split("/").pop()?.split("?")[0];
+        if (urlFileName) return decodeURIComponent(urlFileName);
+      } catch { /* fall through */ }
+    }
+    return fileName || "attachment";
+  };
+
   const handleDownload = async () => {
     if (!fileUrl) return;
     try {
@@ -133,7 +146,7 @@ export function FilePreviewOverlay({ fileName, fileUrl, loading, originalText, o
       const blobUrl = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = blobUrl;
-      a.download = fileName || "attachment";
+      a.download = getDownloadFileName();
       a.click();
       URL.revokeObjectURL(blobUrl);
     } catch {
