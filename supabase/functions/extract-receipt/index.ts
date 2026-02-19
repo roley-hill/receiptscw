@@ -64,10 +64,22 @@ serve(async (req) => {
     let knownTenantsList = "";
     let tenantLookup: { full_name: string; property_address: string; unit_number: string; status: string }[] = [];
     try {
-      const { data: tenants } = await supabase
-        .from("appfolio_tenants")
-        .select("full_name, property_address, unit_number, status")
-        .order("full_name");
+      // Fetch ALL tenants (default limit is 1000, we may have more)
+      let allTenants: any[] = [];
+      let from = 0;
+      const pageSize = 1000;
+      while (true) {
+        const { data: page } = await supabase
+          .from("appfolio_tenants")
+          .select("full_name, property_address, unit_number, status")
+          .order("full_name")
+          .range(from, from + pageSize - 1);
+        if (!page || page.length === 0) break;
+        allTenants = allTenants.concat(page);
+        if (page.length < pageSize) break;
+        from += pageSize;
+      }
+      const tenants = allTenants;
       if (tenants && tenants.length > 0) {
         tenantLookup = tenants
           .filter((t: any) => (t.full_name || "").trim().length > 0)
@@ -770,12 +782,34 @@ ${knownTenantsList}` : ""}`;
     /** Expand common address abbreviations for matching */
     function normAddress(s: string): string {
       return s.toLowerCase()
+        .replace(/,/g, " ")
         .replace(/\bst\b/g, "street").replace(/\bave\b/g, "avenue")
         .replace(/\bblvd\b/g, "boulevard").replace(/\bdr\b/g, "drive")
         .replace(/\bln\b/g, "lane").replace(/\bpl\b/g, "place")
         .replace(/\brd\b/g, "road").replace(/\bct\b/g, "court")
         .replace(/\bpkwy\b/g, "parkway").replace(/\bhwy\b/g, "highway")
+        .replace(/\bcir\b/g, "circle").replace(/\bter\b/g, "terrace")
+        .replace(/\bway\b/g, "way").replace(/\bsq\b/g, "square")
+        .replace(/\bn\b/g, "north").replace(/\bs\b/g, "south")
+        .replace(/\be\b/g, "east").replace(/\bw\b/g, "west")
         .replace(/\s+/g, " ").trim();
+    }
+
+    /** Check if two property addresses refer to the same location */
+    function propertiesMatch(receiptProp: string, dbProp: string): boolean {
+      if (!receiptProp || !dbProp) return false;
+      const a = normAddress(receiptProp);
+      const b = normAddress(dbProp);
+      if (a === b || b.includes(a) || a.includes(b)) return true;
+      // Compare street number + first word of street name (e.g. "14732 blythe")
+      const aWords = a.split(" ").slice(0, 2).join(" ");
+      const bWords = b.split(" ").slice(0, 2).join(" ");
+      if (aWords.length >= 4 && aWords === bWords) return true;
+      // Compare first 3 words
+      const a3 = a.split(" ").slice(0, 3).join(" ");
+      const b3 = b.split(" ").slice(0, 3).join(" ");
+      if (a3.length >= 6 && (b.includes(a3) || a.includes(b3))) return true;
+      return false;
     }
 
     /** Strip middle names/initials → [first, last] */
@@ -865,10 +899,9 @@ ${knownTenantsList}` : ""}`;
           match = tenantLookup.find(t => t.full_name.toLowerCase() === extracted);
           // If multiple exact name matches, prefer one at same property
           if (match && item.property) {
-            const propNorm = normAddress(item.property);
             const betterMatch = tenantLookup.find(t =>
               t.full_name.toLowerCase() === extracted &&
-              normAddress(t.property_address || "").includes(propNorm.split(" ").slice(0, 2).join(" "))
+              propertiesMatch(item.property, t.property_address || "")
             );
             if (betterMatch) match = betterMatch;
           }
@@ -886,13 +919,7 @@ ${knownTenantsList}` : ""}`;
           if (unitMatches.length === 1) {
             match = unitMatches[0];
           } else if (unitMatches.length > 1 && item.property) {
-            const propNorm = normAddress(item.property);
-            const propWords = propNorm.split(" ").slice(0, 3).join(" ");
-            const propMatch = unitMatches.find(t => {
-              const dbProp = normAddress(t.property_address || "");
-              return dbProp.includes(propNorm) || propNorm.includes(dbProp) ||
-                     dbProp.includes(propWords) || propWords.includes(dbProp.split(" ").slice(0, 3).join(" "));
-            });
+            const propMatch = unitMatches.find(t => propertiesMatch(item.property, t.property_address || ""));
             if (propMatch) match = propMatch;
           }
           // If we matched by unit but name is very different, only accept if name is also fuzzy-similar
