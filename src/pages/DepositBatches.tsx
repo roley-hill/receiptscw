@@ -188,7 +188,7 @@ export default function DepositBatches() {
         <Suspense fallback={null}>
           <BatchDocumentPreview
             receipts={allReceipts.filter((r) => r.batch_id === previewBatchId)}
-            batchId={previewBatchId}
+            batch={batches.find((b) => b.id === previewBatchId)}
             onClose={() => setPreviewBatchId(null)}
           />
         </Suspense>
