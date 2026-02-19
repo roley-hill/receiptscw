@@ -498,10 +498,15 @@ function ReviewDetail({
               property={getVal("property", receipt.property)}
               unit={getVal("unit", receipt.unit)}
               extractedTenant={getVal("tenant", receipt.tenant)}
-              onAccept={({ name, property, unit }) => {
-                handleEdit("tenant", name);
-                handleEdit("property", property);
-                handleEdit("unit", unit);
+              onAccept={async ({ name, property, unit }) => {
+                try {
+                  const updatedScores = { ...(receipt.confidence_scores as any || {}), tenant: 0.95, property: 0.95, unit: 0.95, tenantVerified: true, propertyVerified: true };
+                  await updateReceipt(receipt.id, { tenant: name, property, unit, confidence_scores: updatedScores });
+                  toast.success(`Updated tenant to ${name}`);
+                  queryClient.invalidateQueries({ queryKey: ["receipts"] });
+                } catch (err: any) {
+                  toast.error(err.message || "Update failed");
+                }
               }}
             />
             <FieldRow label="Receipt Date" value={getVal("receipt_date", receipt.receipt_date || "")} confidence={conf.receiptDate || 0} required onChange={(v) => handleEdit("receipt_date", v)} />
