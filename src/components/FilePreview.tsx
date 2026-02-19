@@ -125,13 +125,20 @@ interface FilePreviewOverlayProps {
 }
 
 export function FilePreviewOverlay({ fileName, fileUrl, loading, originalText, onClose }: FilePreviewOverlayProps) {
-  const handleDownload = () => {
+  const handleDownload = async () => {
     if (!fileUrl) return;
-    const a = document.createElement("a");
-    a.href = fileUrl;
-    a.download = fileName || "attachment";
-    a.target = "_blank";
-    a.click();
+    try {
+      const response = await fetch(fileUrl);
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = fileName || "attachment";
+      a.click();
+      URL.revokeObjectURL(blobUrl);
+    } catch {
+      window.open(fileUrl, "_blank");
+    }
   };
 
   return (
