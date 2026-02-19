@@ -248,74 +248,45 @@ serve(async (req) => {
     console.log(`Synced ${upserted} charge details`);
 
     // ---- AUTO-TAG SUBSIDY PROVIDERS ON EXISTING RECEIPTS ----
-    // Strategy A: Use charge_details if we got any subsidy charges from AppFolio
+    // Use charge_details as the authoritative source for subsidy provider.
+    // Match receipts to charges by unit number + amount (exact match within $0.01).
+    // This correctly uses the account name (e.g. "Subsidy Rent - Brilliant Corners")
+    // from AppFolio rather than unreliable memo/reference text patterns.
     const { data: subsidyCharges } = await supabase
       .from("charge_details")
-      .select("charged_to, unit, property_address, charge_amount, subsidy_provider")
+      .select("unit, charge_amount, subsidy_provider")
       .eq("is_subsidy", true)
       .not("subsidy_provider", "is", null);
 
     let receiptsUpdated = 0;
     if (subsidyCharges && subsidyCharges.length > 0) {
+      // Build a lookup map: "unit|amount" -> subsidy_provider (de-duped, take first match)
+      const subsidyMap = new Map<string, string>();
+      for (const sc of subsidyCharges) {
+        if (!sc.unit || !sc.subsidy_provider) continue;
+        const normalizedUnit = sc.unit.replace(/^#/, "").trim().toLowerCase();
+        const key = `${normalizedUnit}|${Math.round(sc.charge_amount * 100)}`;
+        if (!subsidyMap.has(key)) {
+          subsidyMap.set(key, sc.subsidy_provider);
+        }
+      }
+
+      // Fetch ALL receipts and update any where charge_details gives us a different (correct) provider
       const { data: receipts } = await supabase
         .from("receipts")
-        .select("id, tenant, unit, property, amount, subsidy_provider")
-        .is("subsidy_provider", null);
+        .select("id, unit, amount, subsidy_provider");
 
       if (receipts && receipts.length > 0) {
         for (const receipt of receipts) {
-          const receiptAmount = Math.abs(Number(receipt.amount));
-          const receiptTenant = (receipt.tenant || "").toLowerCase().trim();
-          const receiptUnit = (receipt.unit || "").replace(/^#/, "").trim().toLowerCase();
+          const normalizedUnit = (receipt.unit || "").replace(/^#/, "").trim().toLowerCase();
+          const key = `${normalizedUnit}|${Math.round(Math.abs(Number(receipt.amount)) * 100)}`;
+          const correctProvider = subsidyMap.get(key);
 
-          const match = subsidyCharges.find(sc => {
-            const scTenant = (sc.charged_to || "").toLowerCase().trim();
-            const scUnit = (sc.unit || "").replace(/^#/, "").trim().toLowerCase();
-            const scAmount = Math.abs(sc.charge_amount);
-            const tenantMatch = scTenant && receiptTenant && (
-              scTenant === receiptTenant || scTenant.includes(receiptTenant) || receiptTenant.includes(scTenant)
-            );
-            const unitMatch = scUnit && receiptUnit && (
-              scUnit === receiptUnit || scUnit.endsWith("-" + receiptUnit) || receiptUnit.endsWith("-" + scUnit)
-            );
-            const amountMatch = Math.abs(scAmount - receiptAmount) < 0.01;
-            return amountMatch && (tenantMatch || unitMatch);
-          });
-
-          if (match && match.subsidy_provider) {
-            await supabase.from("receipts").update({ subsidy_provider: match.subsidy_provider }).eq("id", receipt.id);
+          if (correctProvider && receipt.subsidy_provider !== correctProvider) {
+            await supabase.from("receipts").update({ subsidy_provider: correctProvider }).eq("id", receipt.id);
             receiptsUpdated++;
           }
         }
-      }
-    }
-
-    // Strategy B: Detect subsidy from receipt memo/reference patterns (works even without AppFolio charges API)
-    // Tag HAP (Housing Assistance Payment / Section 8) from memo
-    const { data: hapReceipts } = await supabase
-      .from("receipts")
-      .select("id")
-      .is("subsidy_provider", null)
-      .ilike("memo", "%HAP%");
-
-    if (hapReceipts && hapReceipts.length > 0) {
-      for (const r of hapReceipts) {
-        await supabase.from("receipts").update({ subsidy_provider: "Section 8 HAP" }).eq("id", r.id);
-        receiptsUpdated++;
-      }
-    }
-
-    // Tag FHSP from reference
-    const { data: fhspReceipts } = await supabase
-      .from("receipts")
-      .select("id")
-      .is("subsidy_provider", null)
-      .ilike("reference", "%FHSP%");
-
-    if (fhspReceipts && fhspReceipts.length > 0) {
-      for (const r of fhspReceipts) {
-        await supabase.from("receipts").update({ subsidy_provider: "FHSP" }).eq("id", r.id);
-        receiptsUpdated++;
       }
     }
 
