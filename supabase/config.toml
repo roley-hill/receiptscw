@@ -8,3 +8,6 @@ verify_jwt = false
 
 [functions.sync-rent-roll]
 verify_jwt = false
+
+[functions.sync-charges]
+verify_jwt = false

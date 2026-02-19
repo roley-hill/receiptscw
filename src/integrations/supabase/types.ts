@@ -110,6 +110,66 @@ export type Database = {
         }
         Relationships: []
       }
+      charge_details: {
+        Row: {
+          account_name: string
+          account_number: string
+          appfolio_tenant_id: string | null
+          charge_amount: number
+          charge_date: string | null
+          charged_to: string
+          created_at: string
+          id: string
+          is_subsidy: boolean
+          paid_amount: number
+          property_address: string
+          receipt_date: string | null
+          reference: string | null
+          subsidy_provider: string | null
+          synced_at: string
+          unit: string | null
+          updated_at: string
+        }
+        Insert: {
+          account_name?: string
+          account_number?: string
+          appfolio_tenant_id?: string | null
+          charge_amount?: number
+          charge_date?: string | null
+          charged_to?: string
+          created_at?: string
+          id?: string
+          is_subsidy?: boolean
+          paid_amount?: number
+          property_address?: string
+          receipt_date?: string | null
+          reference?: string | null
+          subsidy_provider?: string | null
+          synced_at?: string
+          unit?: string | null
+          updated_at?: string
+        }
+        Update: {
+          account_name?: string
+          account_number?: string
+          appfolio_tenant_id?: string | null
+          charge_amount?: number
+          charge_date?: string | null
+          charged_to?: string
+          created_at?: string
+          id?: string
+          is_subsidy?: boolean
+          paid_amount?: number
+          property_address?: string
+          receipt_date?: string | null
+          reference?: string | null
+          subsidy_provider?: string | null
+          synced_at?: string
+          unit?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       deposit_batches: {
         Row: {
           batch_id: string
@@ -214,6 +274,7 @@ export type Database = {
           reference: string | null
           rent_month: string | null
           status: Database["public"]["Enums"]["receipt_status"]
+          subsidy_provider: string | null
           tenant: string
           transfer_status: Database["public"]["Enums"]["transfer_status"]
           transferred_at: string | null
@@ -245,6 +306,7 @@ export type Database = {
           reference?: string | null
           rent_month?: string | null
           status?: Database["public"]["Enums"]["receipt_status"]
+          subsidy_provider?: string | null
           tenant?: string
           transfer_status?: Database["public"]["Enums"]["transfer_status"]
           transferred_at?: string | null
@@ -276,6 +338,7 @@ export type Database = {
           reference?: string | null
           rent_month?: string | null
           status?: Database["public"]["Enums"]["receipt_status"]
+          subsidy_provider?: string | null
           tenant?: string
           transfer_status?: Database["public"]["Enums"]["transfer_status"]
           transferred_at?: string | null

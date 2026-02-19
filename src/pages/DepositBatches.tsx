@@ -1,146 +1,20 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchBatches, fetchReceipts, reverseBatch } from "@/lib/api";
+import { downloadBatchPDF, generateBatchXLSX, downloadBatchZIP } from "@/lib/batchReports";
 import { motion } from "framer-motion";
-import { Layers, Download, Mail, CheckCircle2, Clock, FileSpreadsheet, FileText as FileTextIcon, Undo2 } from "lucide-react";
+import { Layers, Download, Mail, CheckCircle2, Clock, FileSpreadsheet, FileText as FileTextIcon, Undo2, PackageOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/hooks/use-toast";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
-import * as XLSX from "xlsx";
-
-function generateBatchPDF(batch: any, receipts: any[]) {
-  const doc = new jsPDF();
-  const pageWidth = doc.internal.pageSize.getWidth();
-
-  const grossTotal = receipts.filter((r) => Number(r.amount) >= 0).reduce((s, r) => s + Number(r.amount), 0);
-  const deductions = receipts.filter((r) => Number(r.amount) < 0).reduce((s, r) => s + Number(r.amount), 0);
-  const netTotal = grossTotal + deductions;
-
-  // Header
-  doc.setFontSize(18);
-  doc.text("Deposit Batch Report", 14, 20);
-  doc.setFontSize(10);
-  doc.setTextColor(100);
-  doc.text(`Generated: ${new Date().toLocaleDateString()}`, 14, 28);
-
-  // Batch info
-  doc.setFontSize(12);
-  doc.setTextColor(0);
-  doc.text(`Property: ${batch.property}`, 14, 40);
-  doc.text(`Batch ID: ${batch.batch_id}`, 14, 48);
-  doc.text(`Period: ${batch.deposit_period || "—"}`, 14, 56);
-  doc.text(`Status: ${batch.status}`, 14, 64);
-  doc.text(`Gross Total: $${grossTotal.toLocaleString("en-US", { minimumFractionDigits: 2 })}`, 14, 72);
-  doc.text(`Deductions: $${deductions.toLocaleString("en-US", { minimumFractionDigits: 2 })}`, pageWidth / 2, 72);
-  doc.text(`Net Total: $${netTotal.toLocaleString("en-US", { minimumFractionDigits: 2 })}`, 14, 80);
-  doc.text(`Receipt Count: ${batch.receipt_count}`, pageWidth / 2, 80);
-
-  if (batch.transferred_at) {
-    doc.text(`Transferred: ${new Date(batch.transferred_at).toLocaleDateString()}`, 14, 88);
-    if (batch.transfer_method) doc.text(`Method: ${batch.transfer_method}`, pageWidth / 2, 88);
-  }
-
-  // Receipt table
-  const startY = batch.transferred_at ? 98 : 90;
-  autoTable(doc, {
-    startY,
-    head: [["Tenant", "Unit", "Amount", "Type", "Receipt Date", "Reference", "Receipt ID"]],
-    body: receipts.map((r) => [
-      r.tenant,
-      r.unit,
-      `$${Number(r.amount).toLocaleString("en-US", { minimumFractionDigits: 2 })}`,
-      Number(r.amount) < 0 ? "DEDUCTION" : "Payment",
-      r.receipt_date || "—",
-      r.reference || "—",
-      r.receipt_id,
-    ]),
-    foot: [
-      ["", "", `Gross: $${grossTotal.toLocaleString("en-US", { minimumFractionDigits: 2 })}`, "", "", "", ""],
-      ["", "", `Deductions: $${deductions.toLocaleString("en-US", { minimumFractionDigits: 2 })}`, "", "", "", ""],
-      ["", "", `Net: $${netTotal.toLocaleString("en-US", { minimumFractionDigits: 2 })}`, "", "", "", `${receipts.length} receipts`],
-    ],
-    styles: { fontSize: 9 },
-    headStyles: { fillColor: [41, 50, 65] },
-    footStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: "bold" },
-    didParseCell: (data: any) => {
-      // Highlight negative amounts in red
-      if (data.section === "body" && data.column.index === 2) {
-        const val = data.cell.raw as string;
-        if (val.includes("-")) {
-          data.cell.styles.textColor = [200, 50, 50];
-        }
-      }
-    },
-  });
-
-  // Transfer instructions
-  const finalY = (doc as any).lastAutoTable?.finalY || startY + 50;
-  if (finalY + 40 < doc.internal.pageSize.getHeight()) {
-    doc.setFontSize(11);
-    doc.setTextColor(0);
-    doc.text("Transfer Instructions", 14, finalY + 15);
-    doc.setFontSize(9);
-    doc.setTextColor(80);
-    doc.text(`Please transfer $${netTotal.toLocaleString("en-US", { minimumFractionDigits: 2 })} (net) for property "${batch.property}".`, 14, finalY + 24);
-    if (batch.external_reference) doc.text(`Reference: ${batch.external_reference}`, 14, finalY + 32);
-    if (batch.notes) doc.text(`Notes: ${batch.notes}`, 14, finalY + 40);
-  }
-
-  doc.save(`batch-report-${batch.batch_id}-${new Date().toISOString().slice(0, 10)}.pdf`);
-  toast({ title: "PDF downloaded" });
-}
-
-function generateBatchXLSX(batch: any, receipts: any[]) {
-  const grossTotal = receipts.filter((r) => Number(r.amount) >= 0).reduce((s, r) => s + Number(r.amount), 0);
-  const deductions = receipts.filter((r) => Number(r.amount) < 0).reduce((s, r) => s + Number(r.amount), 0);
-  const netTotal = grossTotal + deductions;
-
-  const wb = XLSX.utils.book_new();
-
-  // Detail sheet
-  const detailData = receipts.map((r) => ({
-    Tenant: r.tenant,
-    Unit: r.unit,
-    Amount: Number(r.amount),
-    Type: Number(r.amount) < 0 ? "Deduction" : "Payment",
-    "Receipt Date": r.receipt_date || "",
-    Reference: r.reference || "",
-    "Receipt ID": r.receipt_id,
-    "Payment Type": r.payment_type || "",
-  }));
-  const ws = XLSX.utils.json_to_sheet(detailData);
-  XLSX.utils.book_append_sheet(wb, ws, "Receipts");
-
-  // Summary sheet
-  const summaryData = [
-    { Field: "Property", Value: batch.property },
-    { Field: "Batch ID", Value: batch.batch_id },
-    { Field: "Period", Value: batch.deposit_period || "—" },
-    { Field: "Status", Value: batch.status },
-    { Field: "Gross Total (Payments)", Value: grossTotal },
-    { Field: "Deductions", Value: deductions },
-    { Field: "Net Total", Value: netTotal },
-    { Field: "Receipt Count", Value: batch.receipt_count },
-    { Field: "Created", Value: new Date(batch.created_at).toLocaleDateString() },
-    { Field: "Transferred", Value: batch.transferred_at ? new Date(batch.transferred_at).toLocaleDateString() : "—" },
-    { Field: "Transfer Method", Value: batch.transfer_method || "—" },
-    { Field: "External Reference", Value: batch.external_reference || "—" },
-    { Field: "Notes", Value: batch.notes || "" },
-  ];
-  const ws2 = XLSX.utils.json_to_sheet(summaryData);
-  XLSX.utils.book_append_sheet(wb, ws2, "Summary");
-
-  XLSX.writeFile(wb, `batch-report-${batch.batch_id}-${new Date().toISOString().slice(0, 10)}.xlsx`);
-  toast({ title: "XLSX downloaded" });
-}
+import { useState } from "react";
 
 export default function DepositBatches() {
   const queryClient = useQueryClient();
   const { data: batches = [], isLoading } = useQuery({ queryKey: ["batches"], queryFn: fetchBatches });
   const { data: allReceipts = [] } = useQuery({ queryKey: ["receipts"], queryFn: fetchReceipts });
+  const [downloadingZip, setDownloadingZip] = useState<string | null>(null);
 
   const reverseMutation = useMutation({
     mutationFn: (batchId: string) => reverseBatch(batchId),
@@ -151,6 +25,17 @@ export default function DepositBatches() {
     },
     onError: (e: Error) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
+
+  const handleZipDownload = async (batch: any, receipts: any[]) => {
+    setDownloadingZip(batch.id);
+    try {
+      await downloadBatchZIP(batch, receipts);
+    } catch (e) {
+      toast({ title: "Error", description: e instanceof Error ? e.message : "ZIP download failed", variant: "destructive" });
+    } finally {
+      setDownloadingZip(null);
+    }
+  };
 
   if (isLoading) {
     return <div className="flex items-center justify-center py-20"><div className="h-8 w-8 border-2 border-accent border-t-transparent rounded-full animate-spin" /></div>;
@@ -176,6 +61,7 @@ export default function DepositBatches() {
             const deductionTotal = receipts.filter((r) => Number(r.amount) < 0).reduce((s, r) => s + Number(r.amount), 0);
             const netTotal = grossTotal + deductionTotal;
             const hasDeductions = deductionTotal < 0;
+            const isZipping = downloadingZip === batch.id;
             return (
               <motion.div key={batch.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }} className="vault-card overflow-hidden">
                 <div className="px-5 py-4 flex items-center justify-between">
@@ -207,7 +93,10 @@ export default function DepositBatches() {
                       <BatchStatusBadge status={batch.status} />
                     </div>
                     <div className="flex gap-1">
-                      <Button variant="outline" size="sm" onClick={() => generateBatchPDF(batch, receipts)} title="Download PDF report">
+                      <Button variant="outline" size="sm" onClick={() => handleZipDownload(batch, receipts)} disabled={isZipping} title="Download deposit package (ZIP)">
+                        {isZipping ? <div className="h-3.5 w-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" /> : <PackageOpen className="h-3.5 w-3.5" />}
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => downloadBatchPDF(batch, receipts)} title="Download PDF report">
                         <FileTextIcon className="h-3.5 w-3.5" />
                       </Button>
                       <Button variant="outline" size="sm" onClick={() => generateBatchXLSX(batch, receipts)} title="Download XLSX report">
@@ -258,6 +147,7 @@ export default function DepositBatches() {
                           <th className="px-5 py-2 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Unit</th>
                           <th className="px-5 py-2 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wide">Amount</th>
                           <th className="px-5 py-2 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Type</th>
+                          <th className="px-5 py-2 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Subsidy</th>
                           <th className="px-5 py-2 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Receipt ID</th>
                         </tr>
                       </thead>
@@ -268,6 +158,7 @@ export default function DepositBatches() {
                             <td className="px-5 py-2.5 text-sm vault-mono text-muted-foreground">{r.unit}</td>
                             <td className={`px-5 py-2.5 text-sm text-right vault-mono font-semibold ${Number(r.amount) < 0 ? "text-[hsl(var(--vault-red))]" : "text-foreground"}`}>${Number(r.amount).toLocaleString("en-US", { minimumFractionDigits: 2 })}</td>
                             <td className="px-5 py-2.5">{Number(r.amount) < 0 ? <span className="vault-badge-deduction">Deduction</span> : <span className="text-xs text-muted-foreground">Payment</span>}</td>
+                            <td className="px-5 py-2.5 text-xs text-muted-foreground">{r.subsidy_provider || "—"}</td>
                             <td className="px-5 py-2.5 text-xs vault-mono text-vault-blue">{r.receipt_id}</td>
                           </tr>
                         ))}

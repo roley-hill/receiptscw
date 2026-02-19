@@ -973,6 +973,23 @@ ${knownTenantsList}` : ""}`;
       console.warn("Could not load rent roll charges:", e);
     }
 
+    // ---- CHARGE DETAIL / SUBSIDY MATCHING ----
+    // Fetch charge_details to identify subsidy providers
+    let chargeDetails: { charged_to: string; unit: string | null; property_address: string; charge_amount: number; is_subsidy: boolean; subsidy_provider: string | null; account_name: string }[] = [];
+    try {
+      const { data: cd } = await supabase
+        .from("charge_details")
+        .select("charged_to, unit, property_address, charge_amount, is_subsidy, subsidy_provider, account_name")
+        .eq("is_subsidy", true)
+        .not("subsidy_provider", "is", null);
+      if (cd && cd.length > 0) {
+        chargeDetails = cd;
+        console.log(`Loaded ${cd.length} subsidy charge details for provider matching`);
+      }
+    } catch (e) {
+      console.warn("Could not load charge details:", e);
+    }
+
     // Cross-reference each extracted item's amount against rent roll
     if (rentRollCharges.length > 0) {
       for (const item of extractedItems) {
@@ -1173,6 +1190,35 @@ ${knownTenantsList}` : ""}`;
         else if (ref.startsWith("CASH")) item.payment_type = "Cash";
       }
 
+      // ---- SUBSIDY PROVIDER MATCHING ----
+      let subsidyProvider: string | null = null;
+      if (chargeDetails.length > 0 && item.tenant) {
+        const itemTenant = (item.tenant || "").toLowerCase().trim();
+        const itemUnit = (item.unit || "").replace(/^#/, "").trim().toLowerCase();
+        const itemAmount = Math.abs(item.amount || 0);
+
+        const subsidyMatch = chargeDetails.find(cd => {
+          const cdTenant = (cd.charged_to || "").toLowerCase().trim();
+          const cdUnit = (cd.unit || "").replace(/^#/, "").trim().toLowerCase();
+          const cdAmount = Math.abs(cd.charge_amount);
+
+          const tenantMatch = cdTenant && itemTenant && (
+            cdTenant === itemTenant || cdTenant.includes(itemTenant) || itemTenant.includes(cdTenant)
+          );
+          const unitMatch = cdUnit && itemUnit && (
+            cdUnit === itemUnit || cdUnit.endsWith("-" + itemUnit) || itemUnit.endsWith("-" + cdUnit)
+          );
+          const amountMatch = Math.abs(cdAmount - itemAmount) < 0.01;
+
+          return amountMatch && (tenantMatch || unitMatch);
+        });
+
+        if (subsidyMatch && subsidyMatch.subsidy_provider) {
+          subsidyProvider = subsidyMatch.subsidy_provider;
+          console.log(`Subsidy provider matched: "${item.tenant}" -> ${subsidyProvider} ($${itemAmount})`);
+        }
+      }
+
       // Determine status based on confidence — only critical fields matter
       const criticalConfidences = [
         item.property_confidence || 0,
@@ -1210,6 +1256,7 @@ ${knownTenantsList}` : ""}`;
             amountVerified: item.amount_verified ?? null,
           },
           status,
+          subsidy_provider: subsidyProvider,
           file_path: extractedText.startsWith("PDF_ATTACHMENT:") ? extractedText.replace("PDF_ATTACHMENT:", "") : filePath,
           file_name: file.name,
           file_content_hash: fileContentHash,
@@ -1231,7 +1278,7 @@ ${knownTenantsList}` : ""}`;
         action: "receipt_uploaded",
         entity_type: "receipt",
         entity_id: receipt.receipt_id,
-        details: { file_name: file.name, status, confidence: avgCriticalConfidence, line_item: true },
+        details: { file_name: file.name, status, confidence: avgCriticalConfidence, line_item: true, subsidy_provider: subsidyProvider },
       });
     }
 
