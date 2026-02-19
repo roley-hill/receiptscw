@@ -237,22 +237,25 @@ async function callAI(messages: unknown[]): Promise<string> {
   return data.choices?.[0]?.message?.content?.trim() ?? "";
 }
 
-async function detectAddressViaAI(file: File): Promise<AddressResult> {
-  const parts: unknown[] = [
-    {
-      type: "text",
-      text: `Examine this document and extract the PROPERTY building address (NOT a tenant mailing address).
+async function detectAddressViaAI(ocrText: string): Promise<AddressResult> {
+  // IMPORTANT: Never send file bytes here — only text. Loading file data into
+  // base64 for a vision call during address detection blows the memory limit.
+  // If OCR extracted no text, return empty so the user fills in manually.
+  if (!ocrText || ocrText.length < 20) {
+    return { address: "", city: "", state: "", postal_code: "", confidence: 0, method: "ai" };
+  }
+
+  const snippet = ocrText.slice(0, 3000);
+  const raw = await callAI([{
+    role: "user",
+    content: `Extract the PROPERTY building address from this document text (NOT a tenant mailing address).
 Return ONLY valid JSON, no markdown fences:
 { "address": "full street address", "city": "city", "state": "2-letter state", "postal_code": "5-digit zip", "confidence": 0.0-1.0 }
-If you cannot determine it, set confidence to 0 and all fields to empty strings.`,
-    },
-  ];
-  try {
-    const { b64, mime } = await fileToBase64Limited(file);
-    parts.push({ type: "image_url", image_url: { url: `data:${mime};base64,${b64}` } });
-  } catch (_) { /* skip */ }
+If you cannot determine it, set confidence to 0 and all fields to empty strings.
 
-  const raw = await callAI([{ role: "user", content: parts }]);
+Document text:
+${snippet}`,
+  }]);
   const jsonStr = raw.replace(/```json\n?/gi, "").replace(/```/g, "").trim();
   try {
     return { ...JSON.parse(jsonStr), method: "ai" };
@@ -390,7 +393,7 @@ async function processFile(
 // ── Address detection orchestrator: OCR → regex → AI fallback ────────────────
 
 async function detectAddress(file: File): Promise<AddressResult> {
-  // 1. Try OCR first
+  // Only attempt text extraction for PDFs; skip entirely for ZIPs and other formats
   const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
   const ocrText = isPdf ? await extractTextFromPdf(file) : "";
 
@@ -402,9 +405,9 @@ async function detectAddress(file: File): Promise<AddressResult> {
     }
   }
 
-  // 2. Fall back to AI
-  console.log("Address not found via OCR, falling back to AI");
-  return detectAddressViaAI(file);
+  // 2. Fall back to AI text-only (never loads file bytes — memory safe)
+  console.log("Address not found via OCR, falling back to AI text analysis");
+  return detectAddressViaAI(ocrText);
 }
 
 // ── Serve ─────────────────────────────────────────────────────────────────────
