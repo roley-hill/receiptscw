@@ -291,6 +291,7 @@ export default function EntryView() {
                           <th className="px-3 py-2.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide w-[80px]">Month</th>
                           <th className="px-3 py-2.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide w-[90px]">Pay Type</th>
                           <th className="px-3 py-2.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide w-[100px]">Reference</th>
+                          <th className="px-3 py-2.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide w-[120px]">Subsidy</th>
                           <th className="px-3 py-2.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide w-[140px]">Memo</th>
                           <th className="px-3 py-2.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide w-[100px]">Receipt ID</th>
                           <th className="px-3 py-2.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide w-[80px]">Transfer</th>
@@ -346,6 +347,7 @@ export default function EntryView() {
                                   <td className="px-3 py-2.5"><CopyCell value={r.rent_month || "—"} mono id={`month-${r.id}`} /></td>
                                   <td className="px-3 py-2.5"><CopyCell value={r.payment_type || "—"} id={`ptype-${r.id}`} /></td>
                                   <td className="px-3 py-2.5"><CopyCell value={r.reference || "—"} mono id={`ref-${r.id}`} /></td>
+                                  <td className="px-3 py-2.5"><CopyCell value={r.subsidy_provider || "—"} id={`sub-${r.id}`} /></td>
                                   <td className="px-3 py-2.5"><CopyCell value={r.memo || "—"} id={`memo-${r.id}`} /></td>
                                   <td className="px-3 py-2.5 text-xs vault-mono text-vault-blue">{r.receipt_id}</td>
                                   <td className="px-3 py-2.5">{r.transfer_status === "transferred" ? <span className="vault-badge-success">Transferred</span> : <span className="vault-badge-neutral">Pending</span>}</td>
@@ -412,7 +414,7 @@ export default function EntryView() {
                                   </div>
                                 </td>
                                 <td className="px-3 py-2.5 text-right text-sm vault-mono font-semibold text-foreground">${tenantTotal.toLocaleString("en-US", { minimumFractionDigits: 2 })}</td>
-                                <td colSpan={8}></td>
+                                <td colSpan={9}></td>
                               </tr>
                             );
 
@@ -441,6 +443,7 @@ export default function EntryView() {
                                     <td className={`px-3 py-2.5 ${isDupMonth ? "font-semibold" : ""}`}><CopyCell value={r.rent_month || "—"} mono id={`month-${r.id}`} /></td>
                                     <td className="px-3 py-2.5"><CopyCell value={r.payment_type || "—"} id={`ptype-${r.id}`} /></td>
                                     <td className="px-3 py-2.5"><CopyCell value={r.reference || "—"} mono id={`ref-${r.id}`} /></td>
+                                    <td className="px-3 py-2.5"><CopyCell value={r.subsidy_provider || "—"} id={`sub-${r.id}`} /></td>
                                     <td className="px-3 py-2.5"><CopyCell value={r.memo || "—"} id={`memo-${r.id}`} /></td>
                                     <td className="px-3 py-2.5 text-xs vault-mono text-vault-blue">{r.receipt_id}</td>
                                     <td className="px-3 py-2.5">{r.transfer_status === "transferred" ? <span className="vault-badge-success">Transferred</span> : <span className="vault-badge-neutral">Pending</span>}</td>
