@@ -767,6 +767,17 @@ ${knownTenantsList}` : ""}`;
       return s.toLowerCase().replace(/\./g, "").replace(/\s+/g, " ").trim();
     }
 
+    /** Expand common address abbreviations for matching */
+    function normAddress(s: string): string {
+      return s.toLowerCase()
+        .replace(/\bst\b/g, "street").replace(/\bave\b/g, "avenue")
+        .replace(/\bblvd\b/g, "boulevard").replace(/\bdr\b/g, "drive")
+        .replace(/\bln\b/g, "lane").replace(/\bpl\b/g, "place")
+        .replace(/\brd\b/g, "road").replace(/\bct\b/g, "court")
+        .replace(/\bpkwy\b/g, "parkway").replace(/\bhwy\b/g, "highway")
+        .replace(/\s+/g, " ").trim();
+    }
+
     /** Strip middle names/initials → [first, last] */
     function stripMiddle(name: string): string[] {
       const parts = norm(name).split(" ");
@@ -847,11 +858,20 @@ ${knownTenantsList}` : ""}`;
       for (const item of extractedItems) {
         let match: typeof tenantLookup[0] | undefined;
 
-        // 1. Try matching by tenant name if present
+        // 1. Try matching by tenant name + property if present
         if (item.tenant) {
           const extracted = item.tenant.toLowerCase().trim();
-          // Exact match first
+          // Exact match first — also consider property to disambiguate common names
           match = tenantLookup.find(t => t.full_name.toLowerCase() === extracted);
+          // If multiple exact name matches, prefer one at same property
+          if (match && item.property) {
+            const propNorm = normAddress(item.property);
+            const betterMatch = tenantLookup.find(t =>
+              t.full_name.toLowerCase() === extracted &&
+              normAddress(t.property_address || "").includes(propNorm.split(" ").slice(0, 2).join(" "))
+            );
+            if (betterMatch) match = betterMatch;
+          }
           if (!match) {
             // Fuzzy match: handles middle initials, multi-word surnames, abbreviations, typos
             match = tenantLookup.find(t => namesMatchFuzzy(item.tenant, t.full_name));
@@ -866,13 +886,12 @@ ${knownTenantsList}` : ""}`;
           if (unitMatches.length === 1) {
             match = unitMatches[0];
           } else if (unitMatches.length > 1 && item.property) {
-            const propLower = item.property.toLowerCase();
-            // Narrow by property — also try first 3 words for partial match
-            const propWords = propLower.split(" ").slice(0, 3).join(" ");
+            const propNorm = normAddress(item.property);
+            const propWords = propNorm.split(" ").slice(0, 3).join(" ");
             const propMatch = unitMatches.find(t => {
-              const dbProp = (t.property_address || "").toLowerCase();
-              return dbProp.includes(propLower) || propLower.includes(dbProp) ||
-                     dbProp.includes(propWords);
+              const dbProp = normAddress(t.property_address || "");
+              return dbProp.includes(propNorm) || propNorm.includes(dbProp) ||
+                     dbProp.includes(propWords) || propWords.includes(dbProp.split(" ").slice(0, 3).join(" "));
             });
             if (propMatch) match = propMatch;
           }
@@ -1127,17 +1146,15 @@ ${knownTenantsList}` : ""}`;
         else if (ref.startsWith("CASH")) item.payment_type = "Cash";
       }
 
-      // Determine status based on confidence
-      const confidences = [
+      // Determine status based on confidence — only critical fields matter
+      const criticalConfidences = [
         item.property_confidence || 0,
-        item.unit_confidence || 0,
         item.tenant_confidence || 0,
         item.amount_confidence || 0,
-        item.receipt_date_confidence || 0,
       ];
-      const avgConfidence = confidences.reduce((a: number, b: number) => a + b, 0) / confidences.length;
+      const avgCriticalConfidence = criticalConfidences.reduce((a: number, b: number) => a + b, 0) / criticalConfidences.length;
       const hasMissingRequired = !item.property || !item.tenant || !item.amount;
-      const status = hasMissingRequired ? "exception" : avgConfidence < 0.7 ? "exception" : "needs_review";
+      const status = hasMissingRequired ? "exception" : avgCriticalConfidence < 0.7 ? "exception" : "needs_review";
 
       const { data: receipt, error: insertError } = await supabase
         .from("receipts")
