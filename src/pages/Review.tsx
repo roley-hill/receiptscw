@@ -4,7 +4,7 @@ import { useSearchParams } from "react-router-dom";
 import { fetchReceipts, updateReceipt, getFilePreviewUrl } from "@/lib/api";
 import { supabase } from "@/integrations/supabase/client";
 import { motion } from "framer-motion";
-import { CheckCircle2, AlertTriangle, ChevronLeft, ChevronRight, Eye, Edit3, Save, FileText, Image as ImageIcon, Loader2, ZoomIn, ZoomOut, RotateCcw, Trash2, CheckCheck, ArrowLeft } from "lucide-react";
+import { CheckCircle2, AlertTriangle, ChevronLeft, ChevronRight, Eye, Edit3, Save, FileText, Image as ImageIcon, Loader2, ZoomIn, ZoomOut, RotateCcw, Trash2, CheckCheck, ArrowLeft, Shield } from "lucide-react";
 import TenantSuggestion from "@/components/TenantSuggestion";
 import PdfViewer from "@/components/PdfViewer";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,32 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+
+// Hook to look up subsidy provider from charge_details by unit + amount
+function useSubsidyLookup(unit: string, amount: number) {
+  const [subsidy, setSubsidy] = useState<string | null>(null);
+  useEffect(() => {
+    if (!unit || !amount) return;
+    const normalizedUnit = unit.replace(/^#/, "").trim().toLowerCase();
+    const centAmount = Math.round(Math.abs(amount) * 100);
+    supabase
+      .from("charge_details")
+      .select("unit, charge_amount, subsidy_provider")
+      .eq("is_subsidy", true)
+      .not("subsidy_provider", "is", null)
+      .then(({ data }) => {
+        if (!data) return;
+        // Match by unit (normalized) and amount within $0.01
+        const match = data.find((cd: any) => {
+          const cdUnit = (cd.unit || "").replace(/^#/, "").trim().toLowerCase();
+          const cdCents = Math.round(Math.abs(cd.charge_amount) * 100);
+          return cdUnit === normalizedUnit && Math.abs(cdCents - centAmount) <= 1;
+        });
+        setSubsidy(match?.subsidy_provider || null);
+      });
+  }, [unit, amount]);
+  return subsidy;
+}
 
 export default function ReviewPage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -411,6 +437,16 @@ function ReviewDetail({
   };
   const getVal = (field: string, fallback: string) => edits[field] ?? fallback;
 
+  // Look up subsidy from charge_details by current unit+amount
+  const currentUnit = getVal("unit", receipt.unit);
+  const currentAmount = parseFloat(getVal("amount", String(receipt.amount))) || receipt.amount;
+  const chargeSubsidy = useSubsidyLookup(currentUnit, currentAmount);
+
+  // Subsidy value: manual edit > existing receipt value > charge_details lookup
+  const subsidyValue = edits["subsidy_provider"] !== undefined
+    ? edits["subsidy_provider"]
+    : (receipt.subsidy_provider || chargeSubsidy || "");
+
   const handleFinalize = async () => {
     setSaving(true);
     try {
@@ -424,6 +460,7 @@ function ReviewDetail({
         payment_type: getVal("payment_type", receipt.payment_type || ""),
         reference: getVal("reference", receipt.reference || ""),
         memo: getVal("memo", receipt.memo || ""),
+        subsidy_provider: subsidyValue || null,
         status: "finalized" as const,
         finalized_at: new Date().toISOString(),
       });
@@ -457,6 +494,7 @@ function ReviewDetail({
         payment_type: getVal("payment_type", receipt.payment_type || ""),
         reference: getVal("reference", receipt.reference || ""),
         memo: getVal("memo", receipt.memo || ""),
+        subsidy_provider: subsidyValue || null,
       });
       toast.success("Draft saved");
       setEdits({});
@@ -548,7 +586,33 @@ function ReviewDetail({
             <FieldRow label="Amount" value={getVal("amount", String(receipt.amount))} confidence={conf.amount || 0} required onChange={(v) => handleEdit("amount", v)} badge={<>{conf.amountVerified === false ? <UnverifiedBadge field="Amount" /> : null}{conf.chargeType ? <ChargeTypeBadge chargeType={conf.chargeType} /> : null}</>} />
             <FieldRow label="Payment Type" value={getVal("payment_type", receipt.payment_type || "")} confidence={conf.paymentType || 0} onChange={(v) => handleEdit("payment_type", v)} />
             <FieldRow label="Reference" value={getVal("reference", receipt.reference || "")} confidence={0.9} onChange={(v) => handleEdit("reference", v)} />
-            <FieldRow label="Memo / Remarks" value={getVal("memo", receipt.memo || "")} confidence={0.88} onChange={(v) => handleEdit("memo", v)} />
+             <FieldRow label="Memo / Remarks" value={getVal("memo", receipt.memo || "")} confidence={0.88} onChange={(v) => handleEdit("memo", v)} />
+            {/* Subsidy Provider — sourced from charge_details, editable to allow manual override */}
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <label className="text-xs font-medium text-muted-foreground">Subsidy Provider</label>
+                  {chargeSubsidy && edits["subsidy_provider"] === undefined && (
+                    <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-accent/10 text-accent font-medium">
+                      <Shield className="h-2.5 w-2.5" /> From Charge Detail
+                    </span>
+                  )}
+                  {edits["subsidy_provider"] !== undefined && (
+                    <button
+                      className="text-[10px] text-muted-foreground hover:text-accent underline"
+                      onClick={() => setEdits((prev) => { const next = { ...prev }; delete next["subsidy_provider"]; return next; })}
+                    >reset to charge detail</button>
+                  )}
+                </div>
+              </div>
+              <input
+                type="text"
+                value={subsidyValue}
+                placeholder={chargeSubsidy ? chargeSubsidy : "None (no matching subsidy charge)"}
+                onChange={(e) => handleEdit("subsidy_provider", e.target.value)}
+                className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+            </div>
           </div>
           <div className="flex gap-2 pt-4 border-t border-border">
             <Button variant="default" className="flex-1" onClick={handleFinalize} disabled={saving}>
