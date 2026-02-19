@@ -15,30 +15,23 @@ export default function AcceptInvite() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    // Sign out any existing session so the invite token can be properly exchanged
-    supabase.auth.signOut().then(() => {
-      // After signing out, listen for the SIGNED_IN event from the invite token in the URL
-      const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-        if (event === "SIGNED_IN" && session) {
-          // User was signed in via invite link — show password form
-          setSessionReady(true);
-          setChecking(false);
-        } else if (event === "SIGNED_OUT" && !session) {
-          // Still waiting for token exchange, give it a moment
-          setTimeout(() => setChecking(false), 3000);
-        }
-      });
-
-      // Also check if there's already a session (token was already exchanged)
-      supabase.auth.getSession().then(({ data: { session } }) => {
-        if (session) {
-          setSessionReady(true);
-          setChecking(false);
-        }
-      });
-
-      return () => subscription.unsubscribe();
+    // Listen for auth state changes — Supabase auto-exchanges the invite token from URL hash
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if ((event === "SIGNED_IN" || event === "USER_UPDATED") && session) {
+        setSessionReady(true);
+        setChecking(false);
+      }
     });
+
+    // Also check if the token was already exchanged (e.g. page re-render)
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) {
+        setSessionReady(true);
+        setChecking(false);
+      }
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
   // Timeout fallback — if nothing happens after 5s, show invalid link
