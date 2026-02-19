@@ -9,37 +9,71 @@ export default function AcceptInvite() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
-  // Start as true — we'll set to false only if no valid invite session is found
   const [sessionReady, setSessionReady] = useState(false);
   const [checking, setChecking] = useState(true);
   const navigate = useNavigate();
 
   useEffect(() => {
-    // Set up auth state listener FIRST before anything else
+    let resolved = false;
+
+    const resolve = (ready: boolean) => {
+      if (!resolved) {
+        resolved = true;
+        setSessionReady(ready);
+        setChecking(false);
+      }
+    };
+
+    // Handle newer Supabase PKCE flow — token_hash in URL query params
+    const urlParams = new URLSearchParams(window.location.search);
+    const tokenHash = urlParams.get("token_hash");
+    const type = urlParams.get("type");
+
+    if (tokenHash && type === "invite") {
+      // Exchange the token hash for a session
+      supabase.auth.verifyOtp({ token_hash: tokenHash, type: "invite" }).then(({ data, error }) => {
+        console.log("[AcceptInvite] verifyOtp result:", { data, error });
+        if (error) {
+          console.error("[AcceptInvite] verifyOtp error:", error.message);
+          resolve(false);
+        } else if (data.session) {
+          resolve(true);
+        }
+      });
+      return;
+    }
+
+    // Handle older hash fragment flow (#access_token=...&type=invite)
+    const hash = window.location.hash;
+    const hashParams = new URLSearchParams(hash.replace("#", ""));
+    const hashType = hashParams.get("type");
+
+    // Listen for ALL auth events — Supabase auto-processes the hash on init
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if ((event === "SIGNED_IN" || event === "USER_UPDATED" || event === "TOKEN_REFRESHED") && session) {
-        setSessionReady(true);
-        setChecking(false);
+      console.log("[AcceptInvite] auth event:", event, "has session:", !!session);
+      if (session?.user) {
+        // Accept if type=invite in URL, or user hasn't confirmed email yet
+        const isInvite = hashType === "invite" || !session.user.email_confirmed_at;
+        resolve(isInvite);
       }
     });
 
-    // Then check if Supabase already processed the URL hash token
+    // Check for existing session (Supabase may have already processed the hash)
     supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) {
-        setSessionReady(true);
-        setChecking(false);
+      console.log("[AcceptInvite] getSession:", !!session, session?.user?.email);
+      if (session?.user) {
+        const isInvite = hashType === "invite" || !session.user.email_confirmed_at;
+        resolve(isInvite);
       }
     });
 
-    return () => subscription.unsubscribe();
-  }, []);
+    // Timeout fallback after 10s
+    const timer = setTimeout(() => resolve(false), 10000);
 
-  // Timeout fallback — if nothing happens after 8s, show invalid link
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setChecking(false);
-    }, 8000);
-    return () => clearTimeout(timer);
+    return () => {
+      subscription.unsubscribe();
+      clearTimeout(timer);
+    };
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
