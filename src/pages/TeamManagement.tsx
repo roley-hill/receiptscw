@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { Users, UserPlus, Trash2, Shield, ShieldCheck, Eye } from "lucide-react";
+import { Users, UserPlus, Trash2, Shield, ShieldCheck, Eye, Mail } from "lucide-react";
 import type { Database } from "@/integrations/supabase/types";
 
 type AppRole = Database["public"]["Enums"]["app_role"];
@@ -36,7 +36,6 @@ export default function TeamManagement() {
   const queryClient = useQueryClient();
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<AppRole>("processor");
-  const [invitePassword, setInvitePassword] = useState("");
 
   const isAdmin = role === "admin";
 
@@ -65,7 +64,6 @@ export default function TeamManagement() {
 
   const inviteMutation = useMutation({
     mutationFn: async () => {
-      // Use the edge function to create user (admin action)
       const { data: sessionData } = await supabase.auth.getSession();
       const token = sessionData.session?.access_token;
       if (!token) throw new Error("Not authenticated");
@@ -78,7 +76,7 @@ export default function TeamManagement() {
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ email: inviteEmail, password: invitePassword, role: inviteRole }),
+          body: JSON.stringify({ email: inviteEmail, role: inviteRole }),
         }
       );
       if (!resp.ok) {
@@ -88,9 +86,8 @@ export default function TeamManagement() {
       return resp.json();
     },
     onSuccess: () => {
-      toast.success(`Invited ${inviteEmail} as ${inviteRole}`);
+      toast.success(`Invite sent to ${inviteEmail}`);
       setInviteEmail("");
-      setInvitePassword("");
       queryClient.invalidateQueries({ queryKey: ["team-members"] });
     },
     onError: (err: Error) => toast.error(err.message),
@@ -148,7 +145,6 @@ export default function TeamManagement() {
           <Shield className="h-10 w-10 text-muted-foreground mx-auto mb-3" />
           <p className="text-muted-foreground">Only admins can manage team members.</p>
         </div>
-        {/* Still show read-only list */}
         <div className="vault-card divide-y divide-border">
           {members.map((m) => {
             const Icon = roleIcons[m.role];
@@ -184,8 +180,12 @@ export default function TeamManagement() {
       {/* Invite form */}
       <div className="vault-card p-5 space-y-4">
         <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
-          <UserPlus className="h-4 w-4" /> Add Team Member
+          <UserPlus className="h-4 w-4" /> Invite Team Member
         </h2>
+        <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+          <Mail className="h-3.5 w-3.5" />
+          An email with a secure sign-in link will be sent to the invitee.
+        </p>
         <div className="flex flex-wrap gap-3">
           <Input
             placeholder="Email address"
@@ -193,13 +193,6 @@ export default function TeamManagement() {
             value={inviteEmail}
             onChange={(e) => setInviteEmail(e.target.value)}
             className="flex-1 min-w-[200px]"
-          />
-          <Input
-            placeholder="Temporary password"
-            type="password"
-            value={invitePassword}
-            onChange={(e) => setInvitePassword(e.target.value)}
-            className="w-48"
           />
           <Select value={inviteRole} onValueChange={(v) => setInviteRole(v as AppRole)}>
             <SelectTrigger className="w-36">
@@ -213,9 +206,9 @@ export default function TeamManagement() {
           </Select>
           <Button
             onClick={() => inviteMutation.mutate()}
-            disabled={!inviteEmail || !invitePassword || inviteMutation.isPending}
+            disabled={!inviteEmail || inviteMutation.isPending}
           >
-            {inviteMutation.isPending ? "Inviting..." : "Invite"}
+            {inviteMutation.isPending ? "Sending..." : "Send Invite"}
           </Button>
         </div>
       </div>
