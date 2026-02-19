@@ -33,6 +33,31 @@ async function fetchAIWithRetry(url: string, options: RequestInit, corsHdrs: Rec
   throw new Error("AI extraction failed after retries");
 }
 
+/**
+ * Normalize a unit identifier to the standard {street-number}-{unit} format.
+ * e.g. property "13412 W Vanowen St", unit "#11" or "Apt 11" → "13412-11"
+ * e.g. property "9034 Sepulveda Blvd", unit "19" → "9034-19"
+ * If street number cannot be extracted, returns the cleaned unit as-is.
+ */
+function formatUnitWithStreetNumber(property: string, unit: string): string {
+  const streetNumMatch = property.trim().match(/^(\d+)/);
+  if (!streetNumMatch) return cleanUnit(unit);
+  const streetNum = streetNumMatch[1];
+  const cleaned = cleanUnit(unit);
+  if (!cleaned) return streetNum;
+  // Avoid double-prefixing if already formatted
+  if (cleaned.startsWith(streetNum + "-")) return cleaned;
+  return `${streetNum}-${cleaned}`;
+}
+
+/** Strip common unit prefixes (#, Apt, Unit, Suite, Ste) → bare identifier */
+function cleanUnit(unit: string): string {
+  return unit
+    .replace(/^(unit|apt|apartment|suite|ste|#)\s*/i, "")
+    .replace(/^0+(?=\d)/, "")
+    .trim();
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -988,6 +1013,12 @@ ${knownTenantsList}` : ""}`;
           // Cap confidence for unverified tenant/property data from receipts
           if ((item.tenant_confidence || 0) > 0.70) item.tenant_confidence = 0.70;
           if ((item.property_confidence || 0) > 0.70) item.property_confidence = 0.70;
+        }
+
+        // ---- NORMALIZE UNIT TO {street-number}-{unit} FORMAT ----
+        // e.g. property "13412 W Vanowen St", unit "#11" → "13412-11"
+        if (item.unit && item.property) {
+          item.unit = formatUnitWithStreetNumber(item.property, item.unit);
         }
       }
     }
