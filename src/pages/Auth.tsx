@@ -6,10 +6,8 @@ import { FileText } from "lucide-react";
 import { toast } from "sonner";
 
 export default function Auth() {
-  const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [displayName, setDisplayName] = useState("");
   const [loading, setLoading] = useState(false);
   const [forgotPassword, setForgotPassword] = useState(false);
   const navigate = useNavigate();
@@ -32,25 +30,11 @@ export default function Auth() {
       return;
     }
 
-    if (isLogin) {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) {
-        toast.error(error.message);
-      } else {
-        navigate("/");
-      }
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) {
+      toast.error(error.message);
     } else {
-      const { error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: { data: { display_name: displayName || email.split("@")[0] } },
-      });
-      if (error) {
-        toast.error(error.message);
-      } else {
-        toast.success("Account created! You can now sign in.");
-        navigate("/");
-      }
+      navigate("/");
     }
     setLoading(false);
   };
@@ -64,23 +48,11 @@ export default function Auth() {
           </div>
           <h1 className="text-2xl font-bold text-foreground">ReceiptVault</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            {forgotPassword ? "Enter your email to reset password" : isLogin ? "Sign in to your account" : "Create a new account"}
+            {forgotPassword ? "Enter your email to reset password" : "Sign in to your account"}
           </p>
         </div>
 
         <form onSubmit={handleSubmit} className="vault-card p-6 space-y-4">
-          {!isLogin && !forgotPassword && (
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">Display Name</label>
-              <input
-                type="text"
-                value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
-                className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                placeholder="Your name"
-              />
-            </div>
-          )}
           <div className="space-y-1">
             <label className="text-xs font-medium text-muted-foreground">Email</label>
             <input
@@ -106,7 +78,7 @@ export default function Auth() {
               />
             </div>
           )}
-          {isLogin && !forgotPassword && (
+          {!forgotPassword && (
             <div className="text-right">
               <button
                 type="button"
@@ -118,30 +90,20 @@ export default function Auth() {
             </div>
           )}
           <Button type="submit" className="w-full" disabled={loading}>
-            {loading ? "Loading..." : forgotPassword ? "Send Reset Link" : isLogin ? "Sign In" : "Create Account"}
+            {loading ? "Loading..." : forgotPassword ? "Send Reset Link" : "Sign In"}
           </Button>
         </form>
 
-        <p className="text-center text-sm text-muted-foreground">
-          {forgotPassword ? (
+        {forgotPassword && (
+          <p className="text-center text-sm text-muted-foreground">
             <button
               onClick={() => setForgotPassword(false)}
               className="text-accent font-medium hover:underline"
             >
               Back to sign in
             </button>
-          ) : (
-            <>
-              {isLogin ? "Don't have an account?" : "Already have an account?"}{" "}
-              <button
-                onClick={() => setIsLogin(!isLogin)}
-                className="text-accent font-medium hover:underline"
-              >
-                {isLogin ? "Sign up" : "Sign in"}
-              </button>
-            </>
-          )}
-        </p>
+          </p>
+        )}
       </div>
     </div>
   );

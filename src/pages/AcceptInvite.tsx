@@ -15,15 +15,15 @@ export default function AcceptInvite() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    // Listen for auth state changes — Supabase auto-exchanges the invite token from URL hash
+    // Set up auth state listener FIRST before anything else
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if ((event === "SIGNED_IN" || event === "USER_UPDATED") && session) {
+      if ((event === "SIGNED_IN" || event === "USER_UPDATED" || event === "TOKEN_REFRESHED") && session) {
         setSessionReady(true);
         setChecking(false);
       }
     });
 
-    // Also check if the token was already exchanged (e.g. page re-render)
+    // Then check if Supabase already processed the URL hash token
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) {
         setSessionReady(true);
@@ -34,11 +34,11 @@ export default function AcceptInvite() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // Timeout fallback — if nothing happens after 5s, show invalid link
+  // Timeout fallback — if nothing happens after 8s, show invalid link
   useEffect(() => {
     const timer = setTimeout(() => {
       setChecking(false);
-    }, 5000);
+    }, 8000);
     return () => clearTimeout(timer);
   }, []);
 

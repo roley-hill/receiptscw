@@ -52,29 +52,6 @@ export default function TeamManagement() {
     return token;
   };
 
-  const { data: members = [], isLoading } = useQuery({
-    queryKey: ["team-members"],
-    queryFn: async () => {
-      const { data: roles, error: rolesErr } = await supabase
-        .from("user_roles")
-        .select("user_id, role");
-      if (rolesErr) throw rolesErr;
-
-      const { data: profiles, error: profErr } = await supabase
-        .from("profiles_safe" as any)
-        .select("user_id, email, display_name") as { data: { user_id: string; email: string; display_name: string | null }[] | null; error: any };
-      if (profErr) throw profErr;
-
-      const profileMap = new Map(profiles.map((p) => [p.user_id, p]));
-      return roles.map((r) => ({
-        user_id: r.user_id,
-        role: r.role,
-        email: profileMap.get(r.user_id)?.email || "Unknown",
-        display_name: profileMap.get(r.user_id)?.display_name || null,
-      })) as TeamMember[];
-    },
-  });
-
   const { data: pendingInvites = [], isLoading: pendingLoading } = useQuery({
     queryKey: ["pending-invites"],
     enabled: isAdmin,
@@ -87,6 +64,34 @@ export default function TeamManagement() {
       if (!resp.ok) throw new Error("Failed to fetch pending invites");
       const data = await resp.json();
       return (data.pending || []) as PendingInvite[];
+    },
+  });
+
+  const { data: members = [], isLoading } = useQuery({
+    queryKey: ["team-members", pendingInvites],
+    queryFn: async () => {
+      const { data: roles, error: rolesErr } = await supabase
+        .from("user_roles")
+        .select("user_id, role");
+      if (rolesErr) throw rolesErr;
+
+      const { data: profiles, error: profErr } = await supabase
+        .from("profiles_safe" as any)
+        .select("user_id, email, display_name") as { data: { user_id: string; email: string; display_name: string | null }[] | null; error: any };
+      if (profErr) throw profErr;
+
+      // Exclude users who haven't accepted their invite yet
+      const pendingIds = new Set(pendingInvites.map((p) => p.id));
+
+      const profileMap = new Map(profiles.map((p) => [p.user_id, p]));
+      return roles
+        .filter((r) => !pendingIds.has(r.user_id))
+        .map((r) => ({
+          user_id: r.user_id,
+          role: r.role,
+          email: profileMap.get(r.user_id)?.email || "Unknown",
+          display_name: profileMap.get(r.user_id)?.display_name || null,
+        })) as TeamMember[];
     },
   });
 
@@ -162,6 +167,7 @@ export default function TeamManagement() {
     onSuccess: () => {
       toast.success("Invite revoked");
       queryClient.invalidateQueries({ queryKey: ["pending-invites"] });
+      queryClient.invalidateQueries({ queryKey: ["team-members"] });
     },
     onError: (err: Error) => toast.error(err.message),
   });
