@@ -2,19 +2,22 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchBatches, fetchReceipts, reverseBatch } from "@/lib/api";
 import { downloadBatchPDF, generateBatchXLSX, downloadBatchZIP } from "@/lib/batchReports";
 import { motion } from "framer-motion";
-import { Layers, Download, Mail, CheckCircle2, Clock, FileSpreadsheet, FileText as FileTextIcon, Undo2, PackageOpen } from "lucide-react";
+import { Layers, Download, Mail, CheckCircle2, Clock, FileSpreadsheet, FileText as FileTextIcon, Undo2, PackageOpen, Eye } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/hooks/use-toast";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { useState } from "react";
+import { useState, lazy, Suspense } from "react";
+
+const BatchDocumentPreview = lazy(() => import("@/components/BatchDocumentPreview"));
 
 export default function DepositBatches() {
   const queryClient = useQueryClient();
   const { data: batches = [], isLoading } = useQuery({ queryKey: ["batches"], queryFn: fetchBatches });
   const { data: allReceipts = [] } = useQuery({ queryKey: ["receipts"], queryFn: fetchReceipts });
   const [downloadingZip, setDownloadingZip] = useState<string | null>(null);
+  const [previewBatchId, setPreviewBatchId] = useState<string | null>(null);
 
   const reverseMutation = useMutation({
     mutationFn: (batchId: string) => reverseBatch(batchId),
@@ -93,6 +96,9 @@ export default function DepositBatches() {
                       <BatchStatusBadge status={batch.status} />
                     </div>
                     <div className="flex gap-1">
+                      <Button variant="outline" size="sm" onClick={() => setPreviewBatchId(batch.id)} title="Preview all documents">
+                        <Eye className="h-3.5 w-3.5" />
+                      </Button>
                       <Button variant="outline" size="sm" onClick={() => handleZipDownload(batch, receipts)} disabled={isZipping} title="Download deposit package (ZIP)">
                         {isZipping ? <div className="h-3.5 w-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" /> : <PackageOpen className="h-3.5 w-3.5" />}
                       </Button>
@@ -177,6 +183,15 @@ export default function DepositBatches() {
             );
           })}
         </div>
+      )}
+      {previewBatchId && (
+        <Suspense fallback={null}>
+          <BatchDocumentPreview
+            receipts={allReceipts.filter((r) => r.batch_id === previewBatchId)}
+            batchId={previewBatchId}
+            onClose={() => setPreviewBatchId(null)}
+          />
+        </Suspense>
       )}
     </div>
   );
