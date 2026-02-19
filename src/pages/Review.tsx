@@ -5,6 +5,7 @@ import { fetchReceipts, updateReceipt, getFilePreviewUrl } from "@/lib/api";
 import { supabase } from "@/integrations/supabase/client";
 import { motion } from "framer-motion";
 import { CheckCircle2, AlertTriangle, ChevronLeft, ChevronRight, Eye, Edit3, Save, FileText, Image as ImageIcon, Loader2, ZoomIn, ZoomOut, RotateCcw, Trash2, CheckCheck, ArrowLeft } from "lucide-react";
+import TenantSuggestion from "@/components/TenantSuggestion";
 import PdfViewer from "@/components/PdfViewer";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -493,6 +494,16 @@ function ReviewDetail({
             <FieldRow label="Property / Building" value={getVal("property", receipt.property)} confidence={conf.property || 0} required onChange={(v) => handleEdit("property", v)} badge={conf.propertyVerified === false ? <UnverifiedBadge field="Property" /> : undefined} />
             <FieldRow label="Unit" value={getVal("unit", receipt.unit)} confidence={conf.unit || 0} required onChange={(v) => handleEdit("unit", v)} />
             <FieldRow label="Tenant" value={getVal("tenant", receipt.tenant)} confidence={conf.tenant || 0} required onChange={(v) => handleEdit("tenant", v)} badge={<>{conf.tenantVerified === false ? <UnverifiedBadge field="Tenant" /> : null}{conf.tenantStatus ? <TenantStatusBadge status={conf.tenantStatus} /> : null}{conf.chargeType ? <ChargeTypeBadge chargeType={conf.chargeType} /> : null}</>} />
+            <TenantSuggestion
+              property={getVal("property", receipt.property)}
+              unit={getVal("unit", receipt.unit)}
+              extractedTenant={getVal("tenant", receipt.tenant)}
+              onAccept={({ name, property, unit }) => {
+                handleEdit("tenant", name);
+                handleEdit("property", property);
+                handleEdit("unit", unit);
+              }}
+            />
             <FieldRow label="Receipt Date" value={getVal("receipt_date", receipt.receipt_date || "")} confidence={conf.receiptDate || 0} required onChange={(v) => handleEdit("receipt_date", v)} />
             <FieldRow label="Rent Month" value={getVal("rent_month", receipt.rent_month || "")} confidence={0.85} onChange={(v) => handleEdit("rent_month", v)} />
             <FieldRow label="Amount" value={getVal("amount", String(receipt.amount))} confidence={conf.amount || 0} required onChange={(v) => handleEdit("amount", v)} badge={<>{conf.amountVerified === false ? <UnverifiedBadge field="Amount" /> : null}{conf.chargeType ? <ChargeTypeBadge chargeType={conf.chargeType} /> : null}</>} />
