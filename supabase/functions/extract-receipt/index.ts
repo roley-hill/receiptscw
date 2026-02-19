@@ -1204,7 +1204,7 @@ ${knownTenantsList}` : ""}`;
         action: "receipt_uploaded",
         entity_type: "receipt",
         entity_id: receipt.receipt_id,
-        details: { file_name: file.name, status, confidence: avgConfidence, line_item: true },
+        details: { file_name: file.name, status, confidence: avgCriticalConfidence, line_item: true },
       });
     }
 
