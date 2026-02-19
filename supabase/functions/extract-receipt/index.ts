@@ -762,47 +762,83 @@ ${knownTenantsList}` : ""}`;
     // When a match is found, ALWAYS use the database values (source of truth)
     // for tenant name, property address, and unit number.
 
-    // Helper: strip middle initials/names to get [first, last] for comparison
+    /** Normalize: lowercase, strip periods, collapse whitespace */
+    function norm(s: string): string {
+      return s.toLowerCase().replace(/\./g, "").replace(/\s+/g, " ").trim();
+    }
+
+    /** Strip middle names/initials → [first, last] */
     function stripMiddle(name: string): string[] {
-      const parts = name.toLowerCase().trim().split(/\s+/);
+      const parts = norm(name).split(" ");
       if (parts.length <= 2) return parts;
-      // Return first and last only, dropping middle names/initials
       return [parts[0], parts[parts.length - 1]];
     }
 
-    // Helper: check if two names match ignoring middle initials
+    /** Levenshtein distance for typo tolerance */
+    function levenshtein(a: string, b: string): number {
+      const m = a.length, n = b.length;
+      const dp: number[][] = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
+      for (let i = 0; i <= m; i++) dp[i][0] = i;
+      for (let j = 0; j <= n; j++) dp[0][j] = j;
+      for (let i = 1; i <= m; i++)
+        for (let j = 1; j <= n; j++)
+          dp[i][j] = a[i - 1] === b[j - 1]
+            ? dp[i - 1][j - 1]
+            : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+      return dp[m][n];
+    }
+
+    /** Check if unit numbers match (handles "14646-11" vs "11", "#18" vs "18") */
+    function unitsMatch(receiptUnit: string, dbUnit: string): boolean {
+      const r = receiptUnit.replace(/^#/, "").trim().toLowerCase();
+      const d = dbUnit.replace(/^#/, "").trim().toLowerCase();
+      if (r === d) return true;
+      if (d.endsWith("-" + r) || d.endsWith(" " + r)) return true;
+      if (r.endsWith("-" + d) || r.endsWith(" " + d)) return true;
+      const rNum = r.replace(/^0+/, "") || "0";
+      const dNum = d.replace(/^0+/, "").replace(/.*[-\s]0*/, "") || "0";
+      if (rNum === dNum) return true;
+      return false;
+    }
+
+    /** Robust fuzzy name matching: middle initials, multi-word surnames, typos */
     function namesMatchFuzzy(extracted: string, known: string): boolean {
-      const e = extracted.toLowerCase().trim();
-      const k = known.toLowerCase().trim();
+      const e = norm(extracted);
+      const k = norm(known);
       if (e === k) return true;
 
       // Substring containment
       if (k.includes(e) || e.includes(k)) return true;
 
-      const eParts = e.split(/\s+/);
-      const kParts = k.split(/\s+/);
-
-      // Last name must match
+      const eParts = e.split(" ");
+      const kParts = k.split(" ");
       const eLast = eParts[eParts.length - 1];
       const kLast = kParts[kParts.length - 1];
-      if (eLast.length < 3 || eLast !== kLast) return false;
 
-      // First name/initial must match
+      // Last name check with multi-word surname handling ("La Costa" vs "LaCosta")
+      const lastDist = levenshtein(eLast, kLast);
+      const lastMatch = eLast === kLast || (eLast.length >= 4 && lastDist <= 1);
+      const eLastJoined = eParts.length >= 2 ? eParts.slice(-2).join("") : eLast;
+      const kLastJoined = kParts.length >= 2 ? kParts.slice(-2).join("") : kLast;
+      const lastNameOk = lastMatch || eLastJoined === kLast || eLast === kLastJoined || eLastJoined === kLastJoined;
+
+      if (!lastNameOk) return false;
+
+      // First name check
       const eFirst = eParts[0];
       const kFirst = kParts[0];
-      // Full first name match
       if (eFirst === kFirst) return true;
-      // Initial match: "M" matches "Maria", "M." matches "Maria"
-      const eInit = eFirst.replace(".", "");
-      const kInit = kFirst.replace(".", "");
-      if (eInit.length === 1 && kInit.startsWith(eInit)) return true;
-      if (kInit.length === 1 && eInit.startsWith(kInit)) return true;
+      // Initial match: "M" matches "Maria"
+      if (eFirst.length === 1 && kFirst.startsWith(eFirst)) return true;
+      if (kFirst.length === 1 && eFirst.startsWith(kFirst)) return true;
+      // Typo tolerance on first name
+      if (eFirst.length >= 4 && levenshtein(eFirst, kFirst) <= 2) return true;
 
-      // Compare with middle names stripped: "John Smith" vs "John M. Smith"
-      const eStripped = stripMiddle(e);
-      const kStripped = stripMiddle(k);
-      if (eStripped.length >= 2 && kStripped.length >= 2 &&
-          eStripped[0] === kStripped[0] && eStripped[1] === kStripped[1]) return true;
+      // Compare with middles stripped: "John Smith" vs "John M Smith"
+      const ef = stripMiddle(extracted);
+      const kf = stripMiddle(known);
+      if (ef.length >= 2 && kf.length >= 2 && ef[0] === kf[0]) return true;
+      if (ef.length >= 2 && kf.length >= 2 && levenshtein(ef[0], kf[0]) <= 2 && ef[0].length >= 4) return true;
 
       return false;
     }
@@ -817,31 +853,34 @@ ${knownTenantsList}` : ""}`;
           // Exact match first
           match = tenantLookup.find(t => t.full_name.toLowerCase() === extracted);
           if (!match) {
-            // Fuzzy match: handles middle initials, abbreviations, substring
-            match = tenantLookup.find(t => namesMatchFuzzy(extracted, t.full_name));
+            // Fuzzy match: handles middle initials, multi-word surnames, abbreviations, typos
+            match = tenantLookup.find(t => namesMatchFuzzy(item.tenant, t.full_name));
           }
         }
 
-        // 2. If no name match, try matching by unit number
+        // 2. If no name match, try matching by unit + property
         if (!match && item.unit) {
-          const extractedUnit = item.unit.replace(/^#|^apt\s*/i, "").trim().toLowerCase();
-          if (extractedUnit) {
-            const unitMatches = tenantLookup.filter(t => {
-              const dbUnit = (t.unit_number || "").replace(/^#|^apt\s*/i, "").trim().toLowerCase();
-              return dbUnit === extractedUnit;
+          const unitMatches = tenantLookup.filter(t =>
+            t.unit_number && unitsMatch(item.unit, t.unit_number)
+          );
+          if (unitMatches.length === 1) {
+            match = unitMatches[0];
+          } else if (unitMatches.length > 1 && item.property) {
+            const propLower = item.property.toLowerCase();
+            // Narrow by property — also try first 3 words for partial match
+            const propWords = propLower.split(" ").slice(0, 3).join(" ");
+            const propMatch = unitMatches.find(t => {
+              const dbProp = (t.property_address || "").toLowerCase();
+              return dbProp.includes(propLower) || propLower.includes(dbProp) ||
+                     dbProp.includes(propWords);
             });
-            // If unit matches exactly one tenant (or one at the same property), use it
-            if (unitMatches.length === 1) {
-              match = unitMatches[0];
-            } else if (unitMatches.length > 1 && item.property) {
-              // Narrow by property address
-              const propLower = item.property.toLowerCase();
-              const propMatch = unitMatches.find(t =>
-                (t.property_address || "").toLowerCase().includes(propLower) ||
-                propLower.includes((t.property_address || "").toLowerCase())
-              );
-              if (propMatch) match = propMatch;
-            }
+            if (propMatch) match = propMatch;
+          }
+          // If we matched by unit but name is very different, only accept if name is also fuzzy-similar
+          if (match && item.tenant && !namesMatchFuzzy(item.tenant, match.full_name)) {
+            // Names are too different — don't auto-fill, let suggestion banner handle it
+            console.log(`Unit matched but name mismatch: "${item.tenant}" vs "${match.full_name}" — skipping auto-fill`);
+            match = undefined;
           }
         }
 
