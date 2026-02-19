@@ -136,3 +136,30 @@ export async function reverseBatch(batchId: string) {
   if (error) throw error;
   return data;
 }
+
+export async function syncCharges(token: string, fromDate?: string, toDate?: string) {
+  const resp = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/sync-charges`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ from_date: fromDate, to_date: toDate }),
+  });
+  if (!resp.ok) {
+    const err = await resp.json();
+    throw new Error(err.error || "Sync failed");
+  }
+  return resp.json();
+}
+
+export async function getSignedUrlForFile(filePath: string): Promise<string | null> {
+  try {
+    const { data } = await supabase.storage
+      .from("receipts")
+      .createSignedUrl(filePath, 600);
+    return data?.signedUrl || null;
+  } catch {
+    return null;
+  }
+}
