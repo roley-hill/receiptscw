@@ -60,17 +60,34 @@ Deno.serve(async (req) => {
     const { data: inviteData, error: inviteErr } = await adminClient.auth.admin.inviteUserByEmail(email, {
       redirectTo: redirectTo || "https://receiptscw.lovable.app/accept-invite",
     });
-    if (inviteErr) throw inviteErr;
 
-    const newUserId = inviteData.user.id;
+    let newUserId: string;
+
+    if (inviteErr) {
+      // If user already exists (e.g. invited before but hasn't accepted), look them up
+      if (inviteErr.message?.includes("already been registered") || inviteErr.status === 422) {
+        const { data: existingUsers, error: listErr } = await adminClient.auth.admin.listUsers();
+        if (listErr) throw listErr;
+        const existingUser = existingUsers.users.find((u) => u.email === email);
+        if (!existingUser) throw new Error("User exists but could not be found");
+        newUserId = existingUser.id;
+        // Re-generate and send invite link for existing unconfirmed user
+        await adminClient.auth.admin.inviteUserByEmail(email, {
+          redirectTo: redirectTo || "https://receiptscw.lovable.app/accept-invite",
+        });
+      } else {
+        throw inviteErr;
+      }
+    } else {
+      newUserId = inviteData.user.id;
+    }
 
     // The handle_new_user trigger creates profile + default 'processor' role.
     // Update role if different from default.
     if (role && role !== "processor") {
       await adminClient
         .from("user_roles")
-        .update({ role })
-        .eq("user_id", newUserId);
+        .upsert({ user_id: newUserId, role }, { onConflict: "user_id" });
     }
 
     return new Response(JSON.stringify({ success: true, user_id: newUserId }), {
