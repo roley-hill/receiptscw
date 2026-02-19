@@ -21,6 +21,7 @@ import Auth from "@/pages/Auth";
 import ResetPassword from "@/pages/ResetPassword";
 import AcceptInvite from "@/pages/AcceptInvite";
 import NotFound from "@/pages/NotFound";
+import DdUpload from "@/pages/DdUpload";
 
 const queryClient = new QueryClient();
 
@@ -54,6 +55,7 @@ function ProtectedRoutes() {
         <Route path="/exceptions" element={<Exceptions />} />
         <Route path="/duplicates" element={<Duplicates />} />
         <Route path="/team" element={<TeamManagement />} />
+        <Route path="/dd/upload" element={<DdUpload />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
     </AppLayout>

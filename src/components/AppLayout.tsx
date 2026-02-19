@@ -2,6 +2,8 @@ import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/hooks/useAuth";
 import { usePendingCounts } from "@/hooks/usePendingCounts";
 import UploadProgressFloat from "@/components/UploadProgressFloat";
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
 import {
   Sidebar,
   SidebarContent,
@@ -26,6 +28,7 @@ import {
   Copy,
   Menu,
   Users,
+  Building2,
 } from "lucide-react";
 
 const navItems = [
@@ -39,7 +42,16 @@ const navItems = [
   { title: "Exceptions", url: "/exceptions", icon: AlertTriangle, countKey: "exceptions" as const },
   { title: "Duplicates", url: "/duplicates", icon: Copy, countKey: "duplicates" as const },
   { title: "Team", url: "/team", icon: Users, countKey: null },
+  { title: "DD Upload", url: "/dd/upload", icon: Building2, countKey: null },
 ];
+
+interface NavPermissions {
+  pipeline: boolean;
+  reports_batches: boolean;
+  tools: boolean;
+  acquisitions: boolean;
+  admin: boolean;
+}
 
 function CountBadge({ count }: { count: number }) {
   if (count === 0) return null;
@@ -53,6 +65,33 @@ function CountBadge({ count }: { count: number }) {
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { user, signOut } = useAuth();
   const { data: counts } = usePendingCounts();
+
+  const { data: navPerms } = useQuery<NavPermissions>({
+    queryKey: ["nav-permissions", user?.id],
+    enabled: !!user?.id,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("user_roles")
+        .select("nav_permissions")
+        .eq("user_id", user!.id)
+        .maybeSingle();
+      return (data?.nav_permissions as unknown as NavPermissions) ?? {
+        pipeline: true,
+        reports_batches: true,
+        tools: true,
+        acquisitions: true,
+        admin: true,
+      };
+    },
+  });
+
+  const perms: NavPermissions = navPerms ?? {
+    pipeline: true,
+    reports_batches: true,
+    tools: true,
+    acquisitions: true,
+    admin: true,
+  };
 
   const renderNavItem = (item: typeof navItems[number]) => (
     <SidebarMenuItem key={item.title}>
@@ -88,49 +127,70 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               </div>
             </div>
 
-            <SidebarGroup>
-              <SidebarGroupLabel className="text-sidebar-foreground/50 text-[10px] uppercase tracking-widest px-4">
-                Pipeline
-              </SidebarGroupLabel>
-              <SidebarGroupContent>
-                <SidebarMenu>
-                  {navItems.slice(0, 4).map(renderNavItem)}
-                </SidebarMenu>
-              </SidebarGroupContent>
-            </SidebarGroup>
+            {perms.pipeline && (
+              <SidebarGroup>
+                <SidebarGroupLabel className="text-sidebar-foreground/50 text-[10px] uppercase tracking-widest px-4">
+                  Pipeline
+                </SidebarGroupLabel>
+                <SidebarGroupContent>
+                  <SidebarMenu>
+                    {navItems.slice(0, 4).map(renderNavItem)}
+                  </SidebarMenu>
+                </SidebarGroupContent>
+              </SidebarGroup>
+            )}
 
-            <SidebarGroup>
-              <SidebarGroupLabel className="text-sidebar-foreground/50 text-[10px] uppercase tracking-widest px-4">
-                Reports & Batches
-              </SidebarGroupLabel>
-              <SidebarGroupContent>
-                <SidebarMenu>
-                  {navItems.slice(4, 6).map(renderNavItem)}
-                </SidebarMenu>
-              </SidebarGroupContent>
-            </SidebarGroup>
+            {perms.reports_batches && (
+              <SidebarGroup>
+                <SidebarGroupLabel className="text-sidebar-foreground/50 text-[10px] uppercase tracking-widest px-4">
+                  Reports & Batches
+                </SidebarGroupLabel>
+                <SidebarGroupContent>
+                  <SidebarMenu>
+                    {navItems.slice(4, 6).map(renderNavItem)}
+                  </SidebarMenu>
+                </SidebarGroupContent>
+              </SidebarGroup>
+            )}
 
-            <SidebarGroup>
-              <SidebarGroupLabel className="text-sidebar-foreground/50 text-[10px] uppercase tracking-widest px-4">
-                Tools
-              </SidebarGroupLabel>
-              <SidebarGroupContent>
-                <SidebarMenu>
-                  {navItems.slice(6, 9).map(renderNavItem)}
-                </SidebarMenu>
-              </SidebarGroupContent>
-            </SidebarGroup>
+            {perms.tools && (
+              <SidebarGroup>
+                <SidebarGroupLabel className="text-sidebar-foreground/50 text-[10px] uppercase tracking-widest px-4">
+                  Tools
+                </SidebarGroupLabel>
+                <SidebarGroupContent>
+                  <SidebarMenu>
+                    {navItems.slice(6, 9).map(renderNavItem)}
+                  </SidebarMenu>
+                </SidebarGroupContent>
+              </SidebarGroup>
+            )}
 
-            <SidebarGroup>
-              <SidebarGroupLabel className="text-sidebar-foreground/50 text-[10px] uppercase tracking-widest px-4">
-                Admin
-              </SidebarGroupLabel>
-              <SidebarGroupContent>
-                <SidebarMenu>
-                  {navItems.slice(9).map(renderNavItem)}
-                </SidebarMenu>
-              </SidebarGroupContent>
-            </SidebarGroup>
+            {perms.acquisitions && (
+              <SidebarGroup>
+                <SidebarGroupLabel className="text-sidebar-foreground/50 text-[10px] uppercase tracking-widest px-4">
+                  Acquisitions
+                </SidebarGroupLabel>
+                <SidebarGroupContent>
+                  <SidebarMenu>
+                    {navItems.slice(10, 11).map(renderNavItem)}
+                  </SidebarMenu>
+                </SidebarGroupContent>
+              </SidebarGroup>
+            )}
+
+            {perms.admin && (
+              <SidebarGroup>
+                <SidebarGroupLabel className="text-sidebar-foreground/50 text-[10px] uppercase tracking-widest px-4">
+                  Admin
+                </SidebarGroupLabel>
+                <SidebarGroupContent>
+                  <SidebarMenu>
+                    {navItems.slice(9, 10).map(renderNavItem)}
+                  </SidebarMenu>
+                </SidebarGroupContent>
+              </SidebarGroup>
+            )}
           </SidebarContent>
         </Sidebar>
 
