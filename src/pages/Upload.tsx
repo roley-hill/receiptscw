@@ -89,17 +89,24 @@ export default function UploadPage() {
       );
     }
 
-    // Sync tenants and rent roll from AppFolio before extraction (on-demand, in parallel)
+    // Sync tenants, rent roll, and charges from AppFolio before extraction (on-demand, in parallel)
     try {
-      console.log("Syncing tenants and rent roll from AppFolio...");
-      const [tenantResult, rentRollResult] = await Promise.allSettled([
+      console.log("Syncing tenants, rent roll, and charges from AppFolio...");
+      const [tenantResult, rentRollResult, chargesResult] = await Promise.allSettled([
         supabase.functions.invoke("sync-tenants"),
         supabase.functions.invoke("sync-rent-roll"),
+        supabase.functions.invoke("sync-charges"),
       ]);
       if (tenantResult.status === "fulfilled" && !tenantResult.value.error) console.log("Tenant sync completed");
       else console.warn("Tenant sync warning:", tenantResult.status === "rejected" ? tenantResult.reason : tenantResult.value.error?.message);
       if (rentRollResult.status === "fulfilled" && !rentRollResult.value.error) console.log("Rent roll sync completed");
       else console.warn("Rent roll sync warning:", rentRollResult.status === "rejected" ? rentRollResult.reason : rentRollResult.value.error?.message);
+      if (chargesResult.status === "fulfilled" && !chargesResult.value.error) {
+        const chargeData = chargesResult.value.data;
+        console.log(`Charges sync completed: ${chargeData?.charges_synced ?? 0} charges, ${chargeData?.receipts_tagged ?? 0} receipts tagged with subsidy`);
+      } else {
+        console.warn("Charges sync warning:", chargesResult.status === "rejected" ? chargesResult.reason : chargesResult.value.error?.message);
+      }
     } catch (e) {
       console.warn("AppFolio sync skipped:", e);
     }
