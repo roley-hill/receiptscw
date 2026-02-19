@@ -46,6 +46,7 @@ interface NominatimResult {
 }
 
 interface SortedFile {
+  method?: "ocr" | "ai" | "ocr+ai";
   original_name: string;
   renamed_to: string;
   category: string;
@@ -215,6 +216,25 @@ function FileTreeView({ files }: { files: SortedFile[] }) {
                       >
                         {CATEGORY_LABELS[f.category] || f.category}
                       </Badge>
+                      {f.method && (
+                        <Badge
+                          variant="outline"
+                          className={`text-xs shrink-0 font-mono ${
+                            f.method === "ocr"
+                              ? "bg-emerald-500/10 text-emerald-600 border-emerald-200"
+                              : f.method === "ai"
+                              ? "bg-violet-500/10 text-violet-600 border-violet-200"
+                              : "bg-amber-500/10 text-amber-600 border-amber-200"
+                          }`}
+                          title={
+                            f.method === "ocr" ? "Classified via OCR — no AI used"
+                            : f.method === "ai" ? "Classified via AI (scanned/image PDF)"
+                            : "Text extracted via OCR, classified via AI"
+                          }
+                        >
+                          {f.method === "ocr" ? "OCR" : f.method === "ai" ? "AI" : "OCR+AI"}
+                        </Badge>
+                      )}
                       <span className="text-xs text-muted-foreground/50 shrink-0">
                         {Math.round((f.confidence || 0) * 100)}%
                       </span>
