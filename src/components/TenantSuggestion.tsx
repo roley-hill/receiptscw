@@ -8,6 +8,8 @@ interface TenantSuggestionProps {
   unit: string;
   extractedTenant: string;
   onAccept: (tenant: { name: string; property: string; unit: string }) => void;
+  /** If true, suggestion was already accepted — hide the banner */
+  hidden?: boolean;
 }
 
 /** Normalize: lowercase, strip periods, collapse whitespace */
@@ -96,7 +98,7 @@ function isFuzzySimilar(extracted: string, known: string): boolean {
   return false;
 }
 
-export default function TenantSuggestion({ property, unit, extractedTenant, onAccept }: TenantSuggestionProps) {
+export default function TenantSuggestion({ property, unit, extractedTenant, onAccept, hidden }: TenantSuggestionProps) {
   const { data: suggestions = [] } = useQuery({
     queryKey: ["tenant-suggestion", property, unit],
     queryFn: async () => {
@@ -115,12 +117,17 @@ export default function TenantSuggestion({ property, unit, extractedTenant, onAc
     staleTime: 60_000,
   });
 
-  // Find fuzzy matches (similar name but not exact)
+  // Find fuzzy matches (similar name but not exact after acceptance)
   const matches = suggestions.filter((t) =>
     t.full_name && isFuzzySimilar(extractedTenant, t.full_name)
   );
 
-  if (matches.length === 0) return null;
+  // Hide if already accepted (exact match with high confidence) or no matches
+  if (hidden || matches.length === 0) return null;
+
+  // If all matches are exact matches to the current tenant, don't show (already accepted)
+  const allExact = matches.every((m) => norm(m.full_name!) === norm(extractedTenant));
+  if (allExact) return null;
 
   return (
     <div className="space-y-2">

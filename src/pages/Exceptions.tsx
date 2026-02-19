@@ -349,8 +349,9 @@ export default function Exceptions() {
                         extractedTenant={r.tenant}
                         onAccept={async ({ name, property, unit }) => {
                           try {
-                            await updateReceipt(r.id, { tenant: name, property, unit });
-                            toast.success(`Updated tenant to ${name}`);
+                            const updatedScores = { ...(r.confidence_scores as any || {}), tenant: 0.95, property: 0.95, unit: 0.95, tenantVerified: true, propertyVerified: true };
+                            await updateReceipt(r.id, { tenant: name, property, unit, confidence_scores: updatedScores, status: "needs_review" as any });
+                            toast.success(`Updated tenant to ${name} — moved to review`);
                             queryClient.invalidateQueries({ queryKey: ["receipts"] });
                           } catch (err: any) {
                             toast.error(err.message || "Update failed");
