@@ -56,8 +56,6 @@ function levenshtein(a: string, b: string): number {
 function isFuzzySimilar(extracted: string, known: string): boolean {
   const e = norm(extracted);
   const k = norm(known);
-  // Include exact matches too — these are receipts that ended up as exceptions
-  // despite having the correct tenant name (due to property/unit format differences)
   if (e === k) return true;
 
   // Substring containment
@@ -67,33 +65,29 @@ function isFuzzySimilar(extracted: string, known: string): boolean {
   const kParts = k.split(" ");
   const eLast = eParts[eParts.length - 1];
   const kLast = kParts[kParts.length - 1];
-
-  // Check last name similarity (allow 1-2 char difference for typos)
-  const lastDist = levenshtein(eLast, kLast);
-  const lastMatch = eLast === kLast || (eLast.length >= 4 && lastDist <= 1);
-  // Also handle multi-word last names: "La Costa" vs "LaCosta"
-  const eLastJoined = eParts.length >= 2 ? eParts.slice(-2).join("") : eLast;
-  const kLastJoined = kParts.length >= 2 ? kParts.slice(-2).join("") : kLast;
-  const lastNameOk = lastMatch || eLastJoined === kLast || eLast === kLastJoined || eLastJoined === kLastJoined;
-
-  if (!lastNameOk) return false;
-
-  // First name check
   const eFirst = eParts[0];
   const kFirst = kParts[0];
-  if (eFirst === kFirst) return true;
+
+  // If ANY name part matches (first or last), suggest it
+  // e.g. "Cortessa Robinson" vs "Cortessa Johnson" → first name matches
+  // e.g. "Maria Torres" vs "Angelica Torres" at same unit → last name matches
+  const anyPartMatch = eParts.some(ep => ep.length >= 3 && kParts.some(kp => kp.length >= 3 && (ep === kp || (ep.length >= 4 && levenshtein(ep, kp) <= 1))));
+  if (anyPartMatch) return true;
+
   // Initial match: "M" matches "Maria"
   if (eFirst.length === 1 && kFirst.startsWith(eFirst)) return true;
   if (kFirst.length === 1 && eFirst.startsWith(kFirst)) return true;
-  // Typo tolerance on first name (e.g., "Rachael" vs "Rachel")
-  if (eFirst.length >= 4 && levenshtein(eFirst, kFirst) <= 2) return true;
 
-  // Compare with middles stripped: "John Smith" vs "John M Smith"
+  // Multi-word last name handling: "La Costa" vs "LaCosta"
+  const eLastJoined = eParts.length >= 2 ? eParts.slice(-2).join("") : eLast;
+  const kLastJoined = kParts.length >= 2 ? kParts.slice(-2).join("") : kLast;
+  if (eLastJoined === kLast || eLast === kLastJoined || eLastJoined === kLastJoined) return true;
+
+  // Compare with middles stripped
   const ef = firstLast(extracted);
   const kf = firstLast(known);
   if (ef.length >= 2 && kf.length >= 2 && ef[0] === kf[0]) return true;
-  // First name typo with middles stripped
-  if (ef.length >= 2 && kf.length >= 2 && levenshtein(ef[0], kf[0]) <= 2 && ef[0].length >= 4) return true;
+  if (ef.length >= 2 && kf.length >= 2 && ef[1] === kf[1]) return true;
 
   return false;
 }
