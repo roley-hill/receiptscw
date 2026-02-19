@@ -17,7 +17,7 @@ Deno.serve(async (req) => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-    // Verify caller is admin
+    // Verify caller is authenticated
     const userClient = createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!, {
       global: { headers: { Authorization: authHeader } },
     });
@@ -39,7 +39,6 @@ Deno.serve(async (req) => {
       if (!user_id) throw new Error("user_id required");
       if (user_id === user.id) throw new Error("Cannot remove yourself");
 
-      // Delete user via admin API
       const { error } = await adminClient.auth.admin.deleteUser(user_id);
       if (error) throw error;
 
@@ -48,30 +47,30 @@ Deno.serve(async (req) => {
       });
     }
 
-    // POST - create user
-    const { email, password, role } = await req.json();
-    if (!email || !password) throw new Error("Email and password required");
+    // POST - invite user via email
+    const { email, role } = await req.json();
+    if (!email) throw new Error("Email required");
     const validRoles = ["admin", "processor", "viewer"];
     if (role && !validRoles.includes(role)) throw new Error("Invalid role");
 
-    // Create user via admin API
-    const { data: newUser, error: createErr } = await adminClient.auth.admin.createUser({
-      email,
-      password,
-      email_confirm: true,
+    // Use inviteUserByEmail — sends a secure email with a sign-up link
+    const { data: inviteData, error: inviteErr } = await adminClient.auth.admin.inviteUserByEmail(email, {
+      redirectTo: `${Deno.env.get("SUPABASE_URL")?.replace(".supabase.co", "") || ""}/`,
     });
-    if (createErr) throw createErr;
+    if (inviteErr) throw inviteErr;
 
-    // The handle_new_user trigger will create profile + default role.
-    // Update role if different from default
+    const newUserId = inviteData.user.id;
+
+    // The handle_new_user trigger creates profile + default 'processor' role.
+    // Update role if different from default.
     if (role && role !== "processor") {
       await adminClient
         .from("user_roles")
         .update({ role })
-        .eq("user_id", newUser.user.id);
+        .eq("user_id", newUserId);
     }
 
-    return new Response(JSON.stringify({ success: true, user_id: newUser.user.id }), {
+    return new Response(JSON.stringify({ success: true, user_id: newUserId }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err) {
