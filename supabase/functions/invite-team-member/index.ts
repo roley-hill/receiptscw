@@ -35,8 +35,6 @@ Deno.serve(async (req) => {
       .single();
     if (callerRole?.role !== "admin") throw new Error("Admin access required");
 
-    const body = await req.json();
-
     if (req.method === "GET") {
       // Return list of pending (invited but not confirmed) users
       const { data: usersData, error: listErr } = await adminClient.auth.admin.listUsers();
@@ -48,6 +46,8 @@ Deno.serve(async (req) => {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+
+    const body = await req.json();
 
     if (req.method === "DELETE") {
       const { user_id } = body;
