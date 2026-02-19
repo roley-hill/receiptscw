@@ -10,6 +10,8 @@ interface TenantSuggestionProps {
   onAccept: (tenant: { name: string; property: string; unit: string }) => void;
   /** If true, suggestion was already accepted — hide the banner */
   hidden?: boolean;
+  /** Whether the tenant was verified by the extraction pipeline */
+  tenantVerified?: boolean;
 }
 
 /** Normalize: lowercase, strip periods, collapse whitespace */
@@ -92,7 +94,7 @@ function isFuzzySimilar(extracted: string, known: string): boolean {
   return false;
 }
 
-export default function TenantSuggestion({ property, unit, extractedTenant, onAccept, hidden }: TenantSuggestionProps) {
+export default function TenantSuggestion({ property, unit, extractedTenant, onAccept, hidden, tenantVerified }: TenantSuggestionProps) {
   const { data: suggestions = [] } = useQuery({
     queryKey: ["tenant-suggestion", property, unit],
     queryFn: async () => {
@@ -119,40 +121,51 @@ export default function TenantSuggestion({ property, unit, extractedTenant, onAc
   // Hide if already accepted (exact match with high confidence) or no matches
   if (hidden || matches.length === 0) return null;
 
-  // If all matches are exact matches to the current tenant, don't show (already accepted)
+  // If all matches are exact matches AND tenant was verified, don't show (already accepted)
   const allExact = matches.every((m) => norm(m.full_name!) === norm(extractedTenant));
-  if (allExact) return null;
+  if (allExact && tenantVerified) return null;
 
   return (
     <div className="space-y-2">
-      {matches.map((match) => (
-        <div
-          key={match.full_name}
-          className="flex items-center gap-3 rounded-lg border border-accent/30 bg-accent/5 px-3 py-2.5"
-        >
-          <UserCheck className="h-4 w-4 text-accent shrink-0" />
-          <p className="text-sm text-foreground flex-1">
-            Could this be <span className="font-semibold">{match.full_name}</span>?
-            {match.status && match.status !== "current" && (
-              <span className="text-xs text-muted-foreground ml-1">({match.status})</span>
-            )}
-          </p>
-          <Button
-            variant="default"
-            size="sm"
-            className="h-7 text-xs"
-            onClick={() =>
-              onAccept({
-                name: match.full_name!,
-                property: match.property_address || property,
-                unit: match.unit_number || unit,
-              })
-            }
+      {matches.map((match) => {
+        const isExact = norm(match.full_name!) === norm(extractedTenant);
+        return (
+          <div
+            key={match.full_name}
+            className="flex items-center gap-3 rounded-lg border border-accent/30 bg-accent/5 px-3 py-2.5"
           >
-            Yes, use this tenant
-          </Button>
-        </div>
-      ))}
+            <UserCheck className="h-4 w-4 text-accent shrink-0" />
+            <p className="text-sm text-foreground flex-1">
+              {isExact ? (
+                <>
+                  <span className="font-semibold">{match.full_name}</span> found in AppFolio — confirm match?
+                </>
+              ) : (
+                <>
+                  Could this be <span className="font-semibold">{match.full_name}</span>?
+                </>
+              )}
+              {match.status && match.status !== "current" && (
+                <span className="text-xs text-muted-foreground ml-1">({match.status})</span>
+              )}
+            </p>
+            <Button
+              variant="default"
+              size="sm"
+              className="h-7 text-xs"
+              onClick={() =>
+                onAccept({
+                  name: match.full_name!,
+                  property: match.property_address || property,
+                  unit: match.unit_number || unit,
+                })
+              }
+            >
+              {isExact ? "Confirm" : "Yes, use this tenant"}
+            </Button>
+          </div>
+        );
+      })}
     </div>
   );
 }
