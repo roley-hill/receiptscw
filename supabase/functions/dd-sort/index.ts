@@ -22,33 +22,51 @@ function cleanUnit(unit: string): string {
   return unit.replace(/^(unit|apt|apartment|suite|ste|#)\s*/i, "").replace(/^0+(?=\d)/, "").trim();
 }
 
-// ── Step 1: PDF Text Extraction (pdfjs-dist, no AI) ───────────────────────────
+// ── Step 1: PDF Text Extraction (lightweight byte scan, no pdfjs) ────────────
+// Reads raw PDF bytes and pulls printable ASCII text streams out directly.
+// This avoids loading pdfjs-dist which causes memory limit errors in edge functions.
+
+function extractTextFromPdfBytes(bytes: Uint8Array): string {
+  try {
+    // Decode bytes as latin-1 so we can scan for PDF stream content
+    const raw = new TextDecoder("latin1").decode(bytes.slice(0, Math.min(bytes.length, MAX_FILE_BYTES)));
+
+    // Extract content between BT (begin text) and ET (end text) PDF operators
+    const chunks: string[] = [];
+
+    // Match parenthesized strings: (text content) inside streams
+    const parenRe = /\(([^)\\]{1,300})\)/g;
+    let m: RegExpExecArray | null;
+    while ((m = parenRe.exec(raw)) !== null) {
+      const s = m[1].replace(/\\n/g, " ").replace(/\\r/g, " ").replace(/[^\x20-\x7E]/g, "").trim();
+      if (s.length > 2) chunks.push(s);
+    }
+
+    // Also match hex strings: <48656c6c6f> → "Hello"
+    const hexRe = /<([0-9a-fA-F]{4,})>/g;
+    while ((m = hexRe.exec(raw)) !== null) {
+      const hex = m[1];
+      let decoded = "";
+      for (let i = 0; i < hex.length - 1; i += 2) {
+        const code = parseInt(hex.slice(i, i + 2), 16);
+        if (code >= 0x20 && code <= 0x7e) decoded += String.fromCharCode(code);
+      }
+      if (decoded.length > 2) chunks.push(decoded);
+    }
+
+    return chunks.join(" ").slice(0, 8000);
+  } catch (err) {
+    console.warn("PDF byte scan failed:", err instanceof Error ? err.message : err);
+    return "";
+  }
+}
 
 async function extractTextFromPdf(file: File): Promise<string> {
   try {
-    // Use pdfjs-dist legacy build — works in Deno/Node without a DOM/worker
-    const { getDocument, GlobalWorkerOptions } = await import(
-      "npm:pdfjs-dist@4.9.155/legacy/build/pdf.mjs"
-    );
-    GlobalWorkerOptions.workerSrc = ""; // disable worker in edge environment
-
     const buf = await file.arrayBuffer();
-    const typedArray = new Uint8Array(buf);
-    const pdf = await getDocument({ data: typedArray, useWorkerFetch: false, isEvalSupported: false, useSystemFonts: true }).promise;
-
-    let fullText = "";
-    const maxPages = Math.min(pdf.numPages, 5); // read first 5 pages max
-    for (let i = 1; i <= maxPages; i++) {
-      const page = await pdf.getPage(i);
-      const content = await page.getTextContent();
-      const pageText = content.items
-        .map((item: { str?: string }) => item.str || "")
-        .join(" ");
-      fullText += pageText + "\n";
-    }
-    return fullText.trim();
-  } catch (err) {
-    console.warn("PDF text extraction failed, will use AI fallback:", err instanceof Error ? err.message : err);
+    const bytes = new Uint8Array(buf);
+    return extractTextFromPdfBytes(bytes);
+  } catch {
     return "";
   }
 }
