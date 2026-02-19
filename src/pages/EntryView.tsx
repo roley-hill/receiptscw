@@ -351,9 +351,14 @@ export default function EntryView() {
                                       {r.file_path && (<Tooltip><TooltipTrigger asChild><Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => handleViewAttachment(r)}><FileText className="h-3.5 w-3.5 text-vault-blue" /></Button></TooltipTrigger><TooltipContent>View document</TooltipContent></Tooltip>)}
                                       {isAdmin && (
                                         <AlertDialog>
-                                          <AlertDialogTrigger asChild>
-                                            <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive hover:text-destructive"><Trash2 className="h-3.5 w-3.5" /></Button></TooltipTrigger><TooltipContent>Delete receipt</TooltipContent></Tooltip>
-                                          </AlertDialogTrigger>
+                                          <Tooltip>
+                                            <TooltipTrigger asChild>
+                                              <AlertDialogTrigger asChild>
+                                                <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive hover:text-destructive"><Trash2 className="h-3.5 w-3.5" /></Button>
+                                              </AlertDialogTrigger>
+                                            </TooltipTrigger>
+                                            <TooltipContent>Delete receipt</TooltipContent>
+                                          </Tooltip>
                                           <AlertDialogContent>
                                             <AlertDialogHeader><AlertDialogTitle>Delete this receipt?</AlertDialogTitle><AlertDialogDescription>This will permanently remove {r.receipt_id}.</AlertDialogDescription></AlertDialogHeader>
                                             <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={() => deleteMutation.mutate(r.id)} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Delete</AlertDialogAction></AlertDialogFooter>
@@ -439,9 +444,14 @@ export default function EntryView() {
                                         {r.file_path && (<Tooltip><TooltipTrigger asChild><Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => handleViewAttachment(r)}><FileText className="h-3.5 w-3.5 text-vault-blue" /></Button></TooltipTrigger><TooltipContent>View document</TooltipContent></Tooltip>)}
                                         {isAdmin && (
                                           <AlertDialog>
-                                            <AlertDialogTrigger asChild>
-                                              <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive hover:text-destructive"><Trash2 className="h-3.5 w-3.5" /></Button></TooltipTrigger><TooltipContent>Delete receipt</TooltipContent></Tooltip>
-                                            </AlertDialogTrigger>
+                                            <Tooltip>
+                                              <TooltipTrigger asChild>
+                                                <AlertDialogTrigger asChild>
+                                                  <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive hover:text-destructive"><Trash2 className="h-3.5 w-3.5" /></Button>
+                                                </AlertDialogTrigger>
+                                              </TooltipTrigger>
+                                              <TooltipContent>Delete receipt</TooltipContent>
+                                            </Tooltip>
                                             <AlertDialogContent>
                                               <AlertDialogHeader><AlertDialogTitle>Delete this receipt?</AlertDialogTitle><AlertDialogDescription>This will permanently remove {r.receipt_id}.</AlertDialogDescription></AlertDialogHeader>
                                               <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={() => deleteMutation.mutate(r.id)} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Delete</AlertDialogAction></AlertDialogFooter>
