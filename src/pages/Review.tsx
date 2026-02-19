@@ -532,8 +532,10 @@ function ReviewDetail({
               onAccept={async ({ name, property, unit }) => {
                 try {
                   const updatedScores = { ...(receipt.confidence_scores as any || {}), tenant: 0.95, property: 0.95, unit: 0.95, tenantVerified: true, propertyVerified: true };
-                  await updateReceipt(receipt.id, { tenant: name, property, unit, confidence_scores: updatedScores });
-                  toast.success(`Updated tenant to ${name}`);
+                  const updates: Record<string, any> = { tenant: name, property, unit, confidence_scores: updatedScores };
+                  if (receipt.status === "exception") updates.status = "needs_review";
+                  await updateReceipt(receipt.id, updates);
+                  toast.success(`Updated tenant to ${name}${receipt.status === "exception" ? " — moved to review" : ""}`);
                   queryClient.invalidateQueries({ queryKey: ["receipts"] });
                 } catch (err: any) {
                   toast.error(err.message || "Update failed");
