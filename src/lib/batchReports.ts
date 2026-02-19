@@ -178,8 +178,8 @@ export function generateBatchPDF(batch: any, receipts: any[]): jsPDF {
     doc.setFont("helvetica", "normal");
     doc.setTextColor(80);
     const depositLabel = hasDeductions
-      ? `Please transfer $${netTotal.toLocaleString("en-US", { minimumFractionDigits: 2 })} (net after deductions) to the operating account for "${batch.property}".`
-      : `Please transfer $${grossTotal.toLocaleString("en-US", { minimumFractionDigits: 2 })} to the operating account for "${batch.property}".`;
+      ? `Please transfer $${netTotal.toLocaleString("en-US", { minimumFractionDigits: 2 })} (net after deductions) to Countywide AppFolio First Century Account for "${batch.property}".`
+      : `Please transfer $${grossTotal.toLocaleString("en-US", { minimumFractionDigits: 2 })} to Countywide AppFolio First Century Account for "${batch.property}".`;
     doc.text(depositLabel, 14, finalY + 20);
     if (batch.external_reference) doc.text(`Reference: ${batch.external_reference}`, 14, finalY + 28);
   }
