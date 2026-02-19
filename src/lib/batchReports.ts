@@ -1,9 +1,10 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import JSZip from "jszip";
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 import { toast } from "@/hooks/use-toast";
 import { getSignedUrlForFile } from "@/lib/api";
+
 
 /**
  * Generate enhanced deposit batch PDF report.
@@ -197,48 +198,73 @@ export function downloadBatchPDF(batch: any, receipts: any[]) {
 }
 
 /**
- * Generate XLSX workbook for a batch.
+ * Generate XLSX workbook for a batch using ExcelJS (no known CVEs).
  */
-export function generateBatchXLSX(batch: any, receipts: any[]) {
+export async function generateBatchXLSX(batch: any, receipts: any[]) {
   const grossTotal = receipts.filter((r) => Number(r.amount) >= 0).reduce((s, r) => s + Number(r.amount), 0);
   const deductions = receipts.filter((r) => Number(r.amount) < 0).reduce((s, r) => s + Number(r.amount), 0);
   const netTotal = grossTotal + deductions;
 
-  const wb = XLSX.utils.book_new();
+  const wb = new ExcelJS.Workbook();
 
-  const detailData = receipts.map((r: any) => ({
-    Tenant: r.tenant,
-    Unit: r.unit,
-    Amount: Number(r.amount),
-    Type: Number(r.amount) < 0 ? "Deduction" : "Payment",
-    "Subsidy Provider": r.subsidy_provider || "",
-    "Receipt Date": r.receipt_date || "",
-    Reference: r.reference || "",
-    "Payment Type": r.payment_type || "",
-    "Receipt ID": r.receipt_id,
-  }));
-  const ws = XLSX.utils.json_to_sheet(detailData);
-  XLSX.utils.book_append_sheet(wb, ws, "Receipts");
-
-  const summaryData = [
-    { Field: "Property", Value: batch.property },
-    { Field: "Batch ID", Value: batch.batch_id },
-    { Field: "Period", Value: batch.deposit_period || "—" },
-    { Field: "Status", Value: batch.status },
-    { Field: "Gross Total (Payments)", Value: grossTotal },
-    { Field: "Deductions", Value: deductions },
-    { Field: "Net Total", Value: netTotal },
-    { Field: "Receipt Count", Value: batch.receipt_count },
-    { Field: "Created", Value: new Date(batch.created_at).toLocaleDateString() },
-    { Field: "Transferred", Value: batch.transferred_at ? new Date(batch.transferred_at).toLocaleDateString() : "—" },
-    { Field: "Transfer Method", Value: batch.transfer_method || "—" },
-    { Field: "External Reference", Value: batch.external_reference || "—" },
-    { Field: "Notes", Value: batch.notes || "" },
+  // ---- Receipts sheet ----
+  const ws = wb.addWorksheet("Receipts");
+  ws.columns = [
+    { header: "Tenant", key: "tenant", width: 24 },
+    { header: "Unit", key: "unit", width: 12 },
+    { header: "Amount", key: "amount", width: 14 },
+    { header: "Type", key: "type", width: 12 },
+    { header: "Subsidy Provider", key: "subsidy_provider", width: 22 },
+    { header: "Receipt Date", key: "receipt_date", width: 14 },
+    { header: "Reference", key: "reference", width: 20 },
+    { header: "Payment Type", key: "payment_type", width: 16 },
+    { header: "Receipt ID", key: "receipt_id", width: 18 },
   ];
-  const ws2 = XLSX.utils.json_to_sheet(summaryData);
-  XLSX.utils.book_append_sheet(wb, ws2, "Summary");
+  ws.getRow(1).font = { bold: true };
+  for (const r of receipts) {
+    ws.addRow({
+      tenant: r.tenant,
+      unit: r.unit,
+      amount: Number(r.amount),
+      type: Number(r.amount) < 0 ? "Deduction" : "Payment",
+      subsidy_provider: r.subsidy_provider || "",
+      receipt_date: r.receipt_date || "",
+      reference: r.reference || "",
+      payment_type: r.payment_type || "",
+      receipt_id: r.receipt_id,
+    });
+  }
 
-  XLSX.writeFile(wb, `batch-report-${batch.batch_id}-${new Date().toISOString().slice(0, 10)}.xlsx`);
+  // ---- Summary sheet ----
+  const ws2 = wb.addWorksheet("Summary");
+  ws2.columns = [{ header: "Field", key: "field", width: 28 }, { header: "Value", key: "value", width: 32 }];
+  ws2.getRow(1).font = { bold: true };
+  const summaryRows = [
+    { field: "Property", value: batch.property },
+    { field: "Batch ID", value: batch.batch_id },
+    { field: "Period", value: batch.deposit_period || "—" },
+    { field: "Status", value: batch.status },
+    { field: "Gross Total (Payments)", value: grossTotal },
+    { field: "Deductions", value: deductions },
+    { field: "Net Total", value: netTotal },
+    { field: "Receipt Count", value: batch.receipt_count },
+    { field: "Created", value: new Date(batch.created_at).toLocaleDateString() },
+    { field: "Transferred", value: batch.transferred_at ? new Date(batch.transferred_at).toLocaleDateString() : "—" },
+    { field: "Transfer Method", value: batch.transfer_method || "—" },
+    { field: "External Reference", value: batch.external_reference || "—" },
+    { field: "Notes", value: batch.notes || "" },
+  ];
+  ws2.addRows(summaryRows);
+
+  // Write to buffer and trigger download
+  const buffer = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `batch-report-${batch.batch_id}-${new Date().toISOString().slice(0, 10)}.xlsx`;
+  a.click();
+  URL.revokeObjectURL(url);
   toast({ title: "XLSX downloaded" });
 }
 
