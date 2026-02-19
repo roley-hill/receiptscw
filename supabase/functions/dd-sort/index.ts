@@ -10,13 +10,190 @@ const corsHeaders = {
 const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY")!;
 const AI_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
 const MODEL = "google/gemini-3-flash-preview";
+const MAX_FILE_BYTES = 512 * 1024; // 512 KB cap for AI vision payloads
 
-// Cap each file at 512 KB to avoid edge-function memory limits
-const MAX_FILE_BYTES = 512 * 1024;
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function slugify(str: string): string {
   return str.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
+
+function cleanUnit(unit: string): string {
+  return unit.replace(/^(unit|apt|apartment|suite|ste|#)\s*/i, "").replace(/^0+(?=\d)/, "").trim();
+}
+
+// ── Step 1: PDF Text Extraction (pdfjs-dist, no AI) ───────────────────────────
+
+async function extractTextFromPdf(file: File): Promise<string> {
+  try {
+    // Use pdfjs-dist legacy build — works in Deno/Node without a DOM/worker
+    const { getDocument, GlobalWorkerOptions } = await import(
+      "npm:pdfjs-dist@4.9.155/legacy/build/pdf.mjs"
+    );
+    GlobalWorkerOptions.workerSrc = ""; // disable worker in edge environment
+
+    const buf = await file.arrayBuffer();
+    const typedArray = new Uint8Array(buf);
+    const pdf = await getDocument({ data: typedArray, useWorkerFetch: false, isEvalSupported: false, useSystemFonts: true }).promise;
+
+    let fullText = "";
+    const maxPages = Math.min(pdf.numPages, 5); // read first 5 pages max
+    for (let i = 1; i <= maxPages; i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      const pageText = content.items
+        .map((item: { str?: string }) => item.str || "")
+        .join(" ");
+      fullText += pageText + "\n";
+    }
+    return fullText.trim();
+  } catch (err) {
+    console.warn("PDF text extraction failed, will use AI fallback:", err instanceof Error ? err.message : err);
+    return "";
+  }
+}
+
+// ── Step 2a: Address detection from text (regex, no AI) ───────────────────────
+
+interface AddressResult {
+  address: string;
+  city: string;
+  state: string;
+  postal_code: string;
+  confidence: number;
+  method: "ocr" | "ai";
+}
+
+const STREET_PATTERN =
+  /\b(\d{1,5})\s+([A-Za-z0-9 .'-]{2,40}?)\s+(Street|St|Avenue|Ave|Boulevard|Blvd|Drive|Dr|Road|Rd|Lane|Ln|Court|Ct|Place|Pl|Way|Circle|Cir|Terrace|Ter|Parkway|Pkwy|Highway|Hwy)\.?\b/gi;
+
+const CITY_STATE_ZIP =
+  /([A-Za-z ]{2,30}),\s*([A-Z]{2})\s+(\d{5}(?:-\d{4})?)/g;
+
+function detectAddressFromText(text: string): AddressResult | null {
+  STREET_PATTERN.lastIndex = 0;
+  CITY_STATE_ZIP.lastIndex = 0;
+
+  const streetMatch = STREET_PATTERN.exec(text);
+  if (!streetMatch) return null;
+
+  const address = streetMatch[0].trim();
+  CITY_STATE_ZIP.lastIndex = Math.max(0, streetMatch.index - 10);
+  const cityMatch = CITY_STATE_ZIP.exec(text);
+
+  return {
+    address,
+    city: cityMatch?.[1]?.trim() ?? "",
+    state: cityMatch?.[2]?.trim() ?? "",
+    postal_code: cityMatch?.[3]?.trim() ?? "",
+    confidence: cityMatch ? 0.85 : 0.6,
+    method: "ocr",
+  };
+}
+
+// ── Step 2b: Document classification from text (keywords, no AI) ──────────────
+
+type DocCategory = "lease" | "rent-roll" | "notice" | "estoppel" | "other";
+
+interface ClassifyResult {
+  category: DocCategory;
+  unit: string;
+  tenant_last: string;
+  tenant_first: string;
+  effective_date: string; // YYYY-MM-DD
+  building_address: string;
+  confidence: number;
+  method: "ocr" | "ai";
+}
+
+const CATEGORY_KEYWORDS: Array<{ category: DocCategory; patterns: RegExp[] }> = [
+  {
+    category: "lease",
+    patterns: [
+      /\b(lease\s+agreement|rental\s+agreement|tenancy\s+agreement|residential\s+lease|lease\s+contract)\b/i,
+    ],
+  },
+  {
+    category: "rent-roll",
+    patterns: [
+      /\b(rent\s+roll|rent\s+schedule|current\s+rents|rental\s+schedule|monthly\s+rent\s+summary)\b/i,
+    ],
+  },
+  {
+    category: "notice",
+    patterns: [
+      /\b(notice\s+to\s+(quit|vacate|pay|comply)|3[-\s]day\s+notice|30[-\s]day\s+notice|60[-\s]day\s+notice|notice\s+of\s+(termination|eviction))\b/i,
+    ],
+  },
+  {
+    category: "estoppel",
+    patterns: [
+      /\b(estoppel\s+certificate|tenant\s+estoppel|estoppel\s+letter|tenant\s+certification)\b/i,
+    ],
+  },
+];
+
+const UNIT_PATTERN = /\b(?:unit|apt|apartment|suite|ste|#)\s*([A-Za-z0-9-]+)\b/i;
+const DATE_PATTERN = /\b(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})\b/;
+const TENANT_PATTERN =
+  /\b(?:tenant|lessee|resident)s?\s*[:\-–]?\s*([A-Z][a-z]+)\s+([A-Z][a-z]+)\b/;
+
+function classifyFromText(text: string, filename: string): ClassifyResult | null {
+  // Find category
+  let category: DocCategory | null = null;
+  for (const { category: cat, patterns } of CATEGORY_KEYWORDS) {
+    if (patterns.some((p) => p.test(text))) { category = cat; break; }
+  }
+
+  // Filename hints as fallback
+  if (!category) {
+    const fn = filename.toLowerCase();
+    if (fn.includes("lease") || fn.includes("rental")) category = "lease";
+    else if (fn.includes("rent roll") || fn.includes("rentroll")) category = "rent-roll";
+    else if (fn.includes("notice")) category = "notice";
+    else if (fn.includes("estoppel")) category = "estoppel";
+  }
+
+  if (!category) return null; // can't classify without AI
+
+  // Extract unit
+  const unitMatch = UNIT_PATTERN.exec(text);
+  const unit = unitMatch ? cleanUnit(unitMatch[1]) : "";
+
+  // Extract date (take first full date found)
+  const dateMatch = DATE_PATTERN.exec(text);
+  let effectiveDate = "";
+  if (dateMatch) {
+    const [, m, d, y] = dateMatch;
+    const year = y.length === 2 ? `20${y}` : y;
+    effectiveDate = `${year}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+  }
+
+  // Extract tenant
+  const tenantMatch = TENANT_PATTERN.exec(text);
+  const tenantFirst = tenantMatch?.[1] ?? "";
+  const tenantLast = tenantMatch?.[2] ?? "";
+
+  // Extract address from text for building_slug
+  STREET_PATTERN.lastIndex = 0;
+  const addrMatch = STREET_PATTERN.exec(text);
+  const buildingAddress = addrMatch?.[0]?.trim() ?? "";
+
+  const confidence = [unit, effectiveDate, tenantLast].filter(Boolean).length >= 2 ? 0.8 : 0.6;
+
+  return {
+    category,
+    unit,
+    tenant_last: tenantLast,
+    tenant_first: tenantFirst,
+    effective_date: effectiveDate || new Date().toISOString().slice(0, 10),
+    building_address: buildingAddress,
+    confidence,
+    method: "ocr",
+  };
+}
+
+// ── Step 3: AI helpers (fallback only) ────────────────────────────────────────
 
 async function fileToBase64Limited(file: File): Promise<{ b64: string; mime: string }> {
   const buf = await file.arrayBuffer();
@@ -32,10 +209,7 @@ async function fileToBase64Limited(file: File): Promise<{ b64: string; mime: str
 async function callAI(messages: unknown[]): Promise<string> {
   const resp = await fetch(AI_URL, {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${LOVABLE_API_KEY}`,
-      "Content-Type": "application/json",
-    },
+    headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
     body: JSON.stringify({ model: MODEL, messages, max_tokens: 512 }),
   });
   if (resp.status === 429) throw new Error("Rate limit exceeded — please try again shortly.");
@@ -45,17 +219,14 @@ async function callAI(messages: unknown[]): Promise<string> {
   return data.choices?.[0]?.message?.content?.trim() ?? "";
 }
 
-// Phase 1: detect address from a single file (first only, to save memory)
-async function detectAddress(file: File): Promise<{
-  address: string; city: string; state: string; postal_code: string; confidence: number;
-}> {
+async function detectAddressViaAI(file: File): Promise<AddressResult> {
   const parts: unknown[] = [
     {
       type: "text",
-      text: `You are a real-estate document analyst. Examine this document and extract the PROPERTY building address (NOT a tenant mailing address).
+      text: `Examine this document and extract the PROPERTY building address (NOT a tenant mailing address).
 Return ONLY valid JSON, no markdown fences:
 { "address": "full street address", "city": "city", "state": "2-letter state", "postal_code": "5-digit zip", "confidence": 0.0-1.0 }
-If you cannot determine it, set confidence to 0 and all other fields to empty strings.`,
+If you cannot determine it, set confidence to 0 and all fields to empty strings.`,
     },
   ];
   try {
@@ -65,24 +236,15 @@ If you cannot determine it, set confidence to 0 and all other fields to empty st
 
   const raw = await callAI([{ role: "user", content: parts }]);
   const jsonStr = raw.replace(/```json\n?/gi, "").replace(/```/g, "").trim();
-  try { return JSON.parse(jsonStr); }
-  catch { return { address: "", city: "", state: "", postal_code: "", confidence: 0 }; }
+  try {
+    return { ...JSON.parse(jsonStr), method: "ai" };
+  } catch {
+    return { address: "", city: "", state: "", postal_code: "", confidence: 0, method: "ai" };
+  }
 }
 
-interface ClassifiedFile {
-  original_name: string;
-  renamed_to: string;
-  category: "lease" | "rent-roll" | "notice" | "estoppel" | "other";
-  building_slug: string;
-  unit: string;
-  confidence: number;
-}
-
-// Phase 2a: classify + rename a single file (sequential, one at a time)
-async function classifyAndRename(
-  file: File, dealSlug: string, propertyAddress: string,
-): Promise<ClassifiedFile> {
-  const defaultRenamed = `DOC_${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+async function classifyViaAI(file: File, propertyAddress: string, ocrText: string): Promise<ClassifyResult> {
+  const textSnippet = ocrText ? `\n\nExtracted text (first 2000 chars):\n${ocrText.slice(0, 2000)}` : "";
   const parts: unknown[] = [
     {
       type: "text",
@@ -94,36 +256,140 @@ Naming convention:
   Notice:    NOTICE_{unit}_{LastName-FirstName}_{YYYY-MM-DD}.pdf
   Estoppel:  ESTOPPEL_{unit}_{LastName-FirstName}_{YYYY-MM-DD}.pdf
   Other:     DOC_{sanitized-original-name}
-{unit} = bare number only (11, not #11 or Apt 11). Keep original extension if not PDF.
+{unit} = bare number only (e.g. 11, not #11 or Apt 11).
 
 Property: ${propertyAddress}
-Original filename: ${file.name}
+Original filename: ${file.name}${textSnippet}
 
 Return ONLY valid JSON, no markdown fences:
-{ "category": "...", "renamed_to": "...", "unit": "...", "building_address": "...", "confidence": 0.0-1.0 }`,
+{ "category": "...", "unit": "...", "tenant_last": "...", "tenant_first": "...", "effective_date": "YYYY-MM-DD", "building_address": "...", "confidence": 0.0-1.0 }`,
     },
   ];
-  try {
-    const { b64, mime } = await fileToBase64Limited(file);
-    parts.push({ type: "image_url", image_url: { url: `data:${mime};base64,${b64}` } });
-  } catch (_) { /* skip */ }
+
+  // Only send image bytes if OCR got nothing (scanned PDF)
+  if (!ocrText) {
+    try {
+      const { b64, mime } = await fileToBase64Limited(file);
+      parts.push({ type: "image_url", image_url: { url: `data:${mime};base64,${b64}` } });
+    } catch (_) { /* skip */ }
+  }
 
   try {
     const raw = await callAI([{ role: "user", content: parts }]);
     const jsonStr = raw.replace(/```json\n?/gi, "").replace(/```/g, "").trim();
     const p = JSON.parse(jsonStr);
     return {
-      original_name: file.name,
-      renamed_to: p.renamed_to || defaultRenamed,
-      category: (["lease","rent-roll","notice","estoppel","other"].includes(p.category) ? p.category : "other") as ClassifiedFile["category"],
-      building_slug: p.building_address ? (slugify(p.building_address.split(",")[0].trim()) || dealSlug) : dealSlug,
+      category: (["lease","rent-roll","notice","estoppel","other"].includes(p.category) ? p.category : "other") as DocCategory,
       unit: p.unit || "",
+      tenant_last: p.tenant_last || "",
+      tenant_first: p.tenant_first || "",
+      effective_date: p.effective_date || new Date().toISOString().slice(0, 10),
+      building_address: p.building_address || "",
       confidence: p.confidence || 0.5,
+      method: "ai",
     };
   } catch {
-    return { original_name: file.name, renamed_to: defaultRenamed, category: "other", building_slug: dealSlug, unit: "", confidence: 0.3 };
+    return { category: "other", unit: "", tenant_last: "", tenant_first: "", effective_date: new Date().toISOString().slice(0, 10), building_address: "", confidence: 0.3, method: "ai" };
   }
 }
+
+// ── Step 4: Build standardized filename from classification result ─────────────
+
+function buildFilename(info: ClassifyResult, original: string, dealSlug: string): { renamed_to: string; building_slug: string } {
+  const ext = original.includes(".") ? `.${original.split(".").pop()}` : ".pdf";
+  const normExt = ext.toLowerCase() === ".pdf" ? ".pdf" : ext;
+  const date = info.effective_date || new Date().toISOString().slice(0, 10);
+  const unit = info.unit || "XX";
+
+  let renamed_to: string;
+  switch (info.category) {
+    case "lease":
+      renamed_to = `LEASE_${unit}_${info.tenant_last || "Unknown"}-${info.tenant_first || "Unknown"}_${date}${normExt}`;
+      break;
+    case "rent-roll":
+      renamed_to = `RENTROLL_${slugify(info.building_address || dealSlug)}_${date}${normExt}`;
+      break;
+    case "notice":
+      renamed_to = `NOTICE_${unit}_${info.tenant_last || "Unknown"}-${info.tenant_first || "Unknown"}_${date}${normExt}`;
+      break;
+    case "estoppel":
+      renamed_to = `ESTOPPEL_${unit}_${info.tenant_last || "Unknown"}-${info.tenant_first || "Unknown"}_${date}${normExt}`;
+      break;
+    default:
+      renamed_to = `DOC_${original.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+  }
+
+  const building_slug = info.building_address
+    ? slugify(info.building_address.split(",")[0].trim()) || dealSlug
+    : dealSlug;
+
+  return { renamed_to, building_slug };
+}
+
+// ── Orchestrator: OCR → regex → AI fallback ───────────────────────────────────
+
+async function processFile(
+  file: File,
+  dealSlug: string,
+  propertyAddress: string,
+): Promise<{
+  original_name: string;
+  renamed_to: string;
+  category: DocCategory;
+  building_slug: string;
+  unit: string;
+  confidence: number;
+  method: "ocr" | "ai" | "ocr+ai";
+}> {
+  // 1. Extract text via OCR (no AI)
+  const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+  const ocrText = isPdf ? await extractTextFromPdf(file) : "";
+  const hasText = ocrText.length > 80;
+
+  // 2. Try OCR-based classification
+  let classResult: ClassifyResult | null = hasText ? classifyFromText(ocrText, file.name) : null;
+
+  // 3. Fall back to AI if OCR classification failed
+  let method: "ocr" | "ai" | "ocr+ai" = "ocr";
+  if (!classResult) {
+    classResult = await classifyViaAI(file, propertyAddress, ocrText);
+    method = hasText ? "ocr+ai" : "ai"; // ocr+ai means text was extracted but AI did the classification
+  }
+
+  const { renamed_to, building_slug } = buildFilename(classResult, file.name, dealSlug);
+
+  return {
+    original_name: file.name,
+    renamed_to,
+    category: classResult.category,
+    building_slug,
+    unit: classResult.unit,
+    confidence: classResult.confidence,
+    method,
+  };
+}
+
+// ── Address detection orchestrator: OCR → regex → AI fallback ────────────────
+
+async function detectAddress(file: File): Promise<AddressResult> {
+  // 1. Try OCR first
+  const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+  const ocrText = isPdf ? await extractTextFromPdf(file) : "";
+
+  if (ocrText.length > 80) {
+    const ocr = detectAddressFromText(ocrText);
+    if (ocr && ocr.confidence >= 0.6 && ocr.address) {
+      console.log(`Address detected via OCR: ${ocr.address}`);
+      return ocr;
+    }
+  }
+
+  // 2. Fall back to AI
+  console.log("Address not found via OCR, falling back to AI");
+  return detectAddressViaAI(file);
+}
+
+// ── Serve ─────────────────────────────────────────────────────────────────────
 
 const CATEGORY_FOLDER: Record<string, string> = {
   lease: "lease", "rent-roll": "rent-roll", notice: "notice", estoppel: "estoppel", other: "other",
@@ -141,7 +407,7 @@ serve(async (req) => {
     const formData = await req.formData();
     const action = formData.get("action") as string;
 
-    // ── Phase 1: detect address from first file only ──────────────────────────
+    // ── Phase 1: detect address (OCR first, AI fallback) ─────────────────────
     if (action === "detect_address") {
       let firstFile: File | null = null;
       for (const [k, v] of formData.entries()) {
@@ -158,7 +424,7 @@ serve(async (req) => {
       });
     }
 
-    // ── Phase 2: full processing — ONE FILE AT A TIME ─────────────────────────
+    // ── Phase 2: full processing (OCR first, AI fallback, one file at a time) ─
     if (action === "process") {
       const dealName = formData.get("deal_name") as string;
       const propertyAddress = formData.get("property_address") as string;
@@ -187,11 +453,7 @@ serve(async (req) => {
 
       const { data: deal, error: dealErr } = await supabase
         .from("dd_deals")
-        .insert({
-          deal_name: dealName, property_address: propertyAddress,
-          address_city: addressCity, address_state: addressState,
-          address_postal_code: addressPostalCode, created_by: userIdRaw ?? null,
-        })
+        .insert({ deal_name: dealName, property_address: propertyAddress, address_city: addressCity, address_state: addressState, address_postal_code: addressPostalCode, created_by: userIdRaw ?? null })
         .select().single();
       if (dealErr) throw new Error(`Failed to create deal: ${dealErr.message}`);
 
@@ -206,9 +468,9 @@ serve(async (req) => {
 
       const sortedFiles = [];
 
-      // Process strictly one file at a time — no concurrency — to stay in memory budget
+      // Process one file at a time to stay within memory budget
       for (const file of files) {
-        const info = await classifyAndRename(file, dealSlug, propertyAddress);
+        const info = await processFile(file, dealSlug, propertyAddress);
         const folder = CATEGORY_FOLDER[info.category] ?? "other";
         const unitPath = info.unit ? `units/${info.unit}/` : "";
         const storagePath = `${storagePrefix}/buildings/${info.building_slug}/${unitPath}${folder}/${info.renamed_to}`;
@@ -232,10 +494,7 @@ serve(async (req) => {
         .eq("id", pkgId);
 
       return new Response(
-        JSON.stringify({
-          deal_id: deal.id, package_id: pkgId, deal_name: dealName,
-          property_address: propertyAddress, total_files: files.length, files: sortedFiles,
-        }),
+        JSON.stringify({ deal_id: deal.id, package_id: pkgId, deal_name: dealName, property_address: propertyAddress, total_files: files.length, files: sortedFiles }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
