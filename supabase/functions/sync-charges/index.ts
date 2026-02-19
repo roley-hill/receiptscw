@@ -70,15 +70,23 @@ serve(async (req) => {
     }
 
     // Build query params for the charges/general_ledger_details endpoint
-    // Try multiple endpoints: charges, general_ledger_details, tenant_ledgers
+    // Try multiple endpoints: v0 charge_detail, v2 charges, general_ledger_details, tenant_ledgers, v1 charge_detail
     let allCharges: any[] = [];
 
-    // Strategy 1: Try /api/v2/charges.json (paginated)
+    // Strategy 0: Try /api/v0/reports/charge_detail.json (oldest format, credentials embedded in URL per AppFolio docs)
     let params = "?paginate_results=true&per_page=200";
     if (fromDate) params += `&from_date=${fromDate}`;
     if (toDate) params += `&to_date=${toDate}`;
 
-    let nextUrl: string | null = `/api/v2/charges.json${params}`;
+    // v0 endpoint — credentials embedded in URL (as per AppFolio docs)
+    const v0Data = await appfolioFetch(`/api/v0/reports/charge_detail.json${params}`);
+    if (v0Data) {
+      allCharges = v0Data.results || v0Data.data || (Array.isArray(v0Data) ? v0Data : []);
+      console.log(`v0 charge_detail returned ${allCharges.length} entries`);
+    }
+
+    // Strategy 1: Try /api/v2/charges.json (paginated)
+    let nextUrl: string | null = allCharges.length === 0 ? `/api/v2/charges.json${params}` : null;
     while (nextUrl) {
       const data = await appfolioFetch(nextUrl);
       if (!data) break;
@@ -162,13 +170,26 @@ serve(async (req) => {
     const now = new Date().toISOString();
     let upserted = 0;
 
+    // Helper to normalize dates - handles MM/DD/YYYY, YYYY-MM-DD, and comma-separated (takes first)
+    function parseDate(val: any): string | null {
+      if (!val) return null;
+      const str = String(val).trim().split(",")[0].trim(); // take first if multiple
+      if (!str) return null;
+      // MM/DD/YYYY → YYYY-MM-DD
+      const mdyMatch = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+      if (mdyMatch) return `${mdyMatch[3]}-${mdyMatch[1].padStart(2, "0")}-${mdyMatch[2].padStart(2, "0")}`;
+      // Already ISO format
+      if (/^\d{4}-\d{2}-\d{2}/.test(str)) return str.substring(0, 10);
+      return null;
+    }
+
     for (let i = 0; i < allCharges.length; i += 50) {
       const batch = allCharges.slice(i, i + 50).map((c: any) => {
         const accountName = c.account_name || c.AccountName || c["Account Name"] || c.gl_account_name || "";
         const accountNumber = String(c.account_number || c.AccountNumber || c["Account Number"] || c.gl_account || "");
         
-        // Parse tenant name (AppFolio uses "Last, First" format)
-        let chargedTo = c.charged_to || c.ChargedTo || c["Charged to"] || c.tenant_name || c.tenant || c.name || "";
+        // v0 uses ReceivedFrom for the party; fallback to other field names
+        let chargedTo = c.ReceivedFrom || c.charged_to || c.ChargedTo || c["Charged to"] || c.tenant_name || c.tenant || c.name || "";
         
         const chargeAmount = parseFloat(
           String(c.charge_amount || c.ChargeAmount || c["Charge Amount"] || c.amount || c.debit || "0").replace(/,/g, "")
@@ -177,12 +198,12 @@ serve(async (req) => {
           String(c.paid_amount || c.PaidAmount || c["Paid Amount"] || c.credit || "0").replace(/,/g, "")
         ) || 0;
 
-        const chargeDate = c.charge_date || c.ChargeDate || c["Charge Date"] || c.date || c.occurred_on || null;
+        const chargeDate = parseDate(c.charge_date || c.ChargeDate || c["Charge Date"] || c.date || c.occurred_on);
         const unit = c.unit || c.Unit || c.unit_number || c["Unit"] || null;
         const propertyAddress = c.property || c.Property || c.property_address || c["Property"] || "";
-        const reference = c.reference || c.Reference || c.receipt_reference || null;
-        const receiptDate = c.receipt_date || c.ReceiptDate || c["Receipt Date"] || null;
-        const tenantId = c.tenant_id || c.TenantId || null;
+        const reference = c.reference || c.Reference || c.ReceiptReference || c.receipt_reference || null;
+        const receiptDate = parseDate(c.receipt_date || c.ReceiptDate || c["Receipt Date"] || c.ReceiptInfo);
+        const tenantId = c.tenant_id || c.TenantId || c.PartyId || null;
 
         // Detect subsidy from account name
         const accountNameLower = accountName.toLowerCase();
