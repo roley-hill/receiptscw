@@ -227,7 +227,7 @@ serve(async (req) => {
     console.log(`Synced ${upserted} charge details`);
 
     // ---- AUTO-TAG SUBSIDY PROVIDERS ON EXISTING RECEIPTS ----
-    // Find all subsidy charges and match them to receipts by tenant/unit/amount
+    // Strategy A: Use charge_details if we got any subsidy charges from AppFolio
     const { data: subsidyCharges } = await supabase
       .from("charge_details")
       .select("charged_to, unit, property_address, charge_amount, subsidy_provider")
@@ -236,7 +236,6 @@ serve(async (req) => {
 
     let receiptsUpdated = 0;
     if (subsidyCharges && subsidyCharges.length > 0) {
-      // Get all receipts without subsidy_provider set
       const { data: receipts } = await supabase
         .from("receipts")
         .select("id, tenant, unit, property, amount, subsidy_provider")
@@ -248,39 +247,58 @@ serve(async (req) => {
           const receiptTenant = (receipt.tenant || "").toLowerCase().trim();
           const receiptUnit = (receipt.unit || "").replace(/^#/, "").trim().toLowerCase();
 
-          // Find matching subsidy charge
           const match = subsidyCharges.find(sc => {
             const scTenant = (sc.charged_to || "").toLowerCase().trim();
             const scUnit = (sc.unit || "").replace(/^#/, "").trim().toLowerCase();
             const scAmount = Math.abs(sc.charge_amount);
-
-            // Match by tenant name (fuzzy) and amount
             const tenantMatch = scTenant && receiptTenant && (
-              scTenant === receiptTenant ||
-              scTenant.includes(receiptTenant) ||
-              receiptTenant.includes(scTenant)
+              scTenant === receiptTenant || scTenant.includes(receiptTenant) || receiptTenant.includes(scTenant)
             );
             const unitMatch = scUnit && receiptUnit && (
-              scUnit === receiptUnit ||
-              scUnit.endsWith("-" + receiptUnit) ||
-              receiptUnit.endsWith("-" + scUnit)
+              scUnit === receiptUnit || scUnit.endsWith("-" + receiptUnit) || receiptUnit.endsWith("-" + scUnit)
             );
             const amountMatch = Math.abs(scAmount - receiptAmount) < 0.01;
-
-            // Match if (tenant matches AND amount matches) OR (unit matches AND amount matches)
             return amountMatch && (tenantMatch || unitMatch);
           });
 
           if (match && match.subsidy_provider) {
-            await supabase
-              .from("receipts")
-              .update({ subsidy_provider: match.subsidy_provider })
-              .eq("id", receipt.id);
+            await supabase.from("receipts").update({ subsidy_provider: match.subsidy_provider }).eq("id", receipt.id);
             receiptsUpdated++;
           }
         }
       }
     }
+
+    // Strategy B: Detect subsidy from receipt memo/reference patterns (works even without AppFolio charges API)
+    // Tag HAP (Housing Assistance Payment / Section 8) from memo
+    const { data: hapReceipts } = await supabase
+      .from("receipts")
+      .select("id")
+      .is("subsidy_provider", null)
+      .ilike("memo", "%HAP%");
+
+    if (hapReceipts && hapReceipts.length > 0) {
+      for (const r of hapReceipts) {
+        await supabase.from("receipts").update({ subsidy_provider: "Section 8 HAP" }).eq("id", r.id);
+        receiptsUpdated++;
+      }
+    }
+
+    // Tag FHSP from reference
+    const { data: fhspReceipts } = await supabase
+      .from("receipts")
+      .select("id")
+      .is("subsidy_provider", null)
+      .ilike("reference", "%FHSP%");
+
+    if (fhspReceipts && fhspReceipts.length > 0) {
+      for (const r of fhspReceipts) {
+        await supabase.from("receipts").update({ subsidy_provider: "FHSP" }).eq("id", r.id);
+        receiptsUpdated++;
+      }
+    }
+
+    console.log(`Subsidy tagging: ${receiptsUpdated} receipts updated`);
 
     return new Response(JSON.stringify({
       success: true,
