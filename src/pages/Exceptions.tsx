@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { fetchReceipts } from "@/lib/api";
+import { fetchReceipts, updateReceipt } from "@/lib/api";
 import { supabase } from "@/integrations/supabase/client";
 import { AlertTriangle, CheckCircle2, Trash2, FileText, ChevronDown, CheckCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,7 @@ import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
 import { TenantStatusBadge, ChargeTypeBadge } from "@/components/StatusBadges";
+import TenantSuggestion from "@/components/TenantSuggestion";
 
 export default function Exceptions() {
   const { data: allReceipts = [], isLoading } = useQuery({
@@ -340,6 +341,22 @@ export default function Exceptions() {
                     <p className="text-xs text-muted-foreground mt-0.5">{r.property || "Unknown Property"} · Unit {r.unit || "?"} · {r.file_name || "No file"}</p>
                     <div className="flex flex-wrap gap-1.5 mt-2">
                       {issues.map((issue) => <span key={issue} className="vault-badge-error text-[10px]">{issue}</span>)}
+                    </div>
+                    <div className="mt-2">
+                      <TenantSuggestion
+                        property={r.property}
+                        unit={r.unit}
+                        extractedTenant={r.tenant}
+                        onAccept={async ({ name, property, unit }) => {
+                          try {
+                            await updateReceipt(r.id, { tenant: name, property, unit });
+                            toast.success(`Updated tenant to ${name}`);
+                            queryClient.invalidateQueries({ queryKey: ["receipts"] });
+                          } catch (err: any) {
+                            toast.error(err.message || "Update failed");
+                          }
+                        }}
+                      />
                     </div>
                   </div>
                 </div>
