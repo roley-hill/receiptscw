@@ -3,6 +3,7 @@ import { X, ChevronLeft, ChevronRight, FileText, Loader2, Eye, FileBarChart } fr
 import { Button } from "@/components/ui/button";
 import { motion, AnimatePresence } from "framer-motion";
 import { AttachmentContent } from "@/components/FilePreview";
+import PdfViewer from "@/components/PdfViewer";
 import { getFilePreviewUrl } from "@/lib/api";
 import { generateBatchPDF } from "@/lib/batchReports";
 
@@ -172,12 +173,7 @@ export default function BatchDocumentPreview({ receipts, batch, onClose }: Batch
                 >
                   {current?.type === "report" ? (
                     reportBlobUrl ? (
-                      <iframe
-                        src={reportBlobUrl}
-                        className="w-full rounded-lg border border-border"
-                        style={{ height: "70vh", minHeight: 400 }}
-                        title="Batch Report Preview"
-                      />
+                      <PdfViewer url={reportBlobUrl} />
                     ) : (
                       <div className="flex flex-col items-center justify-center min-h-[400px] text-muted-foreground text-sm gap-2">
                         <FileBarChart className="h-10 w-10" />
