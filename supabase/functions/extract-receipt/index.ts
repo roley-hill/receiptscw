@@ -761,6 +761,52 @@ ${knownTenantsList}` : ""}`;
     // ---- POST-EXTRACTION TENANT MATCHING (fuzzy safety net) ----
     // When a match is found, ALWAYS use the database values (source of truth)
     // for tenant name, property address, and unit number.
+
+    // Helper: strip middle initials/names to get [first, last] for comparison
+    function stripMiddle(name: string): string[] {
+      const parts = name.toLowerCase().trim().split(/\s+/);
+      if (parts.length <= 2) return parts;
+      // Return first and last only, dropping middle names/initials
+      return [parts[0], parts[parts.length - 1]];
+    }
+
+    // Helper: check if two names match ignoring middle initials
+    function namesMatchFuzzy(extracted: string, known: string): boolean {
+      const e = extracted.toLowerCase().trim();
+      const k = known.toLowerCase().trim();
+      if (e === k) return true;
+
+      // Substring containment
+      if (k.includes(e) || e.includes(k)) return true;
+
+      const eParts = e.split(/\s+/);
+      const kParts = k.split(/\s+/);
+
+      // Last name must match
+      const eLast = eParts[eParts.length - 1];
+      const kLast = kParts[kParts.length - 1];
+      if (eLast.length < 3 || eLast !== kLast) return false;
+
+      // First name/initial must match
+      const eFirst = eParts[0];
+      const kFirst = kParts[0];
+      // Full first name match
+      if (eFirst === kFirst) return true;
+      // Initial match: "M" matches "Maria", "M." matches "Maria"
+      const eInit = eFirst.replace(".", "");
+      const kInit = kFirst.replace(".", "");
+      if (eInit.length === 1 && kInit.startsWith(eInit)) return true;
+      if (kInit.length === 1 && eInit.startsWith(kInit)) return true;
+
+      // Compare with middle names stripped: "John Smith" vs "John M. Smith"
+      const eStripped = stripMiddle(e);
+      const kStripped = stripMiddle(k);
+      if (eStripped.length >= 2 && kStripped.length >= 2 &&
+          eStripped[0] === kStripped[0] && eStripped[1] === kStripped[1]) return true;
+
+      return false;
+    }
+
     if (tenantLookup.length > 0) {
       for (const item of extractedItems) {
         let match: typeof tenantLookup[0] | undefined;
@@ -768,21 +814,11 @@ ${knownTenantsList}` : ""}`;
         // 1. Try matching by tenant name if present
         if (item.tenant) {
           const extracted = item.tenant.toLowerCase().trim();
-          // Exact match
+          // Exact match first
           match = tenantLookup.find(t => t.full_name.toLowerCase() === extracted);
           if (!match) {
-            // Partial: last name match
-            match = tenantLookup.find(t => {
-              const known = t.full_name.toLowerCase();
-              const eParts = extracted.split(/\s+/);
-              const kParts = known.split(/\s+/);
-              if (eParts.length >= 1 && kParts.length >= 1) {
-                const eLastName = eParts[eParts.length - 1];
-                const kLastName = kParts[kParts.length - 1];
-                if (eLastName.length >= 3 && eLastName === kLastName) return true;
-              }
-              return known.includes(extracted) || extracted.includes(known);
-            });
+            // Fuzzy match: handles middle initials, abbreviations, substring
+            match = tenantLookup.find(t => namesMatchFuzzy(extracted, t.full_name));
           }
         }
 
