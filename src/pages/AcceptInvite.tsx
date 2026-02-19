@@ -2,13 +2,16 @@ import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { FileText } from "lucide-react";
+import { FileText, CheckCircle } from "lucide-react";
 import { toast } from "sonner";
 
 export default function AcceptInvite() {
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [done, setDone] = useState(false);
   const [sessionReady, setSessionReady] = useState(false);
   const [checking, setChecking] = useState(true);
   const navigate = useNavigate();
@@ -16,9 +19,10 @@ export default function AcceptInvite() {
   useEffect(() => {
     let resolved = false;
 
-    const resolve = (ready: boolean) => {
+    const resolve = (ready: boolean, userEmail?: string) => {
       if (!resolved) {
         resolved = true;
+        if (userEmail) setEmail(userEmail);
         setSessionReady(ready);
         setChecking(false);
       }
@@ -30,14 +34,12 @@ export default function AcceptInvite() {
     const type = urlParams.get("type");
 
     if (tokenHash && type === "invite") {
-      // Exchange the token hash for a session
       supabase.auth.verifyOtp({ token_hash: tokenHash, type: "invite" }).then(({ data, error }) => {
-        console.log("[AcceptInvite] verifyOtp result:", { data, error });
         if (error) {
           console.error("[AcceptInvite] verifyOtp error:", error.message);
           resolve(false);
         } else if (data.session) {
-          resolve(true);
+          resolve(true, data.session.user.email ?? "");
         }
       });
       return;
@@ -48,26 +50,20 @@ export default function AcceptInvite() {
     const hashParams = new URLSearchParams(hash.replace("#", ""));
     const hashType = hashParams.get("type");
 
-    // Listen for ALL auth events — Supabase auto-processes the hash on init
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      console.log("[AcceptInvite] auth event:", event, "has session:", !!session);
       if (session?.user) {
-        // Accept if type=invite in URL, or user hasn't confirmed email yet
         const isInvite = hashType === "invite" || !session.user.email_confirmed_at;
-        resolve(isInvite);
+        resolve(isInvite, session.user.email ?? "");
       }
     });
 
-    // Check for existing session (Supabase may have already processed the hash)
     supabase.auth.getSession().then(({ data: { session } }) => {
-      console.log("[AcceptInvite] getSession:", !!session, session?.user?.email);
       if (session?.user) {
         const isInvite = hashType === "invite" || !session.user.email_confirmed_at;
-        resolve(isInvite);
+        resolve(isInvite, session.user.email ?? "");
       }
     });
 
-    // Timeout fallback after 10s
     const timer = setTimeout(() => resolve(false), 10000);
 
     return () => {
@@ -78,6 +74,11 @@ export default function AcceptInvite() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!name.trim()) {
+      toast.error("Please enter your name");
+      return;
+    }
     if (password !== confirmPassword) {
       toast.error("Passwords do not match");
       return;
@@ -88,13 +89,29 @@ export default function AcceptInvite() {
     }
 
     setLoading(true);
-    const { error } = await supabase.auth.updateUser({ password });
+    const { error } = await supabase.auth.updateUser({
+      password,
+      data: { display_name: name.trim() },
+    });
+
     if (error) {
       toast.error(error.message);
-    } else {
-      toast.success("Account created! Welcome aboard.");
-      navigate("/");
+      setLoading(false);
+      return;
     }
+
+    // Also update the profiles table with the display name
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      await supabase
+        .from("profiles")
+        .update({ display_name: name.trim() })
+        .eq("user_id", user.id);
+    }
+
+    // Sign out and show success — they'll log in with their new credentials
+    await supabase.auth.signOut();
+    setDone(true);
     setLoading(false);
   };
 
@@ -128,6 +145,25 @@ export default function AcceptInvite() {
     );
   }
 
+  if (done) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center p-4">
+        <div className="w-full max-w-sm space-y-6 text-center">
+          <div className="inline-flex h-12 w-12 items-center justify-center rounded-xl bg-primary mb-4">
+            <CheckCircle className="h-6 w-6 text-primary-foreground" />
+          </div>
+          <h1 className="text-2xl font-bold text-foreground">Account Created!</h1>
+          <p className="text-sm text-muted-foreground">
+            Your account has been set up successfully. You can now sign in with your email and password.
+          </p>
+          <Button onClick={() => navigate("/auth")} className="w-full">
+            Sign In
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
       <div className="w-full max-w-sm space-y-6">
@@ -135,15 +171,41 @@ export default function AcceptInvite() {
           <div className="inline-flex h-12 w-12 items-center justify-center rounded-xl bg-primary mb-4">
             <FileText className="h-6 w-6 text-primary-foreground" />
           </div>
-          <h1 className="text-2xl font-bold text-foreground">Create Your Password</h1>
+          <h1 className="text-2xl font-bold text-foreground">Create Your Account</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Set a password to complete your account setup.
+            You've been invited. Fill in your details to get started.
           </p>
         </div>
 
         <form onSubmit={handleSubmit} className="vault-card p-6 space-y-4">
+          {/* Email — pre-filled and read-only */}
           <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">New Password</label>
+            <label className="text-xs font-medium text-muted-foreground">Email</label>
+            <input
+              type="email"
+              readOnly
+              value={email}
+              className="w-full h-10 rounded-md border border-input bg-muted px-3 text-sm text-muted-foreground cursor-not-allowed"
+            />
+          </div>
+
+          {/* Display name */}
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground">Your Name</label>
+            <input
+              type="text"
+              required
+              autoFocus
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              placeholder="Jane Smith"
+            />
+          </div>
+
+          {/* Password */}
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground">Password</label>
             <input
               type="password"
               required
@@ -151,9 +213,11 @@ export default function AcceptInvite() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-              placeholder="••••••••"
+              placeholder="Min. 8 characters"
             />
           </div>
+
+          {/* Confirm Password */}
           <div className="space-y-1">
             <label className="text-xs font-medium text-muted-foreground">Confirm Password</label>
             <input
@@ -166,8 +230,9 @@ export default function AcceptInvite() {
               placeholder="••••••••"
             />
           </div>
+
           <Button type="submit" className="w-full" disabled={loading}>
-            {loading ? "Setting up account..." : "Create Account"}
+            {loading ? "Creating account..." : "Create Account"}
           </Button>
         </form>
       </div>
