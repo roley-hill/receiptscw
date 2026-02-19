@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 import { FileText, ZoomIn, ZoomOut, RotateCcw, Loader2, Download, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { motion } from "framer-motion";
@@ -81,13 +81,21 @@ function XlsxFetchPreview({ url }: { url: string }) {
   useEffect(() => {
     fetch(url)
       .then((r) => r.arrayBuffer())
-      .then((buf) => {
-        const wb = XLSX.read(new Uint8Array(buf), { type: "array" });
+      .then(async (buf) => {
+        const wb = new ExcelJS.Workbook();
+        await wb.xlsx.load(buf);
         const parts: string[] = [];
-        for (const name of wb.SheetNames) {
-          parts.push(`=== Sheet: ${name} ===`);
-          parts.push(XLSX.utils.sheet_to_csv(wb.Sheets[name]));
-        }
+        wb.eachSheet((sheet) => {
+          parts.push(`=== Sheet: ${sheet.name} ===`);
+          const rows: string[] = [];
+          sheet.eachRow((row) => {
+            const cells = (row.values as any[]).slice(1).map((v) =>
+              v === null || v === undefined ? "" : String(typeof v === "object" && v.result !== undefined ? v.result : v)
+            );
+            rows.push(cells.join(","));
+          });
+          parts.push(rows.join("\n"));
+        });
         setCsv(parts.join("\n"));
       })
       .catch(() => setError(true))
