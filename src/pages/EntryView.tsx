@@ -40,6 +40,45 @@ function CopyCell({ value, mono, id }: { value: string; mono?: boolean; id: stri
   );
 }
 
+/* ─── Normalize address abbreviations for grouping ─── */
+const ABBR_MAP: Record<string, string> = {
+  " ave ": " avenue ", " ave,": " avenue,",
+  " st ": " street ", " st,": " street,",
+  " blvd ": " boulevard ", " blvd,": " boulevard,",
+  " dr ": " drive ", " dr,": " drive,",
+  " rd ": " road ", " rd,": " road,",
+  " ln ": " lane ", " ln,": " lane,",
+  " ct ": " court ", " ct,": " court,",
+  " pl ": " place ", " pl,": " place,",
+  " n ": " north ", " s ": " south ", " e ": " east ", " w ": " west ",
+};
+
+function normalizeAddress(addr: string): string {
+  let s = " " + addr.toLowerCase().trim() + " ";
+  for (const [abbr, full] of Object.entries(ABBR_MAP)) {
+    // Replace only when the abbreviation appears as a word boundary
+    s = s.split(abbr).join(full);
+  }
+  // Also handle trailing abbreviations (end of string before city/state)
+  return s.trim();
+}
+
+// Map each raw property string to a canonical (normalized) key,
+// and track the canonical display value (prefer longest/most complete form)
+function buildCanonicalPropertyMap(receipts: DbReceipt[]): Map<string, string> {
+  const normToCanonical = new Map<string, string>();
+  for (const r of receipts) {
+    if (!r.property) continue;
+    const norm = normalizeAddress(r.property);
+    const existing = normToCanonical.get(norm);
+    // Prefer the longer string as the canonical display name (more complete)
+    if (!existing || r.property.length > existing.length) {
+      normToCanonical.set(norm, r.property);
+    }
+  }
+  return normToCanonical;
+}
+
 /* ─── Main page ─── */
 export default function EntryView() {
   const { user } = useAuth();
@@ -48,6 +87,11 @@ export default function EntryView() {
   const { data: allReceipts = [], isLoading } = useQuery({ queryKey: ["receipts"], queryFn: fetchReceipts });
 
   const finalized = allReceipts.filter((r) => r.status === "finalized" && !r.batch_id);
+
+  // Build canonical property map (merges Ave/Avenue etc.)
+  const canonicalMap = buildCanonicalPropertyMap(finalized);
+  // Resolve a receipt's property to its canonical form
+  const canonical = (prop: string) => canonicalMap.get(normalizeAddress(prop)) ?? prop;
 
   const [selectedProperty, setSelectedProperty] = useState<string>("all");
   const [selectedTenant, setSelectedTenant] = useState<string | null>(null);
@@ -61,23 +105,25 @@ export default function EntryView() {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [expandedTableTenants, setExpandedTableTenants] = useState<Set<string>>(new Set());
 
-  const filteredProperties = [...new Set(finalized.map((r) => r.property).filter(Boolean))];
+  // Use canonical property names for all grouping
+  const filteredProperties = [...new Set(finalized.map((r) => canonical(r.property)).filter(Boolean))];
 
-  // Build tenant map per property
+  // Build tenant map per canonical property
   const tenantsByProperty = finalized.reduce((acc, r) => {
     if (!r.property) return acc;
-    if (!acc[r.property]) acc[r.property] = {};
+    const prop = canonical(r.property);
+    if (!acc[prop]) acc[prop] = {};
     const tenant = r.tenant || "(No Tenant)";
-    if (!acc[r.property][tenant]) acc[r.property][tenant] = [];
-    acc[r.property][tenant].push(r);
+    if (!acc[prop][tenant]) acc[prop][tenant] = [];
+    acc[prop][tenant].push(r);
     return acc;
   }, {} as Record<string, Record<string, DbReceipt[]>>);
 
   const filtered = selectedProperty === "all"
     ? (selectedTenant ? finalized.filter(r => (r.tenant || "(No Tenant)") === selectedTenant) : finalized)
     : selectedTenant
-      ? finalized.filter(r => r.property === selectedProperty && (r.tenant || "(No Tenant)") === selectedTenant)
-      : finalized.filter(r => r.property === selectedProperty);
+      ? finalized.filter(r => canonical(r.property) === selectedProperty && (r.tenant || "(No Tenant)") === selectedTenant)
+      : finalized.filter(r => canonical(r.property) === selectedProperty);
 
   const togglePropertyExpand = (property: string) => {
     setExpandedProperties(prev => {
@@ -102,8 +148,9 @@ export default function EntryView() {
   };
 
   const flatGrouped = filtered.reduce((acc, r) => {
-    if (!acc[r.property]) acc[r.property] = [];
-    acc[r.property].push(r);
+    const prop = canonical(r.property);
+    if (!acc[prop]) acc[prop] = [];
+    acc[prop].push(r);
     return acc;
   }, {} as Record<string, DbReceipt[]>);
 
@@ -142,13 +189,13 @@ export default function EntryView() {
   
 
   const openBatchDialog = (property: string) => {
-    const propertyRecorded = finalized.filter((r) => r.property === property && (r as any).appfolio_recorded && !r.batch_id);
+    const propertyRecorded = finalized.filter((r) => canonical(r.property) === property && (r as any).appfolio_recorded && !r.batch_id);
     if (propertyRecorded.length === 0) { toast({ title: "No eligible receipts", description: "Mark receipts as recorded in AppFolio first.", variant: "destructive" }); return; }
     setBatchProperty(property); setDepositPeriod(""); setBatchDialogOpen(true);
   };
 
   const handleCreateBatch = () => {
-    const ids = finalized.filter((r) => r.property === batchProperty && (r as any).appfolio_recorded && !r.batch_id).map((r) => r.id);
+    const ids = finalized.filter((r) => canonical(r.property) === batchProperty && (r as any).appfolio_recorded && !r.batch_id).map((r) => r.id);
     if (ids.length === 0) return;
     batchMutation.mutate({ property: batchProperty, ids, period: depositPeriod });
   };
@@ -218,8 +265,8 @@ export default function EntryView() {
               </button>
             )}
             {filteredProperties.sort().filter((p) => !treeSearch || p.toLowerCase().includes(treeSearch.toLowerCase())).map((property) => {
-              const count = finalized.filter((r) => r.property === property).length;
-              const recCount = finalized.filter((r) => r.property === property && (r as any).appfolio_recorded).length;
+              const count = finalized.filter((r) => canonical(r.property) === property).length;
+              const recCount = finalized.filter((r) => canonical(r.property) === property && (r as any).appfolio_recorded).length;
               const isExpanded = expandedProperties.has(property);
               const tenants = tenantsByProperty[property] || {};
               const tenantNames = Object.keys(tenants).sort();
