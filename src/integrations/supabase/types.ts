@@ -170,6 +170,146 @@ export type Database = {
         }
         Relationships: []
       }
+      dd_deals: {
+        Row: {
+          address_city: string | null
+          address_postal_code: string | null
+          address_state: string | null
+          created_at: string
+          created_by: string | null
+          deal_name: string
+          id: string
+          property_address: string | null
+          updated_at: string
+        }
+        Insert: {
+          address_city?: string | null
+          address_postal_code?: string | null
+          address_state?: string | null
+          created_at?: string
+          created_by?: string | null
+          deal_name: string
+          id?: string
+          property_address?: string | null
+          updated_at?: string
+        }
+        Update: {
+          address_city?: string | null
+          address_postal_code?: string | null
+          address_state?: string | null
+          created_at?: string
+          created_by?: string | null
+          deal_name?: string
+          id?: string
+          property_address?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      dd_packages: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          deal_id: string
+          error: string | null
+          id: string
+          processed_files: number
+          status: string
+          storage_prefix: string | null
+          total_files: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          deal_id: string
+          error?: string | null
+          id?: string
+          processed_files?: number
+          status?: string
+          storage_prefix?: string | null
+          total_files?: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          deal_id?: string
+          error?: string | null
+          id?: string
+          processed_files?: number
+          status?: string
+          storage_prefix?: string | null
+          total_files?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "dd_packages_deal_id_fkey"
+            columns: ["deal_id"]
+            isOneToOne: false
+            referencedRelation: "dd_deals"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      dd_sorted_files: {
+        Row: {
+          ai_confidence: number | null
+          building_slug: string | null
+          category: string
+          created_at: string
+          deal_id: string
+          id: string
+          original_name: string
+          package_id: string
+          renamed_to: string
+          storage_path: string | null
+          unit: string | null
+        }
+        Insert: {
+          ai_confidence?: number | null
+          building_slug?: string | null
+          category?: string
+          created_at?: string
+          deal_id: string
+          id?: string
+          original_name: string
+          package_id: string
+          renamed_to: string
+          storage_path?: string | null
+          unit?: string | null
+        }
+        Update: {
+          ai_confidence?: number | null
+          building_slug?: string | null
+          category?: string
+          created_at?: string
+          deal_id?: string
+          id?: string
+          original_name?: string
+          package_id?: string
+          renamed_to?: string
+          storage_path?: string | null
+          unit?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "dd_sorted_files_deal_id_fkey"
+            columns: ["deal_id"]
+            isOneToOne: false
+            referencedRelation: "dd_deals"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dd_sorted_files_package_id_fkey"
+            columns: ["package_id"]
+            isOneToOne: false
+            referencedRelation: "dd_packages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       deposit_batches: {
         Row: {
           batch_id: string

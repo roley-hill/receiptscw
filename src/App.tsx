@@ -22,6 +22,7 @@ import ResetPassword from "@/pages/ResetPassword";
 import AcceptInvite from "@/pages/AcceptInvite";
 import NotFound from "@/pages/NotFound";
 import DdUpload from "@/pages/DdUpload";
+import DdFileSorter from "@/pages/DdFileSorter";
 
 const queryClient = new QueryClient();
 
@@ -56,6 +57,7 @@ function ProtectedRoutes() {
         <Route path="/duplicates" element={<Duplicates />} />
         <Route path="/team" element={<TeamManagement />} />
         <Route path="/dd/upload" element={<DdUpload />} />
+        <Route path="/dd/sort" element={<DdFileSorter />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
     </AppLayout>
