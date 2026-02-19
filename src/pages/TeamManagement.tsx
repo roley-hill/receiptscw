@@ -76,7 +76,11 @@ export default function TeamManagement() {
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ email: inviteEmail, role: inviteRole }),
+          body: JSON.stringify({
+            email: inviteEmail,
+            role: inviteRole,
+            redirectTo: `${window.location.origin}/accept-invite`,
+          }),
         }
       );
       if (!resp.ok) {

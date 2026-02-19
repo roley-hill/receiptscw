@@ -19,6 +19,7 @@ import Duplicates from "@/pages/Duplicates";
 import TeamManagement from "@/pages/TeamManagement";
 import Auth from "@/pages/Auth";
 import ResetPassword from "@/pages/ResetPassword";
+import AcceptInvite from "@/pages/AcceptInvite";
 import NotFound from "@/pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -70,6 +71,7 @@ const App = () => (
             <Routes>
               <Route path="/auth" element={<Auth />} />
               <Route path="/reset-password" element={<ResetPassword />} />
+              <Route path="/accept-invite" element={<AcceptInvite />} />
               <Route path="/*" element={<ProtectedRoutes />} />
             </Routes>
           </UploadStoreProvider>
