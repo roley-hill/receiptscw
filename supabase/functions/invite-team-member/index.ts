@@ -37,6 +37,18 @@ Deno.serve(async (req) => {
 
     const body = await req.json();
 
+    if (req.method === "GET") {
+      // Return list of pending (invited but not confirmed) users
+      const { data: usersData, error: listErr } = await adminClient.auth.admin.listUsers();
+      if (listErr) throw listErr;
+      const pending = usersData.users
+        .filter((u) => u.invited_at && !u.email_confirmed_at)
+        .map((u) => ({ id: u.id, email: u.email, invited_at: u.invited_at }));
+      return new Response(JSON.stringify({ pending }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     if (req.method === "DELETE") {
       const { user_id } = body;
       if (!user_id) throw new Error("user_id required");
