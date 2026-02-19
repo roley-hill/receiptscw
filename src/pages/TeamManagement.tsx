@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { Users, UserPlus, Trash2, Shield, ShieldCheck, Eye, Mail } from "lucide-react";
+import { Users, UserPlus, Trash2, Shield, ShieldCheck, Eye, Mail, Clock, RefreshCw } from "lucide-react";
 import type { Database } from "@/integrations/supabase/types";
 
 type AppRole = Database["public"]["Enums"]["app_role"];
@@ -17,6 +17,12 @@ interface TeamMember {
   role: AppRole;
   email: string;
   display_name: string | null;
+}
+
+interface PendingInvite {
+  id: string;
+  email: string;
+  invited_at: string;
 }
 
 const roleIcons: Record<AppRole, typeof Shield> = {
@@ -38,6 +44,13 @@ export default function TeamManagement() {
   const [inviteRole, setInviteRole] = useState<AppRole>("processor");
 
   const isAdmin = role === "admin";
+
+  const getAuthToken = async () => {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token;
+    if (!token) throw new Error("Not authenticated");
+    return token;
+  };
 
   const { data: members = [], isLoading } = useQuery({
     queryKey: ["team-members"],
@@ -62,20 +75,29 @@ export default function TeamManagement() {
     },
   });
 
+  const { data: pendingInvites = [], isLoading: pendingLoading } = useQuery({
+    queryKey: ["pending-invites"],
+    enabled: isAdmin,
+    queryFn: async () => {
+      const token = await getAuthToken();
+      const resp = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/invite-team-member`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (!resp.ok) throw new Error("Failed to fetch pending invites");
+      const data = await resp.json();
+      return (data.pending || []) as PendingInvite[];
+    },
+  });
+
   const inviteMutation = useMutation({
     mutationFn: async () => {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData.session?.access_token;
-      if (!token) throw new Error("Not authenticated");
-
+      const token = await getAuthToken();
       const resp = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/invite-team-member`,
         {
           method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
           body: JSON.stringify({
             email: inviteEmail,
             role: inviteRole,
@@ -93,6 +115,53 @@ export default function TeamManagement() {
       toast.success(`Invite sent to ${inviteEmail}`);
       setInviteEmail("");
       queryClient.invalidateQueries({ queryKey: ["team-members"] });
+      queryClient.invalidateQueries({ queryKey: ["pending-invites"] });
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  const resendInviteMutation = useMutation({
+    mutationFn: async (email: string) => {
+      const token = await getAuthToken();
+      const resp = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/invite-team-member`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ email, redirectTo: `${window.location.origin}/accept-invite` }),
+        }
+      );
+      if (!resp.ok) {
+        const err = await resp.json();
+        throw new Error(err.error || "Failed to resend invite");
+      }
+    },
+    onSuccess: (_, email) => {
+      toast.success(`Invite resent to ${email}`);
+      queryClient.invalidateQueries({ queryKey: ["pending-invites"] });
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  const revokeInviteMutation = useMutation({
+    mutationFn: async (userId: string) => {
+      const token = await getAuthToken();
+      const resp = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/invite-team-member`,
+        {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ user_id: userId }),
+        }
+      );
+      if (!resp.ok) {
+        const err = await resp.json();
+        throw new Error(err.error || "Failed to revoke invite");
+      }
+    },
+    onSuccess: () => {
+      toast.success("Invite revoked");
+      queryClient.invalidateQueries({ queryKey: ["pending-invites"] });
     },
     onError: (err: Error) => toast.error(err.message),
   });
@@ -114,18 +183,12 @@ export default function TeamManagement() {
 
   const removeMutation = useMutation({
     mutationFn: async (userId: string) => {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData.session?.access_token;
-      if (!token) throw new Error("Not authenticated");
-
+      const token = await getAuthToken();
       const resp = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/invite-team-member`,
         {
           method: "DELETE",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
           body: JSON.stringify({ user_id: userId }),
         }
       );
@@ -137,6 +200,7 @@ export default function TeamManagement() {
     onSuccess: () => {
       toast.success("Member removed");
       queryClient.invalidateQueries({ queryKey: ["team-members"] });
+      queryClient.invalidateQueries({ queryKey: ["pending-invites"] });
     },
     onError: (err: Error) => toast.error(err.message),
   });
@@ -216,6 +280,61 @@ export default function TeamManagement() {
           </Button>
         </div>
       </div>
+
+
+      {/* Pending invitations */}
+      {(pendingInvites.length > 0 || pendingLoading) && (
+        <div className="vault-card divide-y divide-border">
+          <div className="p-4 flex items-center gap-2">
+            <Clock className="h-4 w-4 text-muted-foreground" />
+            <h2 className="text-sm font-semibold text-foreground">
+              Pending Invitations ({pendingInvites.length})
+            </h2>
+          </div>
+          {pendingLoading ? (
+            <div className="p-8 text-center text-muted-foreground text-sm">Loading...</div>
+          ) : (
+            pendingInvites.map((invite) => (
+              <div key={invite.id} className="flex items-center gap-3 p-4">
+                <div className="h-9 w-9 rounded-full bg-yellow-500/10 flex items-center justify-center shrink-0">
+                  <Mail className="h-4 w-4 text-yellow-600 dark:text-yellow-400" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-foreground truncate">{invite.email}</p>
+                  <p className="text-xs text-muted-foreground">
+                    Invited {new Date(invite.invited_at).toLocaleDateString()} · Awaiting account setup
+                  </p>
+                </div>
+                <Badge variant="outline" className="bg-yellow-500/10 text-yellow-700 dark:text-yellow-400 border-yellow-300/50 text-xs">
+                  Pending
+                </Badge>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  title="Resend invite"
+                  onClick={() => resendInviteMutation.mutate(invite.email)}
+                  disabled={resendInviteMutation.isPending}
+                >
+                  <RefreshCw className="h-4 w-4 text-muted-foreground" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="text-destructive hover:text-destructive"
+                  title="Revoke invite"
+                  onClick={() => {
+                    if (confirm(`Revoke invite for ${invite.email}?`)) {
+                      revokeInviteMutation.mutate(invite.id);
+                    }
+                  }}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
+            ))
+          )}
+        </div>
+      )}
 
       {/* Members list */}
       <div className="vault-card divide-y divide-border">
