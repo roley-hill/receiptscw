@@ -10,7 +10,7 @@ const corsHeaders = {
 const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY")!;
 const AI_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
 const MODEL = "google/gemini-3-flash-preview";
-const MAX_FILE_BYTES = 512 * 1024; // 512 KB cap for AI vision payloads
+const MAX_FILE_BYTES = 512 * 1024; // 512 KB cap
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -22,19 +22,13 @@ function cleanUnit(unit: string): string {
   return unit.replace(/^(unit|apt|apartment|suite|ste|#)\s*/i, "").replace(/^0+(?=\d)/, "").trim();
 }
 
-// ── Step 1: PDF Text Extraction (lightweight byte scan, no pdfjs) ────────────
-// Reads raw PDF bytes and pulls printable ASCII text streams out directly.
-// This avoids loading pdfjs-dist which causes memory limit errors in edge functions.
+// ── Step 1: Lightweight PDF text extraction (no pdfjs) ───────────────────────
 
 function extractTextFromPdfBytes(bytes: Uint8Array): string {
   try {
-    // Decode bytes as latin-1 so we can scan for PDF stream content
     const raw = new TextDecoder("latin1").decode(bytes.slice(0, Math.min(bytes.length, MAX_FILE_BYTES)));
-
-    // Extract content between BT (begin text) and ET (end text) PDF operators
     const chunks: string[] = [];
 
-    // Match parenthesized strings: (text content) inside streams
     const parenRe = /\(([^)\\]{1,300})\)/g;
     let m: RegExpExecArray | null;
     while ((m = parenRe.exec(raw)) !== null) {
@@ -42,7 +36,6 @@ function extractTextFromPdfBytes(bytes: Uint8Array): string {
       if (s.length > 2) chunks.push(s);
     }
 
-    // Also match hex strings: <48656c6c6f> → "Hello"
     const hexRe = /<([0-9a-fA-F]{4,})>/g;
     while ((m = hexRe.exec(raw)) !== null) {
       const hex = m[1];
@@ -64,14 +57,13 @@ function extractTextFromPdfBytes(bytes: Uint8Array): string {
 async function extractTextFromPdf(file: File): Promise<string> {
   try {
     const buf = await file.arrayBuffer();
-    const bytes = new Uint8Array(buf);
-    return extractTextFromPdfBytes(bytes);
+    return extractTextFromPdfBytes(new Uint8Array(buf));
   } catch {
     return "";
   }
 }
 
-// ── Step 2a: Address detection from text (regex, no AI) ───────────────────────
+// ── Address detection ─────────────────────────────────────────────────────────
 
 interface AddressResult {
   address: string;
@@ -109,121 +101,6 @@ function detectAddressFromText(text: string): AddressResult | null {
   };
 }
 
-// ── Step 2b: Document classification from text (keywords, no AI) ──────────────
-
-type DocCategory = "lease" | "rent-roll" | "notice" | "estoppel" | "other";
-
-interface ClassifyResult {
-  category: DocCategory;
-  unit: string;
-  tenant_last: string;
-  tenant_first: string;
-  effective_date: string; // YYYY-MM-DD
-  building_address: string;
-  confidence: number;
-  method: "ocr" | "ai";
-}
-
-const CATEGORY_KEYWORDS: Array<{ category: DocCategory; patterns: RegExp[] }> = [
-  {
-    category: "lease",
-    patterns: [
-      /\b(lease\s+agreement|rental\s+agreement|tenancy\s+agreement|residential\s+lease|lease\s+contract)\b/i,
-    ],
-  },
-  {
-    category: "rent-roll",
-    patterns: [
-      /\b(rent\s+roll|rent\s+schedule|current\s+rents|rental\s+schedule|monthly\s+rent\s+summary)\b/i,
-    ],
-  },
-  {
-    category: "notice",
-    patterns: [
-      /\b(notice\s+to\s+(quit|vacate|pay|comply)|3[-\s]day\s+notice|30[-\s]day\s+notice|60[-\s]day\s+notice|notice\s+of\s+(termination|eviction))\b/i,
-    ],
-  },
-  {
-    category: "estoppel",
-    patterns: [
-      /\b(estoppel\s+certificate|tenant\s+estoppel|estoppel\s+letter|tenant\s+certification)\b/i,
-    ],
-  },
-];
-
-const UNIT_PATTERN = /\b(?:unit|apt|apartment|suite|ste|#)\s*([A-Za-z0-9-]+)\b/i;
-const DATE_PATTERN = /\b(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})\b/;
-const TENANT_PATTERN =
-  /\b(?:tenant|lessee|resident)s?\s*[:\-–]?\s*([A-Z][a-z]+)\s+([A-Z][a-z]+)\b/;
-
-function classifyFromText(text: string, filename: string): ClassifyResult | null {
-  // Find category
-  let category: DocCategory | null = null;
-  for (const { category: cat, patterns } of CATEGORY_KEYWORDS) {
-    if (patterns.some((p) => p.test(text))) { category = cat; break; }
-  }
-
-  // Filename hints as fallback
-  if (!category) {
-    const fn = filename.toLowerCase();
-    if (fn.includes("lease") || fn.includes("rental")) category = "lease";
-    else if (fn.includes("rent roll") || fn.includes("rentroll")) category = "rent-roll";
-    else if (fn.includes("notice")) category = "notice";
-    else if (fn.includes("estoppel")) category = "estoppel";
-  }
-
-  if (!category) return null; // can't classify without AI
-
-  // Extract unit
-  const unitMatch = UNIT_PATTERN.exec(text);
-  const unit = unitMatch ? cleanUnit(unitMatch[1]) : "";
-
-  // Extract date (take first full date found)
-  const dateMatch = DATE_PATTERN.exec(text);
-  let effectiveDate = "";
-  if (dateMatch) {
-    const [, m, d, y] = dateMatch;
-    const year = y.length === 2 ? `20${y}` : y;
-    effectiveDate = `${year}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
-  }
-
-  // Extract tenant
-  const tenantMatch = TENANT_PATTERN.exec(text);
-  const tenantFirst = tenantMatch?.[1] ?? "";
-  const tenantLast = tenantMatch?.[2] ?? "";
-
-  // Extract address from text for building_slug
-  STREET_PATTERN.lastIndex = 0;
-  const addrMatch = STREET_PATTERN.exec(text);
-  const buildingAddress = addrMatch?.[0]?.trim() ?? "";
-
-  const confidence = [unit, effectiveDate, tenantLast].filter(Boolean).length >= 2 ? 0.8 : 0.6;
-
-  return {
-    category,
-    unit,
-    tenant_last: tenantLast,
-    tenant_first: tenantFirst,
-    effective_date: effectiveDate || new Date().toISOString().slice(0, 10),
-    building_address: buildingAddress,
-    confidence,
-    method: "ocr",
-  };
-}
-
-// ── Step 3: AI helpers (fallback only) ────────────────────────────────────────
-
-async function fileToBase64Limited(file: File): Promise<{ b64: string; mime: string }> {
-  const buf = await file.arrayBuffer();
-  const limited = new Uint8Array(buf, 0, Math.min(buf.byteLength, MAX_FILE_BYTES));
-  let binary = "";
-  const CHUNK = 8192;
-  for (let i = 0; i < limited.length; i += CHUNK) {
-    binary += String.fromCharCode(...limited.subarray(i, i + CHUNK));
-  }
-  return { b64: btoa(binary), mime: file.type || "application/pdf" };
-}
-
 async function callAI(messages: unknown[]): Promise<string> {
   const resp = await fetch(AI_URL, {
     method: "POST",
@@ -238,14 +115,9 @@ async function callAI(messages: unknown[]): Promise<string> {
 }
 
 async function detectAddressViaAI(ocrText: string): Promise<AddressResult> {
-  // IMPORTANT: Never send file bytes here — only text. Loading file data into
-  // base64 for a vision call during address detection blows the memory limit.
-  // If OCR extracted no text, return empty so the user fills in manually.
   if (!ocrText || ocrText.length < 20) {
     return { address: "", city: "", state: "", postal_code: "", confidence: 0, method: "ai" };
   }
-
-  const snippet = ocrText.slice(0, 3000);
   const raw = await callAI([{
     role: "user",
     content: `Extract the PROPERTY building address from this document text (NOT a tenant mailing address).
@@ -254,7 +126,7 @@ Return ONLY valid JSON, no markdown fences:
 If you cannot determine it, set confidence to 0 and all fields to empty strings.
 
 Document text:
-${snippet}`,
+${ocrText.slice(0, 3000)}`,
   }]);
   const jsonStr = raw.replace(/```json\n?/gi, "").replace(/```/g, "").trim();
   try {
@@ -264,12 +136,88 @@ ${snippet}`,
   }
 }
 
+async function detectAddress(file: File): Promise<AddressResult> {
+  const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+  const ocrText = isPdf ? await extractTextFromPdf(file) : "";
+
+  if (ocrText.length > 80) {
+    const ocr = detectAddressFromText(ocrText);
+    if (ocr && ocr.confidence >= 0.6 && ocr.address) return ocr;
+  }
+
+  return detectAddressViaAI(ocrText);
+}
+
+// ── Document classification ───────────────────────────────────────────────────
+
+type DocCategory = "lease" | "rent-roll" | "notice" | "estoppel" | "other";
+
+interface ClassifyResult {
+  category: DocCategory;
+  unit: string;
+  tenant_last: string;
+  tenant_first: string;
+  effective_date: string;
+  building_address: string;
+  confidence: number;
+  method: "ocr" | "ai";
+}
+
+const CATEGORY_KEYWORDS: Array<{ category: DocCategory; patterns: RegExp[] }> = [
+  { category: "lease", patterns: [/\b(lease\s+agreement|rental\s+agreement|tenancy\s+agreement|residential\s+lease|lease\s+contract)\b/i] },
+  { category: "rent-roll", patterns: [/\b(rent\s+roll|rent\s+schedule|current\s+rents|rental\s+schedule|monthly\s+rent\s+summary)\b/i] },
+  { category: "notice", patterns: [/\b(notice\s+to\s+(quit|vacate|pay|comply)|3[-\s]day\s+notice|30[-\s]day\s+notice|60[-\s]day\s+notice|notice\s+of\s+(termination|eviction))\b/i] },
+  { category: "estoppel", patterns: [/\b(estoppel\s+certificate|tenant\s+estoppel|estoppel\s+letter|tenant\s+certification)\b/i] },
+];
+
+const UNIT_PATTERN = /\b(?:unit|apt|apartment|suite|ste|#)\s*([A-Za-z0-9-]+)\b/i;
+const DATE_PATTERN = /\b(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})\b/;
+const TENANT_PATTERN = /\b(?:tenant|lessee|resident)s?\s*[:\-–]?\s*([A-Z][a-z]+)\s+([A-Z][a-z]+)\b/;
+
+function classifyFromText(text: string, filename: string): ClassifyResult | null {
+  let category: DocCategory | null = null;
+  for (const { category: cat, patterns } of CATEGORY_KEYWORDS) {
+    if (patterns.some((p) => p.test(text))) { category = cat; break; }
+  }
+  if (!category) {
+    const fn = filename.toLowerCase();
+    if (fn.includes("lease") || fn.includes("rental")) category = "lease";
+    else if (fn.includes("rent roll") || fn.includes("rentroll")) category = "rent-roll";
+    else if (fn.includes("notice")) category = "notice";
+    else if (fn.includes("estoppel")) category = "estoppel";
+  }
+  if (!category) return null;
+
+  const unitMatch = UNIT_PATTERN.exec(text);
+  const unit = unitMatch ? cleanUnit(unitMatch[1]) : "";
+  const dateMatch = DATE_PATTERN.exec(text);
+  let effectiveDate = "";
+  if (dateMatch) {
+    const [, m, d, y] = dateMatch;
+    const year = y.length === 2 ? `20${y}` : y;
+    effectiveDate = `${year}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+  }
+  const tenantMatch = TENANT_PATTERN.exec(text);
+  STREET_PATTERN.lastIndex = 0;
+  const addrMatch = STREET_PATTERN.exec(text);
+
+  return {
+    category,
+    unit,
+    tenant_last: tenantMatch?.[2] ?? "",
+    tenant_first: tenantMatch?.[1] ?? "",
+    effective_date: effectiveDate || new Date().toISOString().slice(0, 10),
+    building_address: addrMatch?.[0]?.trim() ?? "",
+    confidence: [unit, effectiveDate, tenantMatch?.[2]].filter(Boolean).length >= 2 ? 0.8 : 0.6,
+    method: "ocr",
+  };
+}
+
 async function classifyViaAI(file: File, propertyAddress: string, ocrText: string): Promise<ClassifyResult> {
   const textSnippet = ocrText ? `\n\nExtracted text (first 2000 chars):\n${ocrText.slice(0, 2000)}` : "";
-  const parts: unknown[] = [
-    {
-      type: "text",
-      text: `Real-estate document analyst. Classify this document and generate a standardized filename.
+  const parts: unknown[] = [{
+    type: "text",
+    text: `Real-estate document analyst. Classify this document and generate a standardized filename.
 Categories: lease | rent-roll | notice | estoppel | other
 Naming convention:
   Lease:     LEASE_{unit}_{LastName-FirstName}_{YYYY-MM-DD}.pdf
@@ -284,14 +232,17 @@ Original filename: ${file.name}${textSnippet}
 
 Return ONLY valid JSON, no markdown fences:
 { "category": "...", "unit": "...", "tenant_last": "...", "tenant_first": "...", "effective_date": "YYYY-MM-DD", "building_address": "...", "confidence": 0.0-1.0 }`,
-    },
-  ];
+  }];
 
-  // Only send image bytes if OCR got nothing (scanned PDF)
   if (!ocrText) {
     try {
-      const { b64, mime } = await fileToBase64Limited(file);
-      parts.push({ type: "image_url", image_url: { url: `data:${mime};base64,${b64}` } });
+      const buf = await file.arrayBuffer();
+      const limited = new Uint8Array(buf, 0, Math.min(buf.byteLength, MAX_FILE_BYTES));
+      let binary = "";
+      const CHUNK = 8192;
+      for (let i = 0; i < limited.length; i += CHUNK) binary += String.fromCharCode(...limited.subarray(i, i + CHUNK));
+      const b64 = btoa(binary);
+      parts.push({ type: "image_url", image_url: { url: `data:${file.type || "application/pdf"};base64,${b64}` } });
     } catch (_) { /* skip */ }
   }
 
@@ -314,8 +265,6 @@ Return ONLY valid JSON, no markdown fences:
   }
 }
 
-// ── Step 4: Build standardized filename from classification result ─────────────
-
 function buildFilename(info: ClassifyResult, original: string, dealSlug: string): { renamed_to: string; building_slug: string } {
   const ext = original.includes(".") ? `.${original.split(".").pop()}` : ".pdf";
   const normExt = ext.toLowerCase() === ".pdf" ? ".pdf" : ext;
@@ -324,20 +273,11 @@ function buildFilename(info: ClassifyResult, original: string, dealSlug: string)
 
   let renamed_to: string;
   switch (info.category) {
-    case "lease":
-      renamed_to = `LEASE_${unit}_${info.tenant_last || "Unknown"}-${info.tenant_first || "Unknown"}_${date}${normExt}`;
-      break;
-    case "rent-roll":
-      renamed_to = `RENTROLL_${slugify(info.building_address || dealSlug)}_${date}${normExt}`;
-      break;
-    case "notice":
-      renamed_to = `NOTICE_${unit}_${info.tenant_last || "Unknown"}-${info.tenant_first || "Unknown"}_${date}${normExt}`;
-      break;
-    case "estoppel":
-      renamed_to = `ESTOPPEL_${unit}_${info.tenant_last || "Unknown"}-${info.tenant_first || "Unknown"}_${date}${normExt}`;
-      break;
-    default:
-      renamed_to = `DOC_${original.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+    case "lease":      renamed_to = `LEASE_${unit}_${info.tenant_last || "Unknown"}-${info.tenant_first || "Unknown"}_${date}${normExt}`; break;
+    case "rent-roll":  renamed_to = `RENTROLL_${slugify(info.building_address || dealSlug)}_${date}${normExt}`; break;
+    case "notice":     renamed_to = `NOTICE_${unit}_${info.tenant_last || "Unknown"}-${info.tenant_first || "Unknown"}_${date}${normExt}`; break;
+    case "estoppel":   renamed_to = `ESTOPPEL_${unit}_${info.tenant_last || "Unknown"}-${info.tenant_first || "Unknown"}_${date}${normExt}`; break;
+    default:           renamed_to = `DOC_${original.replace(/[^a-zA-Z0-9._-]/g, "_")}`; break;
   }
 
   const building_slug = info.building_address
@@ -347,74 +287,7 @@ function buildFilename(info: ClassifyResult, original: string, dealSlug: string)
   return { renamed_to, building_slug };
 }
 
-// ── Orchestrator: OCR → regex → AI fallback ───────────────────────────────────
-
-async function processFile(
-  file: File,
-  dealSlug: string,
-  propertyAddress: string,
-): Promise<{
-  original_name: string;
-  renamed_to: string;
-  category: DocCategory;
-  building_slug: string;
-  unit: string;
-  confidence: number;
-  method: "ocr" | "ai" | "ocr+ai";
-}> {
-  // 1. Extract text via OCR (no AI)
-  const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
-  const ocrText = isPdf ? await extractTextFromPdf(file) : "";
-  const hasText = ocrText.length > 80;
-
-  // 2. Try OCR-based classification
-  let classResult: ClassifyResult | null = hasText ? classifyFromText(ocrText, file.name) : null;
-
-  // 3. Fall back to AI if OCR classification failed
-  let method: "ocr" | "ai" | "ocr+ai" = "ocr";
-  if (!classResult) {
-    classResult = await classifyViaAI(file, propertyAddress, ocrText);
-    method = hasText ? "ocr+ai" : "ai"; // ocr+ai means text was extracted but AI did the classification
-  }
-
-  const { renamed_to, building_slug } = buildFilename(classResult, file.name, dealSlug);
-
-  return {
-    original_name: file.name,
-    renamed_to,
-    category: classResult.category,
-    building_slug,
-    unit: classResult.unit,
-    confidence: classResult.confidence,
-    method,
-  };
-}
-
-// ── Address detection orchestrator: OCR → regex → AI fallback ────────────────
-
-async function detectAddress(file: File): Promise<AddressResult> {
-  // Only attempt text extraction for PDFs; skip entirely for ZIPs and other formats
-  const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
-  const ocrText = isPdf ? await extractTextFromPdf(file) : "";
-
-  if (ocrText.length > 80) {
-    const ocr = detectAddressFromText(ocrText);
-    if (ocr && ocr.confidence >= 0.6 && ocr.address) {
-      console.log(`Address detected via OCR: ${ocr.address}`);
-      return ocr;
-    }
-  }
-
-  // 2. Fall back to AI text-only (never loads file bytes — memory safe)
-  console.log("Address not found via OCR, falling back to AI text analysis");
-  return detectAddressViaAI(ocrText);
-}
-
 // ── Serve ─────────────────────────────────────────────────────────────────────
-
-const CATEGORY_FOLDER: Record<string, string> = {
-  lease: "lease", "rent-roll": "rent-roll", notice: "notice", estoppel: "estoppel", other: "other",
-};
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -428,14 +301,15 @@ serve(async (req) => {
     const formData = await req.formData();
     const action = formData.get("action") as string;
 
-    // ── Phase 1: detect address (OCR first, AI fallback) ─────────────────────
+    // ── Action: detect_address ─────────────────────────────────────────────────
+    // Send one file; returns AddressResult
     if (action === "detect_address") {
       let firstFile: File | null = null;
       for (const [k, v] of formData.entries()) {
         if (k === "files" && v instanceof File) { firstFile = v; break; }
       }
       if (!firstFile) {
-        return new Response(JSON.stringify({ error: "No files provided" }), {
+        return new Response(JSON.stringify({ error: "No file provided" }), {
           status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
@@ -445,14 +319,16 @@ serve(async (req) => {
       });
     }
 
-    // ── Phase 2: full processing (OCR first, AI fallback, one file at a time) ─
-    if (action === "process") {
+    // ── Action: create_deal ────────────────────────────────────────────────────
+    // Creates the deal + package records, returns { deal_id, package_id }
+    if (action === "create_deal") {
       const dealName = formData.get("deal_name") as string;
       const propertyAddress = formData.get("property_address") as string;
       const addressCity = (formData.get("address_city") as string) || "";
       const addressState = (formData.get("address_state") as string) || "";
       const addressPostalCode = (formData.get("address_postal_code") as string) || "";
       const userIdRaw = formData.get("user_id") as string | null;
+      const totalFiles = parseInt(formData.get("total_files") as string || "0", 10);
 
       if (!dealName || !propertyAddress) {
         return new Response(JSON.stringify({ error: "deal_name and property_address required" }), {
@@ -460,18 +336,7 @@ serve(async (req) => {
         });
       }
 
-      const files: File[] = [];
-      for (const [k, v] of formData.entries()) {
-        if (k === "files" && v instanceof File) files.push(v);
-      }
-      if (!files.length) {
-        return new Response(JSON.stringify({ error: "No files to process" }), {
-          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-
       const dealSlug = slugify(dealName);
-
       const { data: deal, error: dealErr } = await supabase
         .from("dd_deals")
         .insert({ deal_name: dealName, property_address: propertyAddress, address_city: addressCity, address_state: addressState, address_postal_code: addressPostalCode, created_by: userIdRaw ?? null })
@@ -480,44 +345,91 @@ serve(async (req) => {
 
       const pkgId = crypto.randomUUID();
       const storagePrefix = `${dealSlug}/${pkgId}`;
-
       await supabase.from("dd_packages").insert({
         id: pkgId, deal_id: deal.id, status: "processing",
-        total_files: files.length, processed_files: 0,
+        total_files: totalFiles, processed_files: 0,
         storage_prefix: storagePrefix, created_by: userIdRaw ?? null,
       });
 
-      const sortedFiles = [];
+      return new Response(JSON.stringify({ deal_id: deal.id, package_id: pkgId, deal_slug: dealSlug, storage_prefix: storagePrefix }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
-      // Process one file at a time to stay within memory budget
-      for (const file of files) {
-        const info = await processFile(file, dealSlug, propertyAddress);
-        const folder = CATEGORY_FOLDER[info.category] ?? "other";
-        const unitPath = info.unit ? `units/${info.unit}/` : "";
-        const storagePath = `${storagePrefix}/buildings/${info.building_slug}/${unitPath}${folder}/${info.renamed_to}`;
+    // ── Action: process_file ───────────────────────────────────────────────────
+    // Send ONE file + deal context; OCR → classify → upload → insert db row
+    if (action === "process_file") {
+      const dealId = formData.get("deal_id") as string;
+      const packageId = formData.get("package_id") as string;
+      const dealSlug = formData.get("deal_slug") as string;
+      const storagePrefix = formData.get("storage_prefix") as string;
+      const propertyAddress = formData.get("property_address") as string;
 
-        const { error: uploadErr } = await supabase.storage
-          .from("dd-documents").upload(storagePath, file, { upsert: true });
-        if (uploadErr) console.error(`Upload failed for ${file.name}:`, uploadErr.message);
-
-        const { data: sfRow } = await supabase.from("dd_sorted_files").insert({
-          package_id: pkgId, deal_id: deal.id,
-          original_name: info.original_name, renamed_to: info.renamed_to,
-          category: info.category, building_slug: info.building_slug,
-          unit: info.unit, storage_path: storagePath, ai_confidence: info.confidence,
-        }).select().single();
-
-        sortedFiles.push({ ...info, storage_path: storagePath, id: sfRow?.id });
+      let file: File | null = null;
+      for (const [k, v] of formData.entries()) {
+        if (k === "file" && v instanceof File) { file = v; break; }
+      }
+      if (!file || !dealId || !packageId) {
+        return new Response(JSON.stringify({ error: "file, deal_id and package_id required" }), {
+          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
       }
 
-      await supabase.from("dd_packages")
-        .update({ status: "done", processed_files: files.length })
-        .eq("id", pkgId);
+      // 1. OCR
+      const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+      const ocrText = isPdf ? await extractTextFromPdf(file) : "";
+      const hasText = ocrText.length > 80;
 
-      return new Response(
-        JSON.stringify({ deal_id: deal.id, package_id: pkgId, deal_name: dealName, property_address: propertyAddress, total_files: files.length, files: sortedFiles }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
+      // 2. Classify (OCR first, AI fallback)
+      let classResult: ClassifyResult | null = hasText ? classifyFromText(ocrText, file.name) : null;
+      let method: "ocr" | "ai" | "ocr+ai" = "ocr";
+      if (!classResult) {
+        classResult = await classifyViaAI(file, propertyAddress, ocrText);
+        method = hasText ? "ocr+ai" : "ai";
+      }
+
+      const { renamed_to, building_slug } = buildFilename(classResult, file.name, dealSlug);
+      const folder = classResult.category;
+      const unitPath = classResult.unit ? `units/${classResult.unit}/` : "";
+      const storagePath = `${storagePrefix}/buildings/${building_slug}/${unitPath}${folder}/${renamed_to}`;
+
+      // 3. Upload to storage
+      const { error: uploadErr } = await supabase.storage
+        .from("dd-documents").upload(storagePath, file, { upsert: true });
+      if (uploadErr) console.error(`Upload failed for ${file.name}:`, uploadErr.message);
+
+      // 4. Insert db row
+      const { data: sfRow } = await supabase.from("dd_sorted_files").insert({
+        package_id: packageId, deal_id: dealId,
+        original_name: file.name, renamed_to,
+        category: classResult.category, building_slug,
+        unit: classResult.unit, storage_path: storagePath,
+        ai_confidence: classResult.confidence,
+      }).select().single();
+
+      return new Response(JSON.stringify({
+        id: sfRow?.id,
+        original_name: file.name,
+        renamed_to,
+        category: classResult.category,
+        building_slug,
+        unit: classResult.unit,
+        confidence: classResult.confidence,
+        method,
+        storage_path: storagePath,
+      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    // ── Action: finalize_package ───────────────────────────────────────────────
+    if (action === "finalize_package") {
+      const packageId = formData.get("package_id") as string;
+      const processedFiles = parseInt(formData.get("processed_files") as string || "0", 10);
+      await supabase.from("dd_packages")
+        .update({ status: "done", processed_files: processedFiles })
+        .eq("id", packageId);
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     return new Response(JSON.stringify({ error: "Unknown action" }), {
