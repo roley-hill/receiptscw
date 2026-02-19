@@ -895,19 +895,53 @@ ${knownTenantsList}` : ""}`;
         // 1. Try matching by tenant name + property if present
         if (item.tenant) {
           const extracted = item.tenant.toLowerCase().trim();
-          // Exact match first — also consider property to disambiguate common names
-          match = tenantLookup.find(t => t.full_name.toLowerCase() === extracted);
-          // If multiple exact name matches, prefer one at same property
-          if (match && item.property) {
-            const betterMatch = tenantLookup.find(t =>
-              t.full_name.toLowerCase() === extracted &&
-              propertiesMatch(item.property, t.property_address || "")
-            );
-            if (betterMatch) match = betterMatch;
+
+          // --- Exact name match: collect all, then disambiguate by unit + property ---
+          const exactMatches = tenantLookup.filter(t => t.full_name.toLowerCase() === extracted);
+          if (exactMatches.length === 1) {
+            match = exactMatches[0];
+          } else if (exactMatches.length > 1) {
+            // Multiple tenants share the same name — pick by unit + property
+            if (item.unit && item.property) {
+              match = exactMatches.find(t =>
+                t.unit_number && unitsMatch(item.unit, t.unit_number) &&
+                propertiesMatch(item.property, t.property_address || "")
+              );
+            }
+            if (!match && item.unit) {
+              const byUnit = exactMatches.filter(t => t.unit_number && unitsMatch(item.unit, t.unit_number));
+              if (byUnit.length === 1) match = byUnit[0];
+            }
+            if (!match && item.property) {
+              const byProp = exactMatches.filter(t => propertiesMatch(item.property, t.property_address || ""));
+              if (byProp.length === 1) match = byProp[0];
+            }
+            if (!match) console.log(`Ambiguous exact name match for "${item.tenant}" (${exactMatches.length} candidates) — deferring to suggestion banner`);
           }
+
+          // --- Fuzzy name match: collect all, then disambiguate by unit + property ---
           if (!match) {
-            // Fuzzy match: handles middle initials, multi-word surnames, abbreviations, typos
-            match = tenantLookup.find(t => namesMatchFuzzy(item.tenant, t.full_name));
+            const fuzzyMatches = tenantLookup.filter(t => namesMatchFuzzy(item.tenant, t.full_name));
+            if (fuzzyMatches.length === 1) {
+              match = fuzzyMatches[0];
+            } else if (fuzzyMatches.length > 1) {
+              // Multiple fuzzy candidates — must disambiguate; never auto-pick the wrong one
+              if (item.unit && item.property) {
+                match = fuzzyMatches.find(t =>
+                  t.unit_number && unitsMatch(item.unit, t.unit_number) &&
+                  propertiesMatch(item.property, t.property_address || "")
+                );
+              }
+              if (!match && item.unit) {
+                const byUnit = fuzzyMatches.filter(t => t.unit_number && unitsMatch(item.unit, t.unit_number));
+                if (byUnit.length === 1) match = byUnit[0];
+              }
+              if (!match && item.property) {
+                const byProp = fuzzyMatches.filter(t => propertiesMatch(item.property, t.property_address || ""));
+                if (byProp.length === 1) match = byProp[0];
+              }
+              if (!match) console.log(`Ambiguous fuzzy match for "${item.tenant}" (${fuzzyMatches.length} candidates: ${fuzzyMatches.map(f => f.full_name).join(", ")}) — deferring to suggestion banner`);
+            }
           }
         }
 
