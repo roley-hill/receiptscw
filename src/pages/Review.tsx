@@ -183,13 +183,24 @@ export default function ReviewPage() {
 
   // Detail view for a single receipt
   const activeReceipt = activeReceiptId ? reviewable.find((r) => r.id === activeReceiptId) : null;
+  const activeIndex = activeReceipt ? filteredReviewable.findIndex((r) => r.id === activeReceiptId) : -1;
+
+  const handleNavigate = (direction: "prev" | "next") => {
+    const newIndex = direction === "prev" ? activeIndex - 1 : activeIndex + 1;
+    if (newIndex >= 0 && newIndex < filteredReviewable.length) {
+      setActiveReceiptId(filteredReviewable[newIndex].id);
+    }
+  };
+
   if (activeReceipt) {
     return (
       <ReviewDetail
         receipt={activeReceipt}
-        reviewable={reviewable}
+        reviewable={filteredReviewable}
+        currentIndex={activeIndex}
         isAdmin={isAdmin}
         onBack={() => setActiveReceiptId(null)}
+        onNavigate={handleNavigate}
         queryClient={queryClient}
       />
     );
@@ -378,14 +389,18 @@ export default function ReviewPage() {
 function ReviewDetail({
   receipt,
   reviewable,
+  currentIndex,
   isAdmin,
   onBack,
+  onNavigate,
   queryClient,
 }: {
   receipt: any;
   reviewable: any[];
+  currentIndex: number;
   isAdmin: boolean;
   onBack: () => void;
+  onNavigate: (direction: "prev" | "next") => void;
   queryClient: any;
 }) {
   const [edits, setEdits] = useState<Record<string, string>>({});
@@ -415,7 +430,14 @@ function ReviewDetail({
       toast.success("Receipt finalized!");
       setEdits({});
       queryClient.invalidateQueries({ queryKey: ["receipts"] });
-      onBack();
+      // Auto-advance to next record, or go back if this was the last one
+      if (currentIndex < reviewable.length - 1) {
+        onNavigate("next");
+      } else if (currentIndex > 0) {
+        onNavigate("prev");
+      } else {
+        onBack();
+      }
     } catch (err: any) {
       toast.error(err.message);
     }
@@ -470,6 +492,15 @@ function ReviewDetail({
             <h1 className="text-2xl font-bold text-foreground">Review Receipt</h1>
             <p className="text-sm text-muted-foreground mt-1">{receipt.receipt_id}</p>
           </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-muted-foreground">{currentIndex + 1} of {reviewable.length}</span>
+          <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => onNavigate("prev")} disabled={currentIndex <= 0}>
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => onNavigate("next")} disabled={currentIndex >= reviewable.length - 1}>
+            <ChevronRight className="h-4 w-4" />
+          </Button>
         </div>
       </div>
 
