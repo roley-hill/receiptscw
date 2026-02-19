@@ -347,6 +347,7 @@ export default function Exceptions() {
                         property={r.property}
                         unit={r.unit}
                         extractedTenant={r.tenant}
+                        tenantVerified={!!(r.confidence_scores as any)?.tenantVerified}
                         onAccept={async ({ name, property, unit }) => {
                           try {
                             const updatedScores = { ...(r.confidence_scores as any || {}), tenant: 0.95, property: 0.95, unit: 0.95, tenantVerified: true, propertyVerified: true };

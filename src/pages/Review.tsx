@@ -529,6 +529,7 @@ function ReviewDetail({
               property={getVal("property", receipt.property)}
               unit={getVal("unit", receipt.unit)}
               extractedTenant={getVal("tenant", receipt.tenant)}
+              tenantVerified={!!conf.tenantVerified}
               onAccept={async ({ name, property, unit }) => {
                 try {
                   const updatedScores = { ...(receipt.confidence_scores as any || {}), tenant: 0.95, property: 0.95, unit: 0.95, tenantVerified: true, propertyVerified: true };
