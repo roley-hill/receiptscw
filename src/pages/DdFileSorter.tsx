@@ -404,7 +404,7 @@ export default function DdFileSorter() {
           <h1 className="text-2xl font-bold text-foreground">Due Diligence — File Sorter</h1>
         </div>
         <p className="text-sm text-muted-foreground">
-          Upload a DD folder or ZIP. AI detects the property address, renames every file using a standardized convention, and sorts them into category subfolders.
+          Upload a DD folder or ZIP. Scans the property address using OCR (no AI for text-based PDFs), renames every file using a standardized convention, and sorts them into category subfolders.
         </p>
       </div>
 
@@ -468,7 +468,7 @@ export default function DdFileSorter() {
           <div className="space-y-2">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" />
-              {phase === "detecting" ? "AI scanning documents for property address…" : "AI renaming and classifying files…"}
+              {phase === "detecting" ? "Scanning documents for property address…" : "Renaming and classifying files…"}
             </div>
             <Progress value={progress} className="h-1.5" />
           </div>
@@ -497,7 +497,7 @@ export default function DdFileSorter() {
               </div>
               <div className="flex-1">
                 <p className="text-xs font-semibold text-primary uppercase tracking-wider mb-1">
-                  AI detected address
+                  Detected address
                   {detectedAddress.confidence >= 0.7 && (
                     <span className="ml-2 text-primary/60">({Math.round(detectedAddress.confidence * 100)}% confident)</span>
                   )}
