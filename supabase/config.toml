@@ -3,6 +3,9 @@ project_id = "gfngyqtbcynmjvbaavvv"
 [functions.dd-extract]
 verify_jwt = false
 
+[functions.dd-sort]
+verify_jwt = false
+
 [functions.sync-tenants]
 verify_jwt = false
 
