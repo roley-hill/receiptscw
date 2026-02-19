@@ -26,10 +26,10 @@ function firstLast(name: string): string[] {
   return [parts[0], parts[parts.length - 1]];
 }
 
-/** Check if unit numbers match (handles "14646-11" vs "11", "#18" vs "18") */
+/** Check if unit numbers match (handles "14646-11" vs "11", "#18" vs "18", "Unit 19" vs "9034-19") */
 function unitsMatch(receiptUnit: string, dbUnit: string): boolean {
-  const r = receiptUnit.replace(/^#/, "").trim();
-  const d = dbUnit.replace(/^#/, "").trim();
+  const r = receiptUnit.replace(/^(unit|apt|ste|suite|#)\s*/i, "").trim();
+  const d = dbUnit.replace(/^(unit|apt|ste|suite|#)\s*/i, "").trim();
   if (r === d) return true;
   // DB might be "14646-11", receipt is "11"
   if (d.endsWith("-" + r) || d.endsWith(" " + r)) return true;
