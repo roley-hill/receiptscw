@@ -3,7 +3,7 @@ import { Loader2, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, RotateCcw } from "
 import { Button } from "@/components/ui/button";
 import * as pdfjsLib from "pdfjs-dist";
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.9.155/pdf.worker.min.mjs`;
+pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
 
 interface PdfViewerProps {
   url: string;
