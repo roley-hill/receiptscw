@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchBatches, fetchReceipts, reverseBatch, moveReceiptsToNewBatch } from "@/lib/api";
 import { downloadBatchPDF, generateBatchXLSX, downloadBatchZIP, downloadGroupedOwnerPDF } from "@/lib/batchReports";
 import { supabase } from "@/integrations/supabase/client";
-import { Building2, ChevronDown, ChevronRight, FileText as FileTextIcon } from "lucide-react";
+import { Building2, ChevronDown, ChevronRight, FileText as FileTextIcon, Layers } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/hooks/use-toast";
 import { useState, useMemo, lazy, Suspense } from "react";
@@ -34,6 +34,8 @@ export default function DepositBatches() {
   const [previewBatchId, setPreviewBatchId] = useState<string | null>(null);
   const [movingBatchId, setMovingBatchId] = useState<string | null>(null);
   const [collapsedEntities, setCollapsedEntities] = useState<Set<string>>(new Set());
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
+  const [reversedCollapsed, setReversedCollapsed] = useState(true);
 
   const reverseMutation = useMutation({
     mutationFn: (batchId: string) => reverseBatch(batchId),
@@ -73,6 +75,14 @@ export default function DepositBatches() {
     setCollapsedEntities(prev => {
       const next = new Set(prev);
       next.has(entityId) ? next.delete(entityId) : next.add(entityId);
+      return next;
+    });
+  };
+
+  const toggleSection = (key: string) => {
+    setCollapsedSections(prev => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
       return next;
     });
   };
@@ -226,13 +236,63 @@ export default function DepositBatches() {
                   </div>
                 </motion.div>
 
-                {/* Child/standalone batches */}
                 {!isCollapsed && (
-                  <div className="space-y-3 pl-6 border-l-2 border-accent/20 ml-4">
-                    {group.children.length > 0
-                      ? group.children.sort((a, b) => a.property.localeCompare(b.property)).map((batch, i) => renderBatchCard(batch, i))
-                      : group.standalone.sort((a, b) => a.property.localeCompare(b.property)).map((batch, i) => renderBatchCard(batch, i))
-                    }
+                  <div className="space-y-4 pl-6 border-l-2 border-accent/20 ml-4">
+                    {/* Grouped Deposit Batches (parent with children) */}
+                    {group.children.length > 0 && (() => {
+                      const sectionKey = `${entityId}__grouped`;
+                      const isSectionCollapsed = collapsedSections.has(sectionKey);
+                      const groupedReceipts = group.children.flatMap(b => allReceipts.filter(r => r.batch_id === b.id));
+                      const groupedTotal = groupedReceipts.reduce((s, r) => s + Number(r.amount), 0);
+                      return (
+                        <div className="space-y-3">
+                          <button
+                            onClick={() => toggleSection(sectionKey)}
+                            className="flex items-center gap-2 text-sm font-semibold text-foreground hover:opacity-80 transition-opacity cursor-pointer"
+                          >
+                            {isSectionCollapsed ? <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />}
+                            <Layers className="h-3.5 w-3.5 text-accent" />
+                            <span>Grouped Deposit Batches</span>
+                            <span className="text-xs vault-mono text-muted-foreground font-normal ml-1">
+                              {group.children.length} properties · ${fmt(groupedTotal)}
+                            </span>
+                          </button>
+                          {!isSectionCollapsed && (
+                            <div className="space-y-3">
+                              {group.children.sort((a, b) => a.property.localeCompare(b.property)).map((batch, i) => renderBatchCard(batch, i))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+
+                    {/* Single Property Deposit Batches */}
+                    {group.standalone.length > 0 && (() => {
+                      const sectionKey = `${entityId}__single`;
+                      const isSectionCollapsed = collapsedSections.has(sectionKey);
+                      const singleReceipts = group.standalone.flatMap(b => allReceipts.filter(r => r.batch_id === b.id));
+                      const singleTotal = singleReceipts.reduce((s, r) => s + Number(r.amount), 0);
+                      return (
+                        <div className="space-y-3">
+                          <button
+                            onClick={() => toggleSection(sectionKey)}
+                            className="flex items-center gap-2 text-sm font-semibold text-foreground hover:opacity-80 transition-opacity cursor-pointer"
+                          >
+                            {isSectionCollapsed ? <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />}
+                            <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
+                            <span>Single Property Deposit Batches</span>
+                            <span className="text-xs vault-mono text-muted-foreground font-normal ml-1">
+                              {group.standalone.length} batches · ${fmt(singleTotal)}
+                            </span>
+                          </button>
+                          {!isSectionCollapsed && (
+                            <div className="space-y-3">
+                              {group.standalone.sort((a, b) => a.property.localeCompare(b.property)).map((batch, i) => renderBatchCard(batch, i))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
               </div>
@@ -257,8 +317,15 @@ export default function DepositBatches() {
           {/* Reversed batches */}
           {reversedBatches.length > 0 && (
             <div className="space-y-4 mt-10">
-              <h2 className="text-lg font-semibold text-muted-foreground">Reversed Batches</h2>
-              {reversedBatches.map((batch, i) => renderBatchCard(batch, i))}
+              <button
+                onClick={() => setReversedCollapsed(prev => !prev)}
+                className="flex items-center gap-2 hover:opacity-80 transition-opacity cursor-pointer"
+              >
+                {reversedCollapsed ? <ChevronRight className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+                <h2 className="text-lg font-semibold text-muted-foreground">Reversed Batches</h2>
+                <span className="text-xs vault-mono text-muted-foreground">({reversedBatches.length})</span>
+              </button>
+              {!reversedCollapsed && reversedBatches.map((batch, i) => renderBatchCard(batch, i))}
             </div>
           )}
         </div>
