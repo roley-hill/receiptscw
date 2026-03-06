@@ -721,7 +721,7 @@ export default function EntryView() {
                       </div>
                     </td>
                     <td className="px-3 py-2.5 text-right text-sm vault-mono font-semibold text-foreground">${fmt(tenantTotal)}</td>
-                    <td colSpan={batchMode ? 10 : 9}></td>
+                    <td colSpan={(batchMode || hasSelections) ? 10 : 9}></td>
                   </tr>
                 );
 
