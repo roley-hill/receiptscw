@@ -163,3 +163,69 @@ export async function getSignedUrlForFile(filePath: string): Promise<string | nu
     return null;
   }
 }
+
+export async function moveReceiptsToNewBatch(
+  sourceBatchId: string,
+  receiptIds: string[],
+  property: string,
+  userId: string
+) {
+  // Get the receipts being moved
+  const { data: movingReceipts, error: fetchErr } = await supabase
+    .from("receipts")
+    .select("id, amount")
+    .in("id", receiptIds);
+  if (fetchErr) throw fetchErr;
+
+  const movedTotal = movingReceipts?.reduce((s, r) => s + Number(r.amount), 0) || 0;
+  const movedCount = receiptIds.length;
+
+  // Create the new batch
+  const today = new Date();
+  const depositPeriod = `${today.getMonth() + 1}/${today.getDate()}/${String(today.getFullYear()).slice(-2)}`;
+
+  const { data: newBatch, error: insertErr } = await supabase
+    .from("deposit_batches")
+    .insert({
+      property,
+      deposit_period: depositPeriod,
+      total_amount: movedTotal,
+      receipt_count: movedCount,
+      created_by: userId,
+      status: "draft" as any,
+    })
+    .select()
+    .single();
+  if (insertErr) throw insertErr;
+
+  // Move receipts to new batch
+  const { error: moveErr } = await supabase
+    .from("receipts")
+    .update({ batch_id: newBatch.id })
+    .in("id", receiptIds);
+  if (moveErr) throw moveErr;
+
+  // Recalculate source batch
+  const { data: remainingReceipts } = await supabase
+    .from("receipts")
+    .select("id, amount")
+    .eq("batch_id", sourceBatchId);
+
+  const remainingTotal = remainingReceipts?.reduce((s, r) => s + Number(r.amount), 0) || 0;
+  const remainingCount = remainingReceipts?.length || 0;
+
+  if (remainingCount === 0) {
+    // Mark empty batch as reversed
+    await supabase
+      .from("deposit_batches")
+      .update({ total_amount: 0, receipt_count: 0, status: "reversed" as any })
+      .eq("id", sourceBatchId);
+  } else {
+    await supabase
+      .from("deposit_batches")
+      .update({ total_amount: remainingTotal, receipt_count: remainingCount })
+      .eq("id", sourceBatchId);
+  }
+
+  return newBatch;
+}
