@@ -336,7 +336,8 @@ export default function DepositBatches() {
     const entry = entityGroups.find(([id]) => id === previewEntityId);
     if (!entry) return null;
     const [, group] = entry;
-    const childBatches = group.children.length > 0 ? group.children : group.standalone;
+    const allChildren = group.groupedSets.flatMap(gs => gs.children);
+    const childBatches = allChildren.length > 0 ? allChildren : group.standalone;
     const buildingBatches = childBatches.map(b => ({ batch: b, receipts: allReceipts.filter(r => r.batch_id === b.id) }));
     const entityAllReceipts = buildingBatches.flatMap(bb => bb.receipts);
     return {
