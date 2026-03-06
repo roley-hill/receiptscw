@@ -567,7 +567,6 @@ export async function downloadBatchZIP(batch: any, receipts: any[]) {
       const ext = fileName.toLowerCase().split(".").pop();
 
       if (ext === "xlsx" || ext === "xls") {
-        // Highlight matching rows in Excel files
         try {
           const highlighted = await highlightExcelRows(blob, batchReceipts);
           docsFolder?.file(fileName, highlighted);
@@ -576,7 +575,6 @@ export async function downloadBatchZIP(batch: any, receipts: any[]) {
           docsFolder?.file(fileName, blob);
         }
       } else if (ext === "pdf") {
-        // Highlight matching lines in PDF files
         try {
           const highlighted = await highlightPdfLines(blob, batchReceipts);
           docsFolder?.file(fileName, highlighted);
@@ -605,5 +603,162 @@ export async function downloadBatchZIP(batch: any, receipts: any[]) {
   toast({
     title: "Deposit package downloaded",
     description: `ZIP includes report + ${docCount} highlighted source document${docCount !== 1 ? "s" : ""}.`,
+  });
+}
+
+/**
+ * Generate a grouped XLSX report for an ownership entity with all properties.
+ */
+export async function generateGroupedXLSX(
+  entityName: string,
+  buildingBatches: { batch: any; receipts: any[] }[],
+) {
+  const allReceipts = buildingBatches.flatMap(b => b.receipts);
+  const grandGross = allReceipts.filter(r => Number(r.amount) >= 0).reduce((s, r) => s + Number(r.amount), 0);
+  const grandDeductions = allReceipts.filter(r => Number(r.amount) < 0).reduce((s, r) => s + Number(r.amount), 0);
+  const grandNet = grandGross + grandDeductions;
+
+  const wb = new ExcelJS.Workbook();
+
+  // Per-property sheets
+  for (const { batch, receipts } of buildingBatches) {
+    const sheetName = batch.property.slice(0, 31).replace(/[\\/*?[\]:]/g, "");
+    const ws = wb.addWorksheet(sheetName);
+    ws.columns = [
+      { header: "Tenant", key: "tenant", width: 24 },
+      { header: "Unit", key: "unit", width: 12 },
+      { header: "Amount", key: "amount", width: 14 },
+      { header: "Type", key: "type", width: 12 },
+      { header: "Subsidy Provider", key: "subsidy_provider", width: 22 },
+      { header: "Receipt Date", key: "receipt_date", width: 14 },
+      { header: "Reference", key: "reference", width: 20 },
+      { header: "Payment Type", key: "payment_type", width: 16 },
+      { header: "Receipt ID", key: "receipt_id", width: 18 },
+    ];
+    ws.getRow(1).font = { bold: true };
+    for (const r of receipts) {
+      ws.addRow({
+        tenant: r.tenant,
+        unit: r.unit,
+        amount: Number(r.amount),
+        type: Number(r.amount) < 0 ? "Deduction" : "Payment",
+        subsidy_provider: r.subsidy_provider || "",
+        receipt_date: r.receipt_date || "",
+        reference: r.reference || "",
+        payment_type: r.payment_type || "",
+        receipt_id: r.receipt_id,
+      });
+    }
+  }
+
+  // Summary sheet
+  const ws2 = wb.addWorksheet("Summary");
+  ws2.columns = [{ header: "Field", key: "field", width: 28 }, { header: "Value", key: "value", width: 32 }];
+  ws2.getRow(1).font = { bold: true };
+  ws2.addRows([
+    { field: "Ownership Entity", value: entityName },
+    { field: "Properties", value: buildingBatches.length },
+    { field: "Total Receipts", value: allReceipts.length },
+    { field: "Gross Total", value: grandGross },
+    { field: "Deductions", value: grandDeductions },
+    { field: "Net Total", value: grandNet },
+  ]);
+  for (const { batch, receipts } of buildingBatches) {
+    const propTotal = receipts.reduce((s, r) => s + Number(r.amount), 0);
+    ws2.addRow({ field: `  ${batch.property}`, value: propTotal });
+  }
+
+  const buffer = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  const safeName = entityName.replace(/[^a-zA-Z0-9]/g, "-").replace(/-+/g, "-");
+  a.download = `grouped-report-${safeName}-${new Date().toISOString().slice(0, 10)}.xlsx`;
+  a.click();
+  URL.revokeObjectURL(url);
+  toast({ title: "Grouped XLSX downloaded" });
+}
+
+/**
+ * Download a grouped ZIP package for an ownership entity.
+ * Contains: grouped PDF report + all source documents from all properties.
+ */
+export async function downloadGroupedZIP(
+  entityName: string,
+  buildingBatches: { batch: any; receipts: any[] }[],
+) {
+  const zip = new JSZip();
+
+  // 1. Generate grouped PDF report
+  const doc = generateGroupedOwnerPDF(entityName, buildingBatches);
+  const pdfBlob = doc.output("blob");
+  const safeName = entityName.replace(/[^a-zA-Z0-9]/g, "-").replace(/-+/g, "-");
+  zip.file(`grouped-report-${safeName}.pdf`, pdfBlob);
+
+  // 2. Collect all source documents organized by property
+  const allReceipts = buildingBatches.flatMap(b => b.receipts);
+  const batchReceipts: BatchReceipt[] = allReceipts.map((r) => ({
+    tenant: r.tenant,
+    unit: r.unit,
+    amount: Number(r.amount),
+    receipt_date: r.receipt_date,
+    reference: r.reference,
+    receipt_id: r.receipt_id,
+  }));
+
+  const filePaths = new Set<string>();
+  for (const r of allReceipts) {
+    if (r.file_path) filePaths.add(r.file_path);
+  }
+
+  const docsFolder = zip.folder("source-documents");
+  let docCount = 0;
+  for (const fp of filePaths) {
+    try {
+      const signedUrl = await getSignedUrlForFile(fp);
+      if (!signedUrl) continue;
+      const resp = await fetch(signedUrl);
+      if (!resp.ok) continue;
+      const blob = await resp.blob();
+      const fileName = fp.split("/").pop() || `document-${docCount + 1}`;
+      const ext = fileName.toLowerCase().split(".").pop();
+
+      if (ext === "xlsx" || ext === "xls") {
+        try {
+          const highlighted = await highlightExcelRows(blob, batchReceipts);
+          docsFolder?.file(fileName, highlighted);
+        } catch (e) {
+          console.warn(`Could not highlight Excel: ${fileName}`, e);
+          docsFolder?.file(fileName, blob);
+        }
+      } else if (ext === "pdf") {
+        try {
+          const highlighted = await highlightPdfLines(blob, batchReceipts);
+          docsFolder?.file(fileName, highlighted);
+        } catch (e) {
+          console.warn(`Could not highlight PDF: ${fileName}`, e);
+          docsFolder?.file(fileName, blob);
+        }
+      } else {
+        docsFolder?.file(fileName, blob);
+      }
+      docCount++;
+    } catch (e) {
+      console.warn(`Could not fetch document: ${fp}`, e);
+    }
+  }
+
+  const zipBlob = await zip.generateAsync({ type: "blob" });
+  const url = URL.createObjectURL(zipBlob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `deposit-package-${safeName}-${new Date().toISOString().slice(0, 10)}.zip`;
+  a.click();
+  URL.revokeObjectURL(url);
+
+  toast({
+    title: "Grouped deposit package downloaded",
+    description: `ZIP includes grouped report + ${docCount} source document${docCount !== 1 ? "s" : ""}.`,
   });
 }
