@@ -73,7 +73,9 @@ export default function BatchDocumentPreview({ receipts, batch, onClose, grouped
   // Generate report PDF blob URL once
   useEffect(() => {
     try {
-      const doc = generateBatchPDF(batch, receipts);
+      const doc = groupedMode
+        ? generateGroupedOwnerPDF(groupedMode.entityName, groupedMode.buildingBatches)
+        : generateBatchPDF(batch, receipts);
       const blob = doc.output("blob");
       const url = URL.createObjectURL(blob);
       setReportBlobUrl(url);
@@ -81,7 +83,7 @@ export default function BatchDocumentPreview({ receipts, batch, onClose, grouped
     } catch {
       setReportBlobUrl(null);
     }
-  }, [batch, receipts]);
+  }, [batch, receipts, groupedMode]);
 
   // Load file URL for document items — depend on stable primitives, not objects
   useEffect(() => {
