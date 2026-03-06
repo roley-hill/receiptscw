@@ -789,26 +789,51 @@ export default function EntryView() {
             </Button>
           </div>
           <div className="flex items-center gap-2">
-            <Button
-              size="sm"
-              onClick={async () => {
-                const selectedArr = finalized.filter(r => selectedReceipts.has(r.id) && !(r as any).appfolio_recorded);
-                if (selectedArr.length === 0) {
-                  toast({ title: "All selected receipts are already recorded" });
-                  return;
-                }
-                for (const r of selectedArr) {
-                  await markAppfolioRecorded(r.id, true, user!.id);
-                }
-                queryClient.invalidateQueries({ queryKey: ["receipts"] });
-                toast({ title: `${selectedArr.length} receipt${selectedArr.length > 1 ? "s" : ""} marked as recorded` });
-                setSelectedReceipts(new Set());
-              }}
-              disabled={toggleMutation.isPending}
-            >
-              <CheckSquare className="h-3.5 w-3.5 mr-1" />
-              Mark Selected as Recorded
-            </Button>
+            {(() => {
+              const selectedArr = finalized.filter(r => selectedReceipts.has(r.id));
+              const allRecorded = selectedArr.length > 0 && selectedArr.every(r => (r as any).appfolio_recorded);
+              const allUnrecorded = selectedArr.length > 0 && selectedArr.every(r => !(r as any).appfolio_recorded);
+
+              return allRecorded ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={async () => {
+                    for (const r of selectedArr) {
+                      await markAppfolioRecorded(r.id, false, user!.id);
+                    }
+                    queryClient.invalidateQueries({ queryKey: ["receipts"] });
+                    toast({ title: `${selectedArr.length} receipt${selectedArr.length > 1 ? "s" : ""} unmarked` });
+                    setSelectedReceipts(new Set());
+                  }}
+                  disabled={toggleMutation.isPending}
+                >
+                  <Square className="h-3.5 w-3.5 mr-1" />
+                  Unmark as Recorded
+                </Button>
+              ) : (
+                <Button
+                  size="sm"
+                  onClick={async () => {
+                    const unrecorded = selectedArr.filter(r => !(r as any).appfolio_recorded);
+                    if (unrecorded.length === 0) {
+                      toast({ title: "All selected receipts are already recorded" });
+                      return;
+                    }
+                    for (const r of unrecorded) {
+                      await markAppfolioRecorded(r.id, true, user!.id);
+                    }
+                    queryClient.invalidateQueries({ queryKey: ["receipts"] });
+                    toast({ title: `${unrecorded.length} receipt${unrecorded.length > 1 ? "s" : ""} marked as recorded` });
+                    setSelectedReceipts(new Set());
+                  }}
+                  disabled={toggleMutation.isPending}
+                >
+                  <CheckSquare className="h-3.5 w-3.5 mr-1" />
+                  Mark Selected as Recorded
+                </Button>
+              );
+            })()}
           </div>
         </div>
       )}
