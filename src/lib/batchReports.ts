@@ -190,6 +190,261 @@ export function generateBatchPDF(batch: any, receipts: any[]): jsPDF {
 }
 
 /**
+ * Generate a GROUPED OWNER PDF report.
+ * Shows: owner name header, per-building sections with receipt tables and subtotals,
+ * grand total across all buildings, and transfer instructions referencing the entity name.
+ */
+export function generateGroupedOwnerPDF(
+  entityName: string,
+  buildingBatches: { batch: any; receipts: any[] }[],
+): jsPDF {
+  const doc = new jsPDF();
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const fmtMoney = (n: number) => `$${n.toLocaleString("en-US", { minimumFractionDigits: 2 })}`;
+
+  // Grand totals
+  const allReceipts = buildingBatches.flatMap(b => b.receipts);
+  const grandGross = allReceipts.filter(r => Number(r.amount) >= 0).reduce((s, r) => s + Number(r.amount), 0);
+  const grandDeductions = allReceipts.filter(r => Number(r.amount) < 0).reduce((s, r) => s + Number(r.amount), 0);
+  const grandNet = grandGross + grandDeductions;
+  const hasDeductions = grandDeductions < 0;
+
+  // ---- COVER / HEADER ----
+  doc.setFontSize(22);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(0);
+  doc.text("Grouped Deposit Report", 14, 22);
+
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(120);
+  doc.text(`Generated: ${new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}`, 14, 30);
+
+  doc.setDrawColor(200);
+  doc.line(14, 34, pageWidth - 14, 34);
+
+  // ---- ENTITY INFO ----
+  doc.setFontSize(15);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(0);
+  doc.text(entityName, 14, 46);
+
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(60);
+  doc.text(`${buildingBatches.length} ${buildingBatches.length === 1 ? "property" : "properties"} · ${allReceipts.length} receipts`, 14, 54);
+
+  // ---- GRAND TOTAL SUMMARY BOX ----
+  let y = 62;
+  doc.setFillColor(235, 240, 248);
+  doc.roundedRect(14, y, pageWidth - 28, hasDeductions ? 40 : 24, 3, 3, "F");
+
+  doc.setFontSize(11);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(0);
+  doc.text("GRAND TOTAL — ALL PROPERTIES", 20, y + 10);
+
+  if (hasDeductions) {
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "normal");
+    doc.text("Gross:", 20, y + 20);
+    doc.setFont("helvetica", "bold");
+    doc.text(fmtMoney(grandGross), pageWidth / 2, y + 20);
+
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(180, 40, 40);
+    doc.text("Deductions:", 20, y + 28);
+    doc.setFont("helvetica", "bold");
+    doc.text(fmtMoney(grandDeductions), pageWidth / 2, y + 28);
+
+    doc.setTextColor(0);
+    doc.setFontSize(12);
+    doc.text("Net Deposit:", 20, y + 36);
+    doc.text(fmtMoney(grandNet), pageWidth / 2, y + 36);
+    y += 48;
+  } else {
+    doc.setFontSize(13);
+    doc.text(fmtMoney(grandGross), pageWidth / 2, y + 10);
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(100);
+    doc.text("(No deductions)", 20, y + 20);
+    y += 30;
+  }
+
+  // ---- PER-BUILDING SECTIONS ----
+  const sortedBuildings = [...buildingBatches].sort((a, b) => a.batch.property.localeCompare(b.batch.property));
+
+  for (let bi = 0; bi < sortedBuildings.length; bi++) {
+    const { batch, receipts } = sortedBuildings[bi];
+    const propGross = receipts.filter(r => Number(r.amount) >= 0).reduce((s, r) => s + Number(r.amount), 0);
+    const propDeductions = receipts.filter(r => Number(r.amount) < 0).reduce((s, r) => s + Number(r.amount), 0);
+    const propNet = propGross + propDeductions;
+    const propHasDeductions = propDeductions < 0;
+
+    // Subsidy breakdown for this property
+    const subsidyByProvider: Record<string, number> = {};
+    for (const r of receipts) {
+      if (r.subsidy_provider) {
+        subsidyByProvider[r.subsidy_provider] = (subsidyByProvider[r.subsidy_provider] || 0) + Number(r.amount);
+      }
+    }
+
+    // Check if we need a new page
+    if (y + 60 > pageHeight) {
+      doc.addPage();
+      y = 20;
+    }
+
+    // Building header
+    doc.setDrawColor(180);
+    doc.line(14, y, pageWidth - 14, y);
+    y += 8;
+
+    doc.setFontSize(12);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(0);
+    doc.text(`${bi + 1}. ${batch.property}`, 14, y);
+
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(80);
+    const meta = [
+      `Batch: ${batch.batch_id}`,
+      batch.deposit_period ? `Period: ${batch.deposit_period}` : null,
+      `${receipts.length} receipts`,
+    ].filter(Boolean).join(" · ");
+    doc.text(meta, 14, y + 7);
+    y += 12;
+
+    // Property subtotal box
+    doc.setFillColor(248, 248, 248);
+    doc.roundedRect(14, y, pageWidth - 28, propHasDeductions ? 28 : 16, 2, 2, "F");
+
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(0);
+
+    if (propHasDeductions) {
+      doc.text(`Gross: ${fmtMoney(propGross)}`, 20, y + 8);
+      doc.setTextColor(180, 40, 40);
+      doc.text(`Deductions: ${fmtMoney(propDeductions)}`, pageWidth / 2 - 10, y + 8);
+      doc.setTextColor(0);
+      doc.setFontSize(11);
+      doc.text(`Net: ${fmtMoney(propNet)}`, 20, y + 20);
+      y += 34;
+    } else {
+      doc.text(`Subtotal: ${fmtMoney(propGross)}`, 20, y + 10);
+      y += 22;
+    }
+
+    // Subsidy provider summary
+    if (Object.keys(subsidyByProvider).length > 0) {
+      doc.setFontSize(9);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(60);
+      doc.text("Subsidy Providers:", 14, y + 2);
+      doc.setFont("helvetica", "normal");
+      let sx = 80;
+      for (const [provider, amount] of Object.entries(subsidyByProvider)) {
+        const text = `${provider}: ${fmtMoney(amount)}`;
+        doc.text(text, sx, y + 2);
+        sx += doc.getTextWidth(text) + 12;
+        if (sx > pageWidth - 30) { sx = 20; y += 6; }
+      }
+      y += 8;
+    }
+
+    // Receipt table
+    autoTable(doc, {
+      startY: y,
+      head: [["Tenant", "Unit", "Amount", "Type", "Subsidy", "Date", "Reference", "Receipt ID"]],
+      body: receipts.map(r => [
+        r.tenant,
+        r.unit,
+        fmtMoney(Number(r.amount)),
+        Number(r.amount) < 0 ? "DEDUCTION" : "Payment",
+        r.subsidy_provider || "—",
+        r.receipt_date || "—",
+        r.reference || "—",
+        r.receipt_id,
+      ]),
+      styles: { fontSize: 7.5, cellPadding: 2 },
+      headStyles: { fillColor: [55, 65, 81], fontSize: 7.5 },
+      margin: { left: 14, right: 14 },
+      didParseCell: (data: any) => {
+        if (data.section === "body" && data.column.index === 2) {
+          const val = data.cell.raw as string;
+          if (val.includes("-")) data.cell.styles.textColor = [200, 50, 50];
+        }
+      },
+    });
+
+    y = (doc as any).lastAutoTable?.finalY || y + 30;
+    y += 10;
+  }
+
+  // ---- TRANSFER INSTRUCTIONS ----
+  if (y + 40 > pageHeight) {
+    doc.addPage();
+    y = 20;
+  }
+
+  doc.setDrawColor(0);
+  doc.line(14, y, pageWidth - 14, y);
+  y += 10;
+
+  doc.setFontSize(12);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(0);
+  doc.text("Transfer Instructions", 14, y);
+  y += 10;
+
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(60);
+
+  const transferAmt = hasDeductions ? grandNet : grandGross;
+  const transferLabel = hasDeductions ? "(net after deductions)" : "(total)";
+
+  const lines = doc.splitTextToSize(
+    `Please transfer ${fmtMoney(transferAmt)} ${transferLabel} to Countywide AppFolio First Century Account for "${entityName}".`,
+    pageWidth - 28,
+  );
+  doc.text(lines, 14, y);
+  y += lines.length * 5 + 6;
+
+  // Per-building breakdown in transfer instructions
+  doc.setFontSize(9);
+  doc.setTextColor(80);
+  doc.text("Breakdown by property:", 14, y);
+  y += 6;
+
+  for (const { batch, receipts } of sortedBuildings) {
+    if (y + 6 > pageHeight - 20) { doc.addPage(); y = 20; }
+    const propTotal = receipts.reduce((s, r) => s + Number(r.amount), 0);
+    doc.text(`• ${batch.property}: ${fmtMoney(propTotal)} (${receipts.length} receipts)`, 20, y);
+    y += 5;
+  }
+
+  return doc;
+}
+
+/**
+ * Download a grouped owner PDF report.
+ */
+export function downloadGroupedOwnerPDF(
+  entityName: string,
+  buildingBatches: { batch: any; receipts: any[] }[],
+) {
+  const doc = generateGroupedOwnerPDF(entityName, buildingBatches);
+  const safeEntityName = entityName.replace(/[^a-zA-Z0-9]/g, "-").replace(/-+/g, "-");
+  doc.save(`grouped-report-${safeEntityName}-${new Date().toISOString().slice(0, 10)}.pdf`);
+  toast({ title: "Grouped PDF downloaded" });
+}
+
+/**
  * Download only the PDF report for a batch.
  */
 export function downloadBatchPDF(batch: any, receipts: any[]) {

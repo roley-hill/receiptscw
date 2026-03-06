@@ -1,8 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchBatches, fetchReceipts, reverseBatch, moveReceiptsToNewBatch } from "@/lib/api";
-import { downloadBatchPDF, generateBatchXLSX, downloadBatchZIP } from "@/lib/batchReports";
+import { downloadBatchPDF, generateBatchXLSX, downloadBatchZIP, downloadGroupedOwnerPDF } from "@/lib/batchReports";
 import { supabase } from "@/integrations/supabase/client";
-import { Building2, ChevronDown, ChevronRight } from "lucide-react";
+import { Building2, ChevronDown, ChevronRight, FileText as FileTextIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/hooks/use-toast";
 import { useState, useMemo, lazy, Suspense } from "react";
@@ -179,13 +179,15 @@ export default function DepositBatches() {
             return (
               <div key={entityId} className="space-y-3">
                 {/* Entity header */}
-                <motion.button
+                <motion.div
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
-                  onClick={() => toggleEntityCollapse(entityId)}
-                  className="w-full vault-card px-5 py-4 flex items-center justify-between hover:bg-muted/50 transition-colors cursor-pointer"
+                  className="vault-card px-5 py-4 flex items-center justify-between"
                 >
-                  <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => toggleEntityCollapse(entityId)}
+                    className="flex items-center gap-3 flex-1 hover:opacity-80 transition-opacity cursor-pointer"
+                  >
                     {isCollapsed
                       ? <ChevronRight className="h-4 w-4 text-muted-foreground" />
                       : <ChevronDown className="h-4 w-4 text-muted-foreground" />
@@ -199,12 +201,30 @@ export default function DepositBatches() {
                         {batchCount} {batchCount === 1 ? "property" : "properties"} · {entityReceiptCount} receipts
                       </p>
                     </div>
+                  </button>
+                  <div className="flex items-center gap-4">
+                    <div className="text-right">
+                      <p className="text-lg vault-mono font-bold text-foreground">${fmt(entityTotal)}</p>
+                      <p className="text-xs text-muted-foreground">Grand Total</p>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      title="Download grouped owner PDF"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const childBatches = group.children.length > 0 ? group.children : group.standalone;
+                        const buildingBatches = childBatches
+                          .sort((a, b) => a.property.localeCompare(b.property))
+                          .map(b => ({ batch: b, receipts: allReceipts.filter(r => r.batch_id === b.id) }));
+                        downloadGroupedOwnerPDF(group.entity?.name || "Unknown Entity", buildingBatches);
+                      }}
+                    >
+                      <FileTextIcon className="h-3.5 w-3.5 mr-1" />
+                      Owner PDF
+                    </Button>
                   </div>
-                  <div className="text-right">
-                    <p className="text-lg vault-mono font-bold text-foreground">${fmt(entityTotal)}</p>
-                    <p className="text-xs text-muted-foreground">Grand Total</p>
-                  </div>
-                </motion.button>
+                </motion.div>
 
                 {/* Child/standalone batches */}
                 {!isCollapsed && (
