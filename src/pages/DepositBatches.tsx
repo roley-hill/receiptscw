@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchBatches, fetchReceipts, reverseBatch, moveReceiptsToNewBatch } from "@/lib/api";
-import { downloadBatchPDF, generateBatchXLSX, downloadBatchZIP } from "@/lib/batchReports";
+import { downloadBatchPDF, generateBatchXLSX, downloadBatchZIP, downloadGroupedOwnerPDF } from "@/lib/batchReports";
 import { supabase } from "@/integrations/supabase/client";
 import { Building2, ChevronDown, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
