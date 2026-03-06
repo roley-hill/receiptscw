@@ -5,12 +5,17 @@ import { motion, AnimatePresence } from "framer-motion";
 import { AttachmentContent } from "@/components/FilePreview";
 import PdfViewer from "@/components/PdfViewer";
 import { getFilePreviewUrl } from "@/lib/api";
-import { generateBatchPDF } from "@/lib/batchReports";
+import { generateBatchPDF, generateGroupedOwnerPDF } from "@/lib/batchReports";
 
 interface BatchDocumentPreviewProps {
   receipts: any[];
   batch: any;
   onClose: () => void;
+  /** For grouped entity preview: entity name + building batches */
+  groupedMode?: {
+    entityName: string;
+    buildingBatches: { batch: any; receipts: any[] }[];
+  };
 }
 
 type SidebarItem = {
