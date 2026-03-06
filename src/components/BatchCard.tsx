@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { motion } from "framer-motion";
 import {
   CheckCircle2, Clock, Eye, PackageOpen, FileText as FileTextIcon,
-  FileSpreadsheet, Mail, Undo2, ArrowRightLeft, SquareCheck,
+  FileSpreadsheet, Mail, Undo2, ArrowRightLeft, SquareCheck, Calendar,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -36,6 +36,13 @@ function BatchStatusBadge({ status }: { status: string }) {
   }
 }
 
+function formatRentMonth(rm: string | null): string {
+  if (!rm) return "No Month Assigned";
+  const [year, month] = rm.split("-");
+  const date = new Date(Number(year), Number(month) - 1);
+  return date.toLocaleDateString("en-US", { year: "numeric", month: "long" });
+}
+
 export default function BatchCard({
   batch, receipts, index, isZipping,
   onPreview, onZipDownload, onPdfDownload, onXlsxDownload, onReverse,
@@ -48,6 +55,23 @@ export default function BatchCard({
   const deductionTotal = receipts.filter((r) => Number(r.amount) < 0).reduce((s, r) => s + Number(r.amount), 0);
   const netTotal = grossTotal + deductionTotal;
   const hasDeductions = deductionTotal < 0;
+
+  // Group receipts by rent_month, sorted newest first
+  const monthGroups = useMemo(() => {
+    const groups: Record<string, DbReceipt[]> = {};
+    for (const r of receipts) {
+      const key = r.rent_month || "__none__";
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(r);
+    }
+    return Object.entries(groups).sort(([a], [b]) => {
+      if (a === "__none__") return 1;
+      if (b === "__none__") return -1;
+      return b.localeCompare(a); // newest first
+    });
+  }, [receipts]);
+
+  const hasMultipleMonths = monthGroups.length > 1;
 
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {
@@ -73,6 +97,34 @@ export default function BatchCard({
   const selectedTotal = receipts
     .filter((r) => selectedIds.has(r.id))
     .reduce((s, r) => s + Number(r.amount), 0);
+
+  const renderReceiptRow = (r: DbReceipt) => {
+    const isSelected = selectedIds.has(r.id);
+    return (
+      <tr
+        key={r.id}
+        className={`vault-table-row ${selectMode ? "cursor-pointer" : ""} ${isSelected ? "bg-accent/40" : ""}`}
+        onClick={selectMode ? () => toggleSelect(r.id) : undefined}
+      >
+        {selectMode && (
+          <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
+            <Checkbox
+              checked={isSelected}
+              onCheckedChange={() => toggleSelect(r.id)}
+            />
+          </td>
+        )}
+        <td className="px-5 py-2.5 text-sm font-medium text-foreground">{r.tenant}</td>
+        <td className="px-5 py-2.5 text-sm vault-mono text-muted-foreground">{r.unit}</td>
+        <td className={`px-5 py-2.5 text-sm text-right vault-mono font-semibold ${Number(r.amount) < 0 ? "text-[hsl(var(--vault-red))]" : "text-foreground"}`}>
+          ${Number(r.amount).toLocaleString("en-US", { minimumFractionDigits: 2 })}
+        </td>
+        <td className="px-5 py-2.5">{Number(r.amount) < 0 ? <span className="vault-badge-deduction">Deduction</span> : <span className="text-xs text-muted-foreground">Payment</span>}</td>
+        <td className="px-5 py-2.5 text-xs text-muted-foreground">{r.subsidy_provider || "—"}</td>
+        <td className="px-5 py-2.5 text-xs vault-mono text-vault-blue">{r.receipt_id}</td>
+      </tr>
+    );
+  };
 
   return (
     <motion.div key={batch.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: index * 0.05 }} className="vault-card overflow-hidden">
@@ -233,33 +285,29 @@ export default function BatchCard({
               </tr>
             </thead>
             <tbody>
-              {receipts.map((r) => {
-                const isSelected = selectedIds.has(r.id);
-                return (
-                  <tr
-                    key={r.id}
-                    className={`vault-table-row ${selectMode ? "cursor-pointer" : ""} ${isSelected ? "bg-accent/40" : ""}`}
-                    onClick={selectMode ? () => toggleSelect(r.id) : undefined}
-                  >
-                    {selectMode && (
-                      <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
-                        <Checkbox
-                          checked={isSelected}
-                          onCheckedChange={() => toggleSelect(r.id)}
-                        />
-                      </td>
-                    )}
-                    <td className="px-5 py-2.5 text-sm font-medium text-foreground">{r.tenant}</td>
-                    <td className="px-5 py-2.5 text-sm vault-mono text-muted-foreground">{r.unit}</td>
-                    <td className={`px-5 py-2.5 text-sm text-right vault-mono font-semibold ${Number(r.amount) < 0 ? "text-[hsl(var(--vault-red))]" : "text-foreground"}`}>
-                      ${Number(r.amount).toLocaleString("en-US", { minimumFractionDigits: 2 })}
-                    </td>
-                    <td className="px-5 py-2.5">{Number(r.amount) < 0 ? <span className="vault-badge-deduction">Deduction</span> : <span className="text-xs text-muted-foreground">Payment</span>}</td>
-                    <td className="px-5 py-2.5 text-xs text-muted-foreground">{r.subsidy_provider || "—"}</td>
-                    <td className="px-5 py-2.5 text-xs vault-mono text-vault-blue">{r.receipt_id}</td>
-                  </tr>
-                );
-              })}
+              {hasMultipleMonths
+                ? monthGroups.map(([monthKey, monthReceipts]) => {
+                    const monthTotal = monthReceipts.reduce((s, r) => s + Number(r.amount), 0);
+                    return (
+                      <>
+                        <tr key={`month-${monthKey}`} className="bg-muted/15">
+                          <td colSpan={selectMode ? 7 : 6} className="px-5 py-2">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <Calendar className="h-3.5 w-3.5 text-accent" />
+                                <span className="text-xs font-semibold text-foreground">{formatRentMonth(monthKey === "__none__" ? null : monthKey)}</span>
+                                <span className="text-xs text-muted-foreground">· {monthReceipts.length} receipt{monthReceipts.length !== 1 ? "s" : ""}</span>
+                              </div>
+                              <span className="text-xs vault-mono font-semibold text-foreground">${monthTotal.toLocaleString("en-US", { minimumFractionDigits: 2 })}</span>
+                            </div>
+                          </td>
+                        </tr>
+                        {monthReceipts.map(renderReceiptRow)}
+                      </>
+                    );
+                  })
+                : receipts.map(renderReceiptRow)
+              }
             </tbody>
           </table>
           {hasDeductions && (
