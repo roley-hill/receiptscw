@@ -552,7 +552,7 @@ export default function EntryView() {
   /* ─── Render receipt row (shared between single and multi-tenant) ─── */
   const renderReceiptRow = (r: DbReceipt, indent = false, isDupMonth = false) => (
     <tr key={r.id} className={`vault-table-row ${isDupMonth ? "bg-[hsl(var(--vault-amber)/0.05)]" : ""}`}>
-      {batchMode && (
+      {(batchMode || hasSelections) && (
         <td className="px-3 py-2.5">
           <Checkbox
             checked={selectedReceipts.has(r.id)}
