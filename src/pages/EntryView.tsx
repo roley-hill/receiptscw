@@ -270,6 +270,26 @@ export default function EntryView() {
     });
   };
 
+  // Scoped selection helpers — operate on a specific set of receipts
+  const toggleSelectScoped = (scopeReceipts: DbReceipt[]) => {
+    const allSelected = scopeReceipts.length > 0 && scopeReceipts.every(r => selectedReceipts.has(r.id));
+    setSelectedReceipts(prev => {
+      const next = new Set(prev);
+      for (const r of scopeReceipts) {
+        allSelected ? next.delete(r.id) : next.add(r.id);
+      }
+      return next;
+    });
+  };
+
+  const isScopedSelected = (scopeReceipts: DbReceipt[]) =>
+    scopeReceipts.length > 0 && scopeReceipts.every(r => selectedReceipts.has(r.id));
+
+  const isScopedPartial = (scopeReceipts: DbReceipt[]) => {
+    const sel = scopeReceipts.filter(r => selectedReceipts.has(r.id));
+    return sel.length > 0 && sel.length < scopeReceipts.length;
+  };
+
   const toggleSelectReceipt = (id: string) => {
     setSelectedReceipts(prev => {
       const next = new Set(prev);
@@ -697,8 +717,8 @@ export default function EntryView() {
     const recorded = receipts.filter((r) => (r as any).appfolio_recorded);
     const recordedAmt = recorded.reduce((s, r) => s + Number(r.amount), 0);
     const unbatched = recorded.filter((r) => !r.batch_id);
-    const propSelected = isPropertySelected(property);
-    const propPartial = isPropertyPartial(property);
+    const propSelected = isScopedSelected(receipts);
+    const propPartial = isScopedPartial(receipts);
 
     // Build tenant groups
     const tenantGroups: Record<string, DbReceipt[]> = {};
@@ -716,7 +736,7 @@ export default function EntryView() {
             <Checkbox
               checked={propSelected}
               data-state={propPartial ? "indeterminate" : propSelected ? "checked" : "unchecked"}
-              onCheckedChange={() => toggleSelectProperty(property)}
+              onCheckedChange={() => toggleSelectScoped(receipts)}
               className="h-3.5 w-3.5"
             />
             <h3 className="text-sm font-bold text-foreground">{property}</h3>
@@ -1077,8 +1097,9 @@ export default function EntryView() {
                             {entity && (
                               <div className="flex items-center gap-3 px-1">
                                 <Checkbox
-                                  checked={isEntitySelected(entity.id)}
-                                  onCheckedChange={() => toggleSelectEntity(entity.id)}
+                                  checked={isScopedSelected(Object.values(propMap).flat() as DbReceipt[])}
+                                  data-state={isScopedPartial(Object.values(propMap).flat() as DbReceipt[]) ? "indeterminate" : undefined}
+                                  onCheckedChange={() => toggleSelectScoped(Object.values(propMap).flat() as DbReceipt[])}
                                   className="h-4 w-4"
                                 />
                                 <Building2 className="h-5 w-5 text-accent" />
