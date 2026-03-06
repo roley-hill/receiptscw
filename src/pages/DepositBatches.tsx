@@ -317,8 +317,15 @@ export default function DepositBatches() {
           {/* Reversed batches */}
           {reversedBatches.length > 0 && (
             <div className="space-y-4 mt-10">
-              <h2 className="text-lg font-semibold text-muted-foreground">Reversed Batches</h2>
-              {reversedBatches.map((batch, i) => renderBatchCard(batch, i))}
+              <button
+                onClick={() => setReversedCollapsed(prev => !prev)}
+                className="flex items-center gap-2 hover:opacity-80 transition-opacity cursor-pointer"
+              >
+                {reversedCollapsed ? <ChevronRight className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+                <h2 className="text-lg font-semibold text-muted-foreground">Reversed Batches</h2>
+                <span className="text-xs vault-mono text-muted-foreground">({reversedBatches.length})</span>
+              </button>
+              {!reversedCollapsed && reversedBatches.map((batch, i) => renderBatchCard(batch, i))}
             </div>
           )}
         </div>
