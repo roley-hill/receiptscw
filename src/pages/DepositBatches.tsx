@@ -34,6 +34,8 @@ export default function DepositBatches() {
   const [previewBatchId, setPreviewBatchId] = useState<string | null>(null);
   const [movingBatchId, setMovingBatchId] = useState<string | null>(null);
   const [collapsedEntities, setCollapsedEntities] = useState<Set<string>>(new Set());
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
+  const [reversedCollapsed, setReversedCollapsed] = useState(true);
 
   const reverseMutation = useMutation({
     mutationFn: (batchId: string) => reverseBatch(batchId),
