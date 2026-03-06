@@ -24,12 +24,30 @@ export function ZoomablePreview({ children }: { children: React.ReactNode }) {
   );
 }
 
-export function SpreadsheetPreview({ csv }: { csv: string }) {
-  const lines = csv.split("\n").filter((l) => l.trim());
-  const rows: string[][] = [];
-  for (const line of lines) { if (line.startsWith("=== Sheet:")) continue; rows.push(line.split(",").map((c) => c.trim())); }
-  if (rows.length === 0) return <pre className="text-xs text-muted-foreground whitespace-pre-wrap font-mono">{csv}</pre>;
-  const headerRow = rows[0]; const dataRows = rows.slice(1);
+export function SpreadsheetPreview({ csv, rows: structuredRows }: { csv?: string; rows?: string[][] }) {
+  let headerRow: string[];
+  let dataRows: string[][];
+
+  if (structuredRows && structuredRows.length > 0) {
+    // Use pre-parsed structured rows (no delimiter issues)
+    headerRow = structuredRows[0];
+    dataRows = structuredRows.slice(1);
+  } else if (csv) {
+    // Legacy CSV path — use tab delimiter first, fall back to comma
+    const lines = csv.split("\n").filter((l) => l.trim());
+    const parsed: string[][] = [];
+    for (const line of lines) {
+      if (line.startsWith("=== Sheet:")) continue;
+      // Use tab as primary delimiter (safe for amounts with commas)
+      parsed.push(line.includes("\t") ? line.split("\t").map((c) => c.trim()) : line.split(",").map((c) => c.trim()));
+    }
+    if (parsed.length === 0) return <pre className="text-xs text-muted-foreground whitespace-pre-wrap font-mono">{csv}</pre>;
+    headerRow = parsed[0];
+    dataRows = parsed.slice(1);
+  } else {
+    return null;
+  }
+
   return (
     <div className="overflow-auto rounded-md border border-border">
       <table className="w-full text-xs">
@@ -74,7 +92,7 @@ export function EmlImageAttachment({ imgPath }: { imgPath: string }) {
 
 /* ─── XLSX fetcher: downloads and parses XLSX from URL ─── */
 function XlsxFetchPreview({ url }: { url: string }) {
-  const [csv, setCsv] = useState<string | null>(null);
+  const [rows, setRows] = useState<string[][] | null>(null);
   const [error, setError] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -84,27 +102,24 @@ function XlsxFetchPreview({ url }: { url: string }) {
       .then(async (buf) => {
         const wb = new ExcelJS.Workbook();
         await wb.xlsx.load(buf);
-        const parts: string[] = [];
+        const allRows: string[][] = [];
         wb.eachSheet((sheet) => {
-          parts.push(`=== Sheet: ${sheet.name} ===`);
-          const rows: string[] = [];
           sheet.eachRow((row) => {
             const cells = (row.values as any[]).slice(1).map((v) =>
               v === null || v === undefined ? "" : String(typeof v === "object" && v.result !== undefined ? v.result : v)
             );
-            rows.push(cells.join(","));
+            allRows.push(cells);
           });
-          parts.push(rows.join("\n"));
         });
-        setCsv(parts.join("\n"));
+        setRows(allRows);
       })
       .catch(() => setError(true))
       .finally(() => setLoading(false));
   }, [url]);
 
   if (loading) return <div className="flex items-center justify-center min-h-[300px]"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
-  if (error || !csv) return <p className="text-sm text-muted-foreground text-center py-8">Could not parse spreadsheet.</p>;
-  return <ZoomablePreview><div className="p-4"><SpreadsheetPreview csv={csv} /></div></ZoomablePreview>;
+  if (error || !rows) return <p className="text-sm text-muted-foreground text-center py-8">Could not parse spreadsheet.</p>;
+  return <ZoomablePreview><div className="p-4"><SpreadsheetPreview rows={rows} /></div></ZoomablePreview>;
 }
 
 export function AttachmentContent({ url, fileName, originalText }: { url: string; fileName: string; originalText: string | null }) {
