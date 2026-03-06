@@ -245,7 +245,7 @@ export default function DepositBatches() {
                 <div key={sectionKey} className="space-y-3">
                   {/* Batch-level header with ALL actions */}
                   <div className="vault-card px-4 py-3 flex items-center justify-between">
-                    <button onClick={() => toggleSection(sectionKey)} className="flex items-center gap-2 text-sm font-semibold text-foreground hover:opacity-80 transition-opacity cursor-pointer flex-1">
+                    <button onClick={() => toggleSection(sectionKey)} className="group flex items-center gap-2 text-sm font-semibold text-foreground hover:opacity-80 transition-opacity cursor-pointer flex-1">
                       {isSectionCollapsed ? <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />}
                       <Layers className="h-3.5 w-3.5 text-accent" />
                       <span>Deposit Batch — {gs.parentBatch.batch_id}</span>
