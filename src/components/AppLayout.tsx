@@ -44,6 +44,7 @@ const navItems = [
   { title: "Team", url: "/team", icon: Users, countKey: null },
   { title: "DD Extract", url: "/dd/upload", icon: Building2, countKey: null },
   { title: "DD File Sorter", url: "/dd/sort", icon: FolderOpen, countKey: null },
+  { title: "Ownership Entities", url: "/ownership", icon: Building2, countKey: null },
 ];
 
 interface NavPermissions {
@@ -188,6 +189,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 <SidebarGroupContent>
                   <SidebarMenu>
                     {navItems.slice(9, 10).map(renderNavItem)}
+                    {navItems.slice(12, 13).map(renderNavItem)}
                   </SidebarMenu>
                 </SidebarGroupContent>
               </SidebarGroup>

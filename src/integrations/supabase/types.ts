@@ -319,6 +319,8 @@ export type Database = {
           external_reference: string | null
           id: string
           notes: string | null
+          ownership_entity_id: string | null
+          parent_batch_id: string | null
           property: string
           receipt_count: number
           status: Database["public"]["Enums"]["batch_status"]
@@ -336,6 +338,8 @@ export type Database = {
           external_reference?: string | null
           id?: string
           notes?: string | null
+          ownership_entity_id?: string | null
+          parent_batch_id?: string | null
           property: string
           receipt_count?: number
           status?: Database["public"]["Enums"]["batch_status"]
@@ -353,6 +357,8 @@ export type Database = {
           external_reference?: string | null
           id?: string
           notes?: string | null
+          ownership_entity_id?: string | null
+          parent_batch_id?: string | null
           property?: string
           receipt_count?: number
           status?: Database["public"]["Enums"]["batch_status"]
@@ -360,6 +366,42 @@ export type Database = {
           transfer_method?: string | null
           transferred_at?: string | null
           transferred_by?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "deposit_batches_ownership_entity_id_fkey"
+            columns: ["ownership_entity_id"]
+            isOneToOne: false
+            referencedRelation: "ownership_entities"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "deposit_batches_parent_batch_id_fkey"
+            columns: ["parent_batch_id"]
+            isOneToOne: false
+            referencedRelation: "deposit_batches"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ownership_entities: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
           updated_at?: string
         }
         Relationships: []
@@ -390,6 +432,41 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      properties: {
+        Row: {
+          address: string
+          created_at: string
+          id: string
+          normalized_address: string
+          ownership_entity_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          address: string
+          created_at?: string
+          id?: string
+          normalized_address: string
+          ownership_entity_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          address?: string
+          created_at?: string
+          id?: string
+          normalized_address?: string
+          ownership_entity_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "properties_ownership_entity_id_fkey"
+            columns: ["ownership_entity_id"]
+            isOneToOne: false
+            referencedRelation: "ownership_entities"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       receipts: {
         Row: {

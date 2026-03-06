@@ -23,6 +23,7 @@ import AcceptInvite from "@/pages/AcceptInvite";
 import NotFound from "@/pages/NotFound";
 import DdUpload from "@/pages/DdUpload";
 import DdFileSorter from "@/pages/DdFileSorter";
+import OwnershipEntities from "@/pages/OwnershipEntities";
 
 const queryClient = new QueryClient();
 
@@ -58,6 +59,7 @@ function ProtectedRoutes() {
         <Route path="/team" element={<TeamManagement />} />
         <Route path="/dd/upload" element={<DdUpload />} />
         <Route path="/dd/sort" element={<DdFileSorter />} />
+        <Route path="/ownership" element={<OwnershipEntities />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
     </AppLayout>
