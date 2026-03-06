@@ -652,7 +652,7 @@ export default function EntryView() {
           <table className="w-full min-w-[1200px]">
             <thead className="sticky top-0 z-10 bg-card">
               <tr className="border-b border-border">
-                {batchMode && <th className="px-3 py-2.5 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide w-10">Select</th>}
+                {(batchMode || hasSelections) && <th className="px-3 py-2.5 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide w-10">Select</th>}
                 <th className="px-3 py-2.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide w-10">Recorded?</th>
                 <th className="px-3 py-2.5 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide w-[40px]">Doc</th>
                 <th className="px-3 py-2.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide w-[70px]">Unit</th>
