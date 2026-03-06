@@ -557,7 +557,6 @@ export default function EntryView() {
           <Checkbox
             checked={selectedReceipts.has(r.id)}
             onCheckedChange={() => toggleSelectReceipt(r.id)}
-            disabled={!(r as any).appfolio_recorded}
           />
         </td>
       )}
