@@ -778,65 +778,7 @@ export default function EntryView() {
         </div>
       </div>
 
-      {/* Batch mode action bar */}
-      {selectedReceipts.size > 0 && (
-        <div className="mb-4 vault-card px-4 py-3 flex items-center justify-between bg-accent/5 border-accent/20">
-          <div className="flex items-center gap-4 text-sm">
-            <span className="font-semibold text-foreground">{selectedReceipts.size} receipts selected</span>
-            <span className="vault-mono font-bold text-accent">${fmt(selectedTotal)}</span>
-            <Button size="sm" variant="ghost" onClick={() => setSelectedReceipts(new Set())} className="text-xs text-muted-foreground h-7">
-              Clear
-            </Button>
-          </div>
-          <div className="flex items-center gap-2">
-            {(() => {
-              const selectedArr = finalized.filter(r => selectedReceipts.has(r.id));
-              const unrecorded = selectedArr.filter(r => !(r as any).appfolio_recorded);
-              const recorded = selectedArr.filter(r => (r as any).appfolio_recorded);
 
-              return (
-                <>
-                  {unrecorded.length > 0 && (
-                    <Button
-                      size="sm"
-                      onClick={async () => {
-                        for (const r of unrecorded) {
-                          await markAppfolioRecorded(r.id, true, user!.id);
-                        }
-                        queryClient.invalidateQueries({ queryKey: ["receipts"] });
-                        toast({ title: `${unrecorded.length} receipt${unrecorded.length > 1 ? "s" : ""} marked as recorded` });
-                        setSelectedReceipts(new Set());
-                      }}
-                      disabled={toggleMutation.isPending}
-                    >
-                      <CheckSquare className="h-3.5 w-3.5 mr-1" />
-                      Mark as Recorded ({unrecorded.length})
-                    </Button>
-                  )}
-                  {recorded.length > 0 && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={async () => {
-                        for (const r of recorded) {
-                          await markAppfolioRecorded(r.id, false, user!.id);
-                        }
-                        queryClient.invalidateQueries({ queryKey: ["receipts"] });
-                        toast({ title: `${recorded.length} receipt${recorded.length > 1 ? "s" : ""} unmarked` });
-                        setSelectedReceipts(new Set());
-                      }}
-                      disabled={toggleMutation.isPending}
-                    >
-                      <Square className="h-3.5 w-3.5 mr-1" />
-                      Unmark as Recorded ({recorded.length})
-                    </Button>
-                  )}
-                </>
-              );
-            })()}
-          </div>
-        </div>
-      )}
 
       <div className="flex gap-4">
         {/* ─── Building Tree Sidebar ─── */}
