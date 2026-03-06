@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { fetchReceipts, markAppfolioRecorded, getFilePreviewUrl, createDepositBatch } from "@/lib/api";
 import { motion } from "framer-motion";
-import { Copy, Check, FileText, Layers, Loader2, ChevronRight, ChevronDown, Building2, Search, User, AlertTriangle, Trash2, CheckSquare, Square } from "lucide-react";
+import { Copy, Check, FileText, Layers, Loader2, ChevronRight, ChevronDown, Building2, Search, User, AlertTriangle, Trash2, CheckSquare, Square, Calendar } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { DbReceipt } from "@/lib/api";
@@ -85,6 +85,21 @@ type PropertyRecord = { id: string; address: string; normalized_address: string;
 
 const fmt = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 2 });
 
+/** Format YYYY-MM rent_month to readable label */
+function formatRentMonth(rm: string | null): string {
+  if (!rm) return "No Month Assigned";
+  const [year, month] = rm.split("-");
+  const date = new Date(Number(year), Number(month) - 1);
+  return date.toLocaleDateString("en-US", { year: "numeric", month: "long" });
+}
+
+/** Sort rent months newest first; null goes last */
+function sortRentMonths(a: string, b: string): number {
+  if (a === "__none__") return 1;
+  if (b === "__none__") return -1;
+  return b.localeCompare(a);
+}
+
 /* ─── Main page ─── */
 export default function EntryView() {
   const { user } = useAuth();
@@ -152,6 +167,7 @@ export default function EntryView() {
   const [groupedBatchDialogOpen, setGroupedBatchDialogOpen] = useState(false);
   const [batchCreationType, setBatchCreationType] = useState<"individual" | "grouped">("individual");
   const [isBatchCreating, setIsBatchCreating] = useState(false);
+  const [collapsedMonths, setCollapsedMonths] = useState<Set<string>>(new Set());
 
   const filteredProperties = [...new Set(finalized.map((r) => canonical(r.property)).filter(Boolean))];
 
@@ -467,31 +483,57 @@ export default function EntryView() {
     toast({ title: "Copied all fields" });
   };
 
-  // Group flatGrouped by entity for main content display
-  const mainContentGroups = useMemo(() => {
-    const entityMap: Record<string, { entity: OwnerEntity | null; properties: Record<string, DbReceipt[]> }> = {};
-
-    for (const [prop, receipts] of Object.entries(flatGrouped)) {
-      const entityId = propertyToEntity.get(prop);
-      const key = entityId || "__unassigned__";
-      if (!entityMap[key]) {
-        entityMap[key] = {
-          entity: entityId ? ownerEntities.find(e => e.id === entityId) || null : null,
-          properties: {},
-        };
-      }
-      entityMap[key].properties[prop] = receipts;
+  // Group by rent_month → entity → property
+  const monthGroups = useMemo(() => {
+    // First group all filtered receipts by rent_month
+    const byMonth: Record<string, DbReceipt[]> = {};
+    for (const r of filtered) {
+      const monthKey = r.rent_month || "__none__";
+      if (!byMonth[monthKey]) byMonth[monthKey] = [];
+      byMonth[monthKey].push(r);
     }
 
-    // Sort: entities first (alphabetically), then unassigned
-    const sorted = Object.entries(entityMap).sort(([a, va], [b, vb]) => {
-      if (a === "__unassigned__") return 1;
-      if (b === "__unassigned__") return -1;
-      return (va.entity?.name || "").localeCompare(vb.entity?.name || "");
-    });
+    // For each month, build entity → property groups
+    const result: { monthKey: string; label: string; receipts: DbReceipt[]; entityGroups: [string, { entity: OwnerEntity | null; properties: Record<string, DbReceipt[]> }][] }[] = [];
 
-    return sorted;
-  }, [flatGrouped, propertyToEntity, ownerEntities]);
+    for (const monthKey of Object.keys(byMonth).sort(sortRentMonths)) {
+      const monthReceipts = byMonth[monthKey];
+      const flatByProp: Record<string, DbReceipt[]> = {};
+      for (const r of monthReceipts) {
+        const prop = canonical(r.property);
+        if (!flatByProp[prop]) flatByProp[prop] = [];
+        flatByProp[prop].push(r);
+      }
+
+      const entityMap: Record<string, { entity: OwnerEntity | null; properties: Record<string, DbReceipt[]> }> = {};
+      for (const [prop, receipts] of Object.entries(flatByProp)) {
+        const entityId = propertyToEntity.get(prop);
+        const key = entityId || "__unassigned__";
+        if (!entityMap[key]) {
+          entityMap[key] = {
+            entity: entityId ? ownerEntities.find(e => e.id === entityId) || null : null,
+            properties: {},
+          };
+        }
+        entityMap[key].properties[prop] = receipts;
+      }
+
+      const sortedEntities = Object.entries(entityMap).sort(([a, va], [b, vb]) => {
+        if (a === "__unassigned__") return 1;
+        if (b === "__unassigned__") return -1;
+        return (va.entity?.name || "").localeCompare(vb.entity?.name || "");
+      });
+
+      result.push({
+        monthKey,
+        label: monthKey === "__none__" ? "No Month Assigned" : formatRentMonth(monthKey),
+        receipts: monthReceipts,
+        entityGroups: sortedEntities,
+      });
+    }
+
+    return result;
+  }, [filtered, propertyToEntity, ownerEntities, canonical]);
 
   if (isLoading) {
     return <div className="flex items-center justify-center py-20"><div className="h-8 w-8 border-2 border-accent border-t-transparent rounded-full animate-spin" /></div>;
@@ -945,44 +987,89 @@ export default function EntryView() {
 
         {/* ─── Main Content ─── */}
         <div className="flex-1 min-w-0 space-y-6">
-          {mainContentGroups.length === 0 ? (
+          {monthGroups.length === 0 ? (
             <div className="vault-card p-8 text-center text-muted-foreground text-sm">No finalized receipts.</div>
           ) : (
-            mainContentGroups.map(([key, { entity, properties: propMap }]) => {
-              const entityTotal = Object.values(propMap).flat().reduce((s, r) => s + Number(r.amount), 0);
-              const entityReceiptCount = Object.values(propMap).flat().length;
-              const propCount = Object.keys(propMap).length;
+            monthGroups.map(({ monthKey, label, receipts: monthReceipts, entityGroups }) => {
+              const monthTotal = monthReceipts.reduce((s, r) => s + Number(r.amount), 0);
+              const monthRecorded = monthReceipts.filter((r) => (r as any).appfolio_recorded);
+              const monthRecordedTotal = monthRecorded.reduce((s, r) => s + Number(r.amount), 0);
+              const isMonthCollapsed = collapsedMonths.has(monthKey);
 
               return (
-                <div key={key} className="space-y-4">
-                  {/* Entity header */}
-                  {entity && (
-                    <div className="flex items-center gap-3 px-1">
-                      {batchMode && (
-                        <Checkbox
-                          checked={isEntitySelected(entity.id)}
-                          onCheckedChange={() => toggleSelectEntity(entity.id)}
-                        />
-                      )}
-                      <Building2 className="h-5 w-5 text-accent" />
-                      <div className="flex-1">
-                        <h2 className="text-lg font-bold text-foreground">{entity.name}</h2>
-                        <p className="text-xs text-muted-foreground">{propCount} properties • {entityReceiptCount} receipts • ${fmt(entityTotal)}</p>
+                <div key={monthKey} className="space-y-4">
+                  {/* Month header */}
+                  <button
+                    onClick={() => setCollapsedMonths(prev => {
+                      const next = new Set(prev);
+                      next.has(monthKey) ? next.delete(monthKey) : next.add(monthKey);
+                      return next;
+                    })}
+                    className="w-full vault-card px-5 py-3.5 flex items-center justify-between hover:bg-muted/50 transition-colors cursor-pointer"
+                  >
+                    <div className="flex items-center gap-3">
+                      {isMonthCollapsed
+                        ? <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                        : <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                      }
+                      <Calendar className="h-4.5 w-4.5 text-accent" />
+                      <div className="text-left">
+                        <h2 className="text-base font-bold text-foreground">{label}</h2>
+                        <p className="text-xs text-muted-foreground">
+                          {monthReceipts.length} receipts · {monthRecorded.length} recorded · ${fmt(monthTotal)}
+                        </p>
                       </div>
                     </div>
-                  )}
-                  {key === "__unassigned__" && ownerEntities.length > 0 && (
-                    <div className="flex items-center gap-3 px-1">
-                      <div className="flex-1">
-                        <h2 className="text-lg font-bold text-muted-foreground">Unassigned Properties</h2>
-                        <p className="text-xs text-muted-foreground">{propCount} properties • {entityReceiptCount} receipts • ${fmt(entityTotal)}</p>
-                      </div>
+                    <div className="text-right">
+                      <p className="text-lg vault-mono font-bold text-foreground">${fmt(monthTotal)}</p>
+                      <p className="text-xs text-muted-foreground">
+                        Recorded: ${fmt(monthRecordedTotal)}
+                      </p>
                     </div>
-                  )}
+                  </button>
 
-                  {/* Property cards within entity */}
-                  {Object.entries(propMap).sort(([a], [b]) => a.localeCompare(b)).map(([prop, receipts]) =>
-                    renderPropertyCard(prop, receipts)
+                  {!isMonthCollapsed && (
+                    <div className="space-y-4 pl-4 border-l-2 border-accent/20 ml-2">
+                      {entityGroups.map(([key, { entity, properties: propMap }]) => {
+                        const entityTotal = Object.values(propMap).flat().reduce((s: number, r: DbReceipt) => s + Number(r.amount), 0);
+                        const entityReceiptCount = Object.values(propMap).flat().length;
+                        const propCount = Object.keys(propMap).length;
+
+                        return (
+                          <div key={key} className="space-y-4">
+                            {/* Entity header */}
+                            {entity && (
+                              <div className="flex items-center gap-3 px-1">
+                                {batchMode && (
+                                  <Checkbox
+                                    checked={isEntitySelected(entity.id)}
+                                    onCheckedChange={() => toggleSelectEntity(entity.id)}
+                                  />
+                                )}
+                                <Building2 className="h-5 w-5 text-accent" />
+                                <div className="flex-1">
+                                  <h2 className="text-lg font-bold text-foreground">{entity.name}</h2>
+                                  <p className="text-xs text-muted-foreground">{propCount} properties • {entityReceiptCount} receipts • ${fmt(entityTotal)}</p>
+                                </div>
+                              </div>
+                            )}
+                            {key === "__unassigned__" && ownerEntities.length > 0 && (
+                              <div className="flex items-center gap-3 px-1">
+                                <div className="flex-1">
+                                  <h2 className="text-lg font-bold text-muted-foreground">Unassigned Properties</h2>
+                                  <p className="text-xs text-muted-foreground">{propCount} properties • {entityReceiptCount} receipts • ${fmt(entityTotal)}</p>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Property cards within entity */}
+                            {Object.entries(propMap).sort(([a], [b]) => a.localeCompare(b)).map(([prop, receipts]) =>
+                              renderPropertyCard(prop, receipts as DbReceipt[])
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
                   )}
                 </div>
               );

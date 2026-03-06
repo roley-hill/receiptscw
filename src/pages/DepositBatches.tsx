@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchBatches, fetchReceipts, reverseBatch, moveReceiptsToNewBatch } from "@/lib/api";
 import { downloadBatchPDF, generateBatchXLSX, downloadBatchZIP, downloadGroupedOwnerPDF } from "@/lib/batchReports";
 import { supabase } from "@/integrations/supabase/client";
-import { Building2, ChevronDown, ChevronRight, FileText as FileTextIcon, Layers } from "lucide-react";
+import { Building2, ChevronDown, ChevronRight, FileText as FileTextIcon, Layers, Calendar } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/hooks/use-toast";
 import { useState, useMemo, lazy, Suspense } from "react";
@@ -15,6 +15,29 @@ const BatchDocumentPreview = lazy(() => import("@/components/BatchDocumentPrevie
 type OwnerEntity = { id: string; name: string };
 
 const fmt = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 2 });
+
+function formatRentMonth(rm: string | null): string {
+  if (!rm) return "No Month Assigned";
+  const [year, month] = rm.split("-");
+  const date = new Date(Number(year), Number(month) - 1);
+  return date.toLocaleDateString("en-US", { year: "numeric", month: "long" });
+}
+
+function getBatchMonth(batchId: string, allReceipts: any[]): string {
+  const receipts = allReceipts.filter(r => r.batch_id === batchId);
+  // Find predominant rent_month
+  const counts: Record<string, number> = {};
+  for (const r of receipts) {
+    const m = r.rent_month || "__none__";
+    counts[m] = (counts[m] || 0) + 1;
+  }
+  let best = "__none__";
+  let bestCount = 0;
+  for (const [m, c] of Object.entries(counts)) {
+    if (c > bestCount) { best = m; bestCount = c; }
+  }
+  return best;
+}
 
 export default function DepositBatches() {
   const queryClient = useQueryClient();
@@ -36,6 +59,7 @@ export default function DepositBatches() {
   const [collapsedEntities, setCollapsedEntities] = useState<Set<string>>(new Set());
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
   const [reversedCollapsed, setReversedCollapsed] = useState(true);
+  const [collapsedMonths, setCollapsedMonths] = useState<Set<string>>(new Set());
 
   const reverseMutation = useMutation({
     mutationFn: (batchId: string) => reverseBatch(batchId),
@@ -107,64 +131,211 @@ export default function DepositBatches() {
     );
   };
 
-  // Organize batches into entity groups
-  const { entityGroupedBatches, standaloneBatches, reversedBatches } = useMemo(() => {
+  // Determine month for each batch
+  const batchMonthMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const b of batches) {
+      map.set(b.id, getBatchMonth(b.id, allReceipts));
+    }
+    return map;
+  }, [batches, allReceipts]);
+
+  // Organize batches: month → entity → grouped/standalone
+  type EntityGroup = { entity: OwnerEntity | null; parentBatch: typeof batches[0] | null; children: typeof batches; standalone: typeof batches };
+  type MonthGroup = {
+    monthKey: string;
+    label: string;
+    entityGroups: [string, EntityGroup][];
+    standaloneBatches: typeof batches;
+    totalAmount: number;
+    receiptCount: number;
+  };
+
+  const { monthGroups, reversedBatches } = useMemo(() => {
     const active = batches.filter(b => b.status !== "reversed");
     const reversed = batches.filter(b => b.status === "reversed");
-
-    // Parent batches (have ownership_entity_id and no parent_batch_id, or are parents of children)
     const parentBatchIds = new Set(active.filter(b => b.parent_batch_id).map(b => b.parent_batch_id!));
-    const childBatches = new Set(active.filter(b => b.parent_batch_id).map(b => b.id));
+    const childBatchIds = new Set(active.filter(b => b.parent_batch_id).map(b => b.id));
 
-    // Group by ownership entity
-    const entityMap: Record<string, { entity: OwnerEntity | null; parentBatch: typeof batches[0] | null; children: typeof batches; standalone: typeof batches }> = {};
-
+    // Group active top-level batches by month
+    const byMonth: Record<string, typeof batches> = {};
     for (const batch of active) {
-      if (childBatches.has(batch.id)) continue; // handled under parent
+      if (childBatchIds.has(batch.id)) continue;
+      const month = batchMonthMap.get(batch.id) || "__none__";
+      if (!byMonth[month]) byMonth[month] = [];
+      byMonth[month].push(batch);
+    }
 
-      const entityId = batch.ownership_entity_id;
-      if (entityId && (parentBatchIds.has(batch.id) || batch.parent_batch_id === null)) {
-        if (!entityMap[entityId]) {
-          entityMap[entityId] = {
-            entity: ownerEntities.find(e => e.id === entityId) || null,
-            parentBatch: null,
-            children: [],
-            standalone: [],
-          };
-        }
+    const result: MonthGroup[] = [];
+    for (const monthKey of Object.keys(byMonth).sort((a, b) => {
+      if (a === "__none__") return 1;
+      if (b === "__none__") return -1;
+      return b.localeCompare(a);
+    })) {
+      const monthBatches = byMonth[monthKey];
+      const entityMap: Record<string, EntityGroup> = {};
+      const unassigned: typeof batches = [];
 
-        if (parentBatchIds.has(batch.id)) {
-          // This is a parent batch — find its children
-          entityMap[entityId].parentBatch = batch;
-          entityMap[entityId].children = active.filter(b => b.parent_batch_id === batch.id);
+      for (const batch of monthBatches) {
+        const entityId = batch.ownership_entity_id;
+        if (entityId) {
+          if (!entityMap[entityId]) {
+            entityMap[entityId] = {
+              entity: ownerEntities.find(e => e.id === entityId) || null,
+              parentBatch: null,
+              children: [],
+              standalone: [],
+            };
+          }
+          if (parentBatchIds.has(batch.id)) {
+            entityMap[entityId].parentBatch = batch;
+            entityMap[entityId].children = active.filter(b => b.parent_batch_id === batch.id);
+          } else {
+            entityMap[entityId].standalone.push(batch);
+          }
         } else {
-          // Standalone batch with entity assignment (individual batch)
-          entityMap[entityId].standalone.push(batch);
+          unassigned.push(batch);
         }
       }
+
+      const sortedEntities = Object.entries(entityMap).sort(([, a], [, b]) =>
+        (a.entity?.name || "").localeCompare(b.entity?.name || "")
+      );
+
+      // Compute totals for month
+      const allMonthBatchIds = new Set<string>();
+      for (const [, g] of sortedEntities) {
+        if (g.parentBatch) allMonthBatchIds.add(g.parentBatch.id);
+        for (const c of g.children) allMonthBatchIds.add(c.id);
+        for (const s of g.standalone) allMonthBatchIds.add(s.id);
+      }
+      for (const b of unassigned) allMonthBatchIds.add(b.id);
+      const monthReceipts = allReceipts.filter(r => {
+        if (!r.batch_id) return false;
+        return allMonthBatchIds.has(r.batch_id);
+      });
+
+      result.push({
+        monthKey,
+        label: monthKey === "__none__" ? "No Month Assigned" : formatRentMonth(monthKey),
+        entityGroups: sortedEntities,
+        standaloneBatches: unassigned,
+        totalAmount: monthReceipts.reduce((s, r) => s + Number(r.amount), 0),
+        receiptCount: monthReceipts.length,
+      });
     }
 
-    // Standalone batches: no entity assignment, not a child
-    const entityBatchIds = new Set<string>();
-    for (const group of Object.values(entityMap)) {
-      if (group.parentBatch) entityBatchIds.add(group.parentBatch.id);
-      for (const c of group.children) entityBatchIds.add(c.id);
-      for (const s of group.standalone) entityBatchIds.add(s.id);
-    }
-    const standalone = active.filter(b => !entityBatchIds.has(b.id) && !childBatches.has(b.id));
-
-    return { entityGroupedBatches: entityMap, standaloneBatches: standalone, reversedBatches: reversed };
-  }, [batches, ownerEntities]);
+    return { monthGroups: result, reversedBatches: reversed };
+  }, [batches, ownerEntities, allReceipts, batchMonthMap]);
 
   if (isLoading) {
     return <div className="flex items-center justify-center py-20"><div className="h-8 w-8 border-2 border-accent border-t-transparent rounded-full animate-spin" /></div>;
   }
 
-  const sortedEntityGroups = Object.entries(entityGroupedBatches).sort(([, a], [, b]) =>
-    (a.entity?.name || "").localeCompare(b.entity?.name || "")
-  );
+  const hasAnyBatches = monthGroups.some(mg => mg.entityGroups.length > 0 || mg.standaloneBatches.length > 0);
 
-  const hasAnyBatches = sortedEntityGroups.length > 0 || standaloneBatches.length > 0;
+  const renderEntityGroup = (entityId: string, group: MonthGroup["entityGroups"][0][1], monthKey: string) => {
+    const collapseKey = `${monthKey}__${entityId}`;
+    const isCollapsed = collapsedEntities.has(collapseKey);
+    const allGroupBatches = [...(group.parentBatch ? [group.parentBatch] : []), ...group.children, ...group.standalone];
+    const allGroupReceipts = allGroupBatches.flatMap(b => allReceipts.filter(r => r.batch_id === b.id));
+    const entityTotal = allGroupReceipts.reduce((s, r) => s + Number(r.amount), 0);
+    const entityReceiptCount = allGroupReceipts.length;
+    const batchCount = group.children.length > 0 ? group.children.length : group.standalone.length;
+
+    return (
+      <div key={entityId} className="space-y-3">
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="vault-card px-5 py-4 flex items-center justify-between"
+        >
+          <button
+            onClick={() => {
+              setCollapsedEntities(prev => {
+                const next = new Set(prev);
+                next.has(collapseKey) ? next.delete(collapseKey) : next.add(collapseKey);
+                return next;
+              });
+            }}
+            className="flex items-center gap-3 flex-1 hover:opacity-80 transition-opacity cursor-pointer"
+          >
+            {isCollapsed ? <ChevronRight className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+            <div className="h-9 w-9 rounded-lg bg-accent/10 flex items-center justify-center">
+              <Building2 className="h-4.5 w-4.5 text-accent" />
+            </div>
+            <div className="text-left">
+              <h2 className="text-base font-bold text-foreground">{group.entity?.name || "Unknown Entity"}</h2>
+              <p className="text-xs text-muted-foreground">
+                {batchCount} {batchCount === 1 ? "property" : "properties"} · {entityReceiptCount} receipts
+              </p>
+            </div>
+          </button>
+          <div className="flex items-center gap-4">
+            <div className="text-right">
+              <p className="text-lg vault-mono font-bold text-foreground">${fmt(entityTotal)}</p>
+              <p className="text-xs text-muted-foreground">Total</p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              title="Download grouped owner PDF"
+              onClick={(e) => {
+                e.stopPropagation();
+                const childBatches = group.children.length > 0 ? group.children : group.standalone;
+                const buildingBatches = childBatches
+                  .sort((a, b) => a.property.localeCompare(b.property))
+                  .map(b => ({ batch: b, receipts: allReceipts.filter(r => r.batch_id === b.id) }));
+                downloadGroupedOwnerPDF(group.entity?.name || "Unknown Entity", buildingBatches);
+              }}
+            >
+              <FileTextIcon className="h-3.5 w-3.5 mr-1" />
+              Owner PDF
+            </Button>
+          </div>
+        </motion.div>
+
+        {!isCollapsed && (
+          <div className="space-y-4 pl-6 border-l-2 border-accent/20 ml-4">
+            {group.children.length > 0 && (() => {
+              const sectionKey = `${collapseKey}__grouped`;
+              const isSectionCollapsed = collapsedSections.has(sectionKey);
+              const groupedReceipts = group.children.flatMap(b => allReceipts.filter(r => r.batch_id === b.id));
+              const groupedTotal = groupedReceipts.reduce((s, r) => s + Number(r.amount), 0);
+              return (
+                <div className="space-y-3">
+                  <button onClick={() => toggleSection(sectionKey)} className="flex items-center gap-2 text-sm font-semibold text-foreground hover:opacity-80 transition-opacity cursor-pointer">
+                    {isSectionCollapsed ? <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />}
+                    <Layers className="h-3.5 w-3.5 text-accent" />
+                    <span>Grouped Deposit Batches</span>
+                    <span className="text-xs vault-mono text-muted-foreground font-normal ml-1">{group.children.length} properties · ${fmt(groupedTotal)}</span>
+                  </button>
+                  {!isSectionCollapsed && <div className="space-y-3">{group.children.sort((a, b) => a.property.localeCompare(b.property)).map((batch, i) => renderBatchCard(batch, i))}</div>}
+                </div>
+              );
+            })()}
+            {group.standalone.length > 0 && (() => {
+              const sectionKey = `${collapseKey}__single`;
+              const isSectionCollapsed = collapsedSections.has(sectionKey);
+              const singleReceipts = group.standalone.flatMap(b => allReceipts.filter(r => r.batch_id === b.id));
+              const singleTotal = singleReceipts.reduce((s, r) => s + Number(r.amount), 0);
+              return (
+                <div className="space-y-3">
+                  <button onClick={() => toggleSection(sectionKey)} className="flex items-center gap-2 text-sm font-semibold text-foreground hover:opacity-80 transition-opacity cursor-pointer">
+                    {isSectionCollapsed ? <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />}
+                    <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
+                    <span>Single Property Deposit Batches</span>
+                    <span className="text-xs vault-mono text-muted-foreground font-normal ml-1">{group.standalone.length} batches · ${fmt(singleTotal)}</span>
+                  </button>
+                  {!isSectionCollapsed && <div className="space-y-3">{group.standalone.sort((a, b) => a.property.localeCompare(b.property)).map((batch, i) => renderBatchCard(batch, i))}</div>}
+                </div>
+              );
+            })()}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-6 max-w-6xl">
@@ -177,142 +348,58 @@ export default function DepositBatches() {
         <div className="vault-card p-8 text-center text-muted-foreground text-sm">No deposit batches yet. Create one from the Entry & Recording page.</div>
       ) : (
         <div className="space-y-8">
-          {/* Entity-grouped batches */}
-          {sortedEntityGroups.map(([entityId, group]) => {
-            const isCollapsed = collapsedEntities.has(entityId);
-            const allGroupBatches = [...(group.parentBatch ? [group.parentBatch] : []), ...group.children, ...group.standalone];
-            const allGroupReceipts = allGroupBatches.flatMap(b => allReceipts.filter(r => r.batch_id === b.id));
-            const entityTotal = allGroupReceipts.reduce((s, r) => s + Number(r.amount), 0);
-            const entityReceiptCount = allGroupReceipts.length;
-            const batchCount = group.children.length > 0 ? group.children.length : group.standalone.length;
+          {monthGroups.map(({ monthKey, label, entityGroups, standaloneBatches: monthStandalone, totalAmount, receiptCount }) => {
+            const isMonthCollapsed = collapsedMonths.has(monthKey);
+            const hasContent = entityGroups.length > 0 || monthStandalone.length > 0;
+            if (!hasContent) return null;
 
             return (
-              <div key={entityId} className="space-y-3">
-                {/* Entity header */}
-                <motion.div
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="vault-card px-5 py-4 flex items-center justify-between"
+              <div key={monthKey} className="space-y-4">
+                {/* Month header */}
+                <button
+                  onClick={() => setCollapsedMonths(prev => {
+                    const next = new Set(prev);
+                    next.has(monthKey) ? next.delete(monthKey) : next.add(monthKey);
+                    return next;
+                  })}
+                  className="w-full vault-card px-5 py-3.5 flex items-center justify-between hover:bg-muted/50 transition-colors cursor-pointer"
                 >
-                  <button
-                    onClick={() => toggleEntityCollapse(entityId)}
-                    className="flex items-center gap-3 flex-1 hover:opacity-80 transition-opacity cursor-pointer"
-                  >
-                    {isCollapsed
-                      ? <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                      : <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                    }
-                    <div className="h-9 w-9 rounded-lg bg-accent/10 flex items-center justify-center">
-                      <Building2 className="h-4.5 w-4.5 text-accent" />
-                    </div>
+                  <div className="flex items-center gap-3">
+                    {isMonthCollapsed ? <ChevronRight className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+                    <Calendar className="h-4.5 w-4.5 text-accent" />
                     <div className="text-left">
-                      <h2 className="text-base font-bold text-foreground">{group.entity?.name || "Unknown Entity"}</h2>
+                      <h2 className="text-base font-bold text-foreground">{label}</h2>
                       <p className="text-xs text-muted-foreground">
-                        {batchCount} {batchCount === 1 ? "property" : "properties"} · {entityReceiptCount} receipts
+                        {receiptCount} receipts · {entityGroups.length + (monthStandalone.length > 0 ? 1 : 0)} groups
                       </p>
                     </div>
-                  </button>
-                  <div className="flex items-center gap-4">
-                    <div className="text-right">
-                      <p className="text-lg vault-mono font-bold text-foreground">${fmt(entityTotal)}</p>
-                      <p className="text-xs text-muted-foreground">Grand Total</p>
-                    </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      title="Download grouped owner PDF"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        const childBatches = group.children.length > 0 ? group.children : group.standalone;
-                        const buildingBatches = childBatches
-                          .sort((a, b) => a.property.localeCompare(b.property))
-                          .map(b => ({ batch: b, receipts: allReceipts.filter(r => r.batch_id === b.id) }));
-                        downloadGroupedOwnerPDF(group.entity?.name || "Unknown Entity", buildingBatches);
-                      }}
-                    >
-                      <FileTextIcon className="h-3.5 w-3.5 mr-1" />
-                      Owner PDF
-                    </Button>
                   </div>
-                </motion.div>
+                  <div className="text-right">
+                    <p className="text-lg vault-mono font-bold text-foreground">${fmt(totalAmount)}</p>
+                  </div>
+                </button>
 
-                {!isCollapsed && (
-                  <div className="space-y-4 pl-6 border-l-2 border-accent/20 ml-4">
-                    {/* Grouped Deposit Batches (parent with children) */}
-                    {group.children.length > 0 && (() => {
-                      const sectionKey = `${entityId}__grouped`;
-                      const isSectionCollapsed = collapsedSections.has(sectionKey);
-                      const groupedReceipts = group.children.flatMap(b => allReceipts.filter(r => r.batch_id === b.id));
-                      const groupedTotal = groupedReceipts.reduce((s, r) => s + Number(r.amount), 0);
-                      return (
-                        <div className="space-y-3">
-                          <button
-                            onClick={() => toggleSection(sectionKey)}
-                            className="flex items-center gap-2 text-sm font-semibold text-foreground hover:opacity-80 transition-opacity cursor-pointer"
-                          >
-                            {isSectionCollapsed ? <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />}
-                            <Layers className="h-3.5 w-3.5 text-accent" />
-                            <span>Grouped Deposit Batches</span>
-                            <span className="text-xs vault-mono text-muted-foreground font-normal ml-1">
-                              {group.children.length} properties · ${fmt(groupedTotal)}
-                            </span>
-                          </button>
-                          {!isSectionCollapsed && (
-                            <div className="space-y-3">
-                              {group.children.sort((a, b) => a.property.localeCompare(b.property)).map((batch, i) => renderBatchCard(batch, i))}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })()}
+                {!isMonthCollapsed && (
+                  <div className="space-y-4 pl-4 border-l-2 border-accent/20 ml-2">
+                    {entityGroups.map(([entityId, group]) => renderEntityGroup(entityId, group, monthKey))}
 
-                    {/* Single Property Deposit Batches */}
-                    {group.standalone.length > 0 && (() => {
-                      const sectionKey = `${entityId}__single`;
-                      const isSectionCollapsed = collapsedSections.has(sectionKey);
-                      const singleReceipts = group.standalone.flatMap(b => allReceipts.filter(r => r.batch_id === b.id));
-                      const singleTotal = singleReceipts.reduce((s, r) => s + Number(r.amount), 0);
-                      return (
+                    {monthStandalone.length > 0 && (
+                      <div className="space-y-3">
+                        {entityGroups.length > 0 && (
+                          <div className="px-1">
+                            <h3 className="text-sm font-semibold text-muted-foreground">Unassigned Batches</h3>
+                          </div>
+                        )}
                         <div className="space-y-3">
-                          <button
-                            onClick={() => toggleSection(sectionKey)}
-                            className="flex items-center gap-2 text-sm font-semibold text-foreground hover:opacity-80 transition-opacity cursor-pointer"
-                          >
-                            {isSectionCollapsed ? <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />}
-                            <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
-                            <span>Single Property Deposit Batches</span>
-                            <span className="text-xs vault-mono text-muted-foreground font-normal ml-1">
-                              {group.standalone.length} batches · ${fmt(singleTotal)}
-                            </span>
-                          </button>
-                          {!isSectionCollapsed && (
-                            <div className="space-y-3">
-                              {group.standalone.sort((a, b) => a.property.localeCompare(b.property)).map((batch, i) => renderBatchCard(batch, i))}
-                            </div>
-                          )}
+                          {monthStandalone.map((batch, i) => renderBatchCard(batch, i))}
                         </div>
-                      );
-                    })()}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
             );
           })}
-
-          {/* Standalone (unassigned) batches */}
-          {standaloneBatches.length > 0 && (
-            <div className="space-y-3">
-              {sortedEntityGroups.length > 0 && (
-                <div className="px-1">
-                  <h2 className="text-lg font-semibold text-muted-foreground">Unassigned Batches</h2>
-                  <p className="text-xs text-muted-foreground">{standaloneBatches.length} batches not linked to an ownership entity</p>
-                </div>
-              )}
-              <div className="space-y-4">
-                {standaloneBatches.map((batch, i) => renderBatchCard(batch, i))}
-              </div>
-            </div>
-          )}
 
           {/* Reversed batches */}
           {reversedBatches.length > 0 && (
