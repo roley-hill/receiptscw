@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { X, ChevronLeft, ChevronRight, FileText, Loader2, Eye, FileBarChart } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { motion, AnimatePresence } from "framer-motion";
@@ -19,13 +19,13 @@ type SidebarItem = {
   sublabel: string;
   detail: string;
   type: "report" | "document";
-  receipt?: any;
+  filePath?: string;
+  fileName?: string;
+  originalText?: string | null;
 };
 
 export default function BatchDocumentPreview({ receipts, batch, onClose }: BatchDocumentPreviewProps) {
-  const docsReceipts = receipts.filter((r) => r.file_path);
-
-  // Build sidebar items: PDF report first, then source documents
+  // Build sidebar items: PDF report first, then source documents (deduplicated by file_path)
   const items: SidebarItem[] = useMemo(() => {
     const list: SidebarItem[] = [
       {
@@ -36,25 +36,34 @@ export default function BatchDocumentPreview({ receipts, batch, onClose }: Batch
         type: "report",
       },
     ];
-    for (const r of docsReceipts) {
+    const seenPaths = new Set<string>();
+    for (const r of receipts) {
+      if (!r.file_path || seenPaths.has(r.file_path)) continue;
+      seenPaths.add(r.file_path);
       list.push({
         id: r.id,
         label: r.tenant,
         sublabel: `${r.unit}  ·  $${Number(r.amount).toLocaleString("en-US", { minimumFractionDigits: 2 })}`,
         detail: r.file_name || "document",
         type: "document",
-        receipt: r,
+        filePath: r.file_path,
+        fileName: r.file_name,
+        originalText: r.original_text ?? null,
       });
     }
     return list;
-  }, [receipts, docsReceipts, batch]);
+  }, [receipts, batch]);
 
   const [currentIndex, setCurrentIndex] = useState(0);
   const [fileUrl, setFileUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [reportBlobUrl, setReportBlobUrl] = useState<string | null>(null);
 
+  // Cache signed URLs to avoid redundant network requests
+  const urlCache = useRef<Map<string, string>>(new Map());
+
   const current = items[currentIndex];
+  const currentFilePath = current?.type === "document" ? current.filePath : null;
 
   // Generate report PDF blob URL once
   useEffect(() => {
@@ -69,30 +78,41 @@ export default function BatchDocumentPreview({ receipts, batch, onClose }: Batch
     }
   }, [batch, receipts]);
 
-  // Load file URL for document items
+  // Load file URL for document items — depend on stable primitives, not objects
   useEffect(() => {
-    if (current?.type === "report") {
+    if (!currentFilePath) {
       setFileUrl(null);
       setLoading(false);
       return;
     }
-    const filePath = current?.receipt?.file_path;
-    if (!filePath) {
-      setFileUrl(null);
+
+    // Check cache first
+    const cached = urlCache.current.get(currentFilePath);
+    if (cached) {
+      setFileUrl(cached);
       setLoading(false);
       return;
     }
+
+    let cancelled = false;
     setLoading(true);
     setFileUrl(null);
-    getFilePreviewUrl(filePath)
-      .then((url) => setFileUrl(url))
-      .catch(() => setFileUrl(null))
-      .finally(() => setLoading(false));
-  }, [current]);
 
-  if (items.length <= 1 && docsReceipts.length === 0) {
-    // Only report, no docs — still show the report
-  }
+    getFilePreviewUrl(currentFilePath)
+      .then((url) => {
+        if (cancelled) return;
+        urlCache.current.set(currentFilePath, url);
+        setFileUrl(url);
+      })
+      .catch(() => {
+        if (!cancelled) setFileUrl(null);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [currentFilePath]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
@@ -187,8 +207,8 @@ export default function BatchDocumentPreview({ receipts, batch, onClose }: Batch
                   ) : fileUrl ? (
                     <AttachmentContent
                       url={fileUrl}
-                      fileName={current?.receipt?.file_name || ""}
-                      originalText={current?.receipt?.original_text ?? null}
+                      fileName={current?.fileName || ""}
+                      originalText={current?.originalText ?? null}
                     />
                   ) : (
                     <div className="flex flex-col items-center justify-center min-h-[400px] text-muted-foreground text-sm gap-2">
