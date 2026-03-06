@@ -699,7 +699,7 @@ export default function EntryView() {
                       return next;
                     })}
                   >
-                    <td className="px-3 py-2.5" colSpan={batchMode ? 3 : 2}>
+                    <td className="px-3 py-2.5" colSpan={(batchMode || hasSelections) ? 3 : 2}>
                       <div className="flex items-center gap-1.5">
                         {isOpen ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />}
                       </div>
