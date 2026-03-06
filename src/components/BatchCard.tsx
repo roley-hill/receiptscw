@@ -157,56 +157,58 @@ export default function BatchCard({
             )}
             <BatchStatusBadge status={batch.status} />
           </div>
-          <div className="flex gap-1">
-            <Button variant="outline" size="sm" onClick={onPreview} title="Preview all documents">
-              <Eye className="h-3.5 w-3.5" />
-            </Button>
-            <Button variant="outline" size="sm" onClick={onZipDownload} disabled={isZipping} title="Download deposit package (ZIP)">
-              {isZipping ? <div className="h-3.5 w-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" /> : <PackageOpen className="h-3.5 w-3.5" />}
-            </Button>
-            <Button variant="outline" size="sm" onClick={onPdfDownload} title="Download PDF report">
-              <FileTextIcon className="h-3.5 w-3.5" />
-            </Button>
-            <Button variant="outline" size="sm" onClick={onXlsxDownload} title="Download XLSX report">
-              <FileSpreadsheet className="h-3.5 w-3.5" />
-            </Button>
-            <Button variant="outline" size="sm" title="Email report">
-              <Mail className="h-3.5 w-3.5" />
-            </Button>
-            {receipts.length > 0 && batch.status !== "reversed" && (
-              <Button
-                variant={selectMode ? "secondary" : "outline"}
-                size="sm"
-                onClick={() => selectMode ? exitSelectMode() : setSelectMode(true)}
-                title={selectMode ? "Cancel selection" : "Select receipts to move"}
-              >
-                <SquareCheck className="h-3.5 w-3.5" />
+          {!hideActions && (
+            <div className="flex gap-1">
+              <Button variant="outline" size="sm" onClick={onPreview} title="Preview all documents">
+                <Eye className="h-3.5 w-3.5" />
               </Button>
-            )}
-            {batch.status !== "reversed" && (
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button variant="outline" size="sm" title="Reverse batch" className="text-destructive hover:text-destructive">
-                    <Undo2 className="h-3.5 w-3.5" />
-                  </Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Reverse Batch {batch.batch_id}?</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      This will unlink all {batch.receipt_count} receipt{batch.receipt_count !== 1 ? "s" : ""} from this batch, making them available for re-batching. The batch will be marked as reversed.
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction onClick={onReverse} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-                      Reverse Batch
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
-            )}
-          </div>
+              <Button variant="outline" size="sm" onClick={onZipDownload} disabled={isZipping} title="Download deposit package (ZIP)">
+                {isZipping ? <div className="h-3.5 w-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" /> : <PackageOpen className="h-3.5 w-3.5" />}
+              </Button>
+              <Button variant="outline" size="sm" onClick={onPdfDownload} title="Download PDF report">
+                <FileTextIcon className="h-3.5 w-3.5" />
+              </Button>
+              <Button variant="outline" size="sm" onClick={onXlsxDownload} title="Download XLSX report">
+                <FileSpreadsheet className="h-3.5 w-3.5" />
+              </Button>
+              <Button variant="outline" size="sm" title="Email report">
+                <Mail className="h-3.5 w-3.5" />
+              </Button>
+              {receipts.length > 0 && batch.status !== "reversed" && (
+                <Button
+                  variant={selectMode ? "secondary" : "outline"}
+                  size="sm"
+                  onClick={() => selectMode ? exitSelectMode() : setSelectMode(true)}
+                  title={selectMode ? "Cancel selection" : "Select receipts to move"}
+                >
+                  <SquareCheck className="h-3.5 w-3.5" />
+                </Button>
+              )}
+              {batch.status !== "reversed" && (
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button variant="outline" size="sm" title="Reverse batch" className="text-destructive hover:text-destructive">
+                      <Undo2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Reverse Batch {batch.batch_id}?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        This will unlink all {batch.receipt_count} receipt{batch.receipt_count !== 1 ? "s" : ""} from this batch, making them available for re-batching. The batch will be marked as reversed.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                      <AlertDialogAction onClick={onReverse} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                        Reverse Batch
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
