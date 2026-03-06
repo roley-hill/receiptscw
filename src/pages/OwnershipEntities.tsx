@@ -121,6 +121,20 @@ function parseCsvLine(line: string): string[] {
   return result;
 }
 
+/** Normalize an address for fuzzy matching */
+function normalizeAddr(s: string): string {
+  return s.toLowerCase().replace(/[.,]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+/** Check if any of the CSV address variants match a database property address */
+function matchesProperty(variants: string[], dbAddress: string): boolean {
+  const normalizedDb = normalizeAddr(dbAddress);
+  return variants.some(v => {
+    const nv = normalizeAddr(v);
+    return normalizedDb.startsWith(nv) || nv.startsWith(normalizedDb);
+  });
+}
+
 export default function OwnershipEntities() {
   const queryClient = useQueryClient();
   const [newName, setNewName] = useState("");
