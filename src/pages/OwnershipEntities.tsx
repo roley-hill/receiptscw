@@ -49,6 +49,8 @@ function cleanOwnerName(raw: string): string {
 
 type CsvMapping = {
   propertyAddress: string;
+  /** All address variants parsed from the CSV (e.g. both sides of " - ") */
+  addressVariants: string[];
   ownerName: string;
   selected: boolean;
 };
@@ -85,15 +87,16 @@ function parsePropertyDirectoryCsv(text: string): CsvMapping[] {
     const rawOwner = cols[ownerColIdx]?.trim() || "";
     if (!rawProperty || !rawOwner) continue;
 
-    // Extract the short property name (before the " - " full address)
-    const propertyAddress = rawProperty.includes(" - ")
-      ? rawProperty.split(" - ")[0].trim()
-      : rawProperty;
+    // Extract all address variants from compound names like "14652 Blythe St. (Rear) - 14652-R Blythe Street Panorama City, CA 91402"
+    const addressVariants = rawProperty.includes(" - ")
+      ? rawProperty.split(" - ").map(s => s.trim()).filter(Boolean)
+      : [rawProperty];
+    const propertyAddress = addressVariants[0];
 
     const ownerName = cleanOwnerName(rawOwner);
     if (!ownerName) continue;
 
-    results.push({ propertyAddress, ownerName, selected: true });
+    results.push({ propertyAddress, addressVariants, ownerName, selected: true });
   }
   return results;
 }
@@ -116,6 +119,20 @@ function parseCsvLine(line: string): string[] {
   }
   result.push(current);
   return result;
+}
+
+/** Normalize an address for fuzzy matching */
+function normalizeAddr(s: string): string {
+  return s.toLowerCase().replace(/[.,]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+/** Check if any of the CSV address variants match a database property address */
+function matchesProperty(variants: string[], dbAddress: string): boolean {
+  const normalizedDb = normalizeAddr(dbAddress);
+  return variants.some(v => {
+    const nv = normalizeAddr(v);
+    return normalizedDb.startsWith(nv) || nv.startsWith(normalizedDb);
+  });
 }
 
 export default function OwnershipEntities() {
@@ -296,12 +313,8 @@ export default function OwnershipEntities() {
         const entity = allEntities.find(e => e.name.toLowerCase() === mapping.ownerName.trim().toLowerCase());
         if (!entity) continue;
 
-        // Try to find matching property by normalized address prefix
-        const normalizedCsv = mapping.propertyAddress.toLowerCase().replace(/[.,]/g, " ").replace(/\s+/g, " ").trim();
-        let matchedProperty = properties.find(p => {
-          const normalizedDb = p.address.toLowerCase().replace(/[.,]/g, " ").replace(/\s+/g, " ").trim();
-          return normalizedDb.startsWith(normalizedCsv) || normalizedCsv.startsWith(normalizedDb);
-        });
+        // Try to find matching property using all address variants
+        let matchedProperty = properties.find(p => matchesProperty(mapping.addressVariants, p.address));
 
         if (matchedProperty) {
           const { error } = await supabase
@@ -316,7 +329,7 @@ export default function OwnershipEntities() {
             .from("properties")
             .insert({
               address: mapping.propertyAddress,
-              normalized_address: normalizedCsv,
+              normalized_address: normalizeAddr(mapping.propertyAddress),
               ownership_entity_id: entity.id,
             });
           if (error && !error.message.includes("duplicate")) {
@@ -604,11 +617,7 @@ export default function OwnershipEntities() {
                 {Object.entries(csvByOwner).map(([ownerName, { mappings, indices }]) => (
                   mappings.map((m, j) => {
                     const idx = indices[j];
-                    const normalizedCsv = m.propertyAddress.toLowerCase().replace(/[.,]/g, " ").replace(/\s+/g, " ").trim();
-                    const hasMatch = properties.some(p => {
-                      const normalizedDb = p.address.toLowerCase().replace(/[.,]/g, " ").replace(/\s+/g, " ").trim();
-                      return normalizedDb.startsWith(normalizedCsv) || normalizedCsv.startsWith(normalizedDb);
-                    });
+                    const hasMatch = properties.some(p => matchesProperty(m.addressVariants, p.address));
                     const entityExists = entities.some(e => e.name.toLowerCase() === m.ownerName.trim().toLowerCase());
 
                     return (
