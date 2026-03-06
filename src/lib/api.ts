@@ -73,13 +73,24 @@ export async function getFilePreviewUrl(filePath: string): Promise<string> {
   return data.signedUrl;
 }
 
-export async function createDepositBatch(property: string, receiptIds: string[], depositPeriod: string, userId: string) {
+export async function createDepositBatch(property: string, receiptIds: string[], depositPeriod: string, userId: string, ownershipEntityId?: string) {
   const { data: receipts } = await supabase
     .from("receipts")
     .select("id, amount")
     .in("id", receiptIds);
 
   const totalAmount = receipts?.reduce((sum, r) => sum + Number(r.amount), 0) || 0;
+
+  // Auto-lookup entity if not provided
+  let entityId = ownershipEntityId || null;
+  if (!entityId) {
+    const { data: prop } = await supabase
+      .from("properties")
+      .select("ownership_entity_id")
+      .eq("address", property)
+      .maybeSingle();
+    if (prop?.ownership_entity_id) entityId = prop.ownership_entity_id;
+  }
 
   const { data: batch, error } = await supabase
     .from("deposit_batches")
@@ -89,6 +100,7 @@ export async function createDepositBatch(property: string, receiptIds: string[],
       total_amount: totalAmount,
       receipt_count: receiptIds.length,
       created_by: userId,
+      ownership_entity_id: entityId,
     })
     .select()
     .single();
