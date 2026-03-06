@@ -1033,12 +1033,11 @@ export default function EntryView() {
                             {/* Entity header */}
                             {entity && (
                               <div className="flex items-center gap-3 px-1">
-                                {batchMode && (
-                                  <Checkbox
-                                    checked={isEntitySelected(entity.id)}
-                                    onCheckedChange={() => toggleSelectEntity(entity.id)}
-                                  />
-                                )}
+                                <Checkbox
+                                  checked={isEntitySelected(entity.id)}
+                                  onCheckedChange={() => toggleSelectEntity(entity.id)}
+                                  className="h-4 w-4"
+                                />
                                 <Building2 className="h-5 w-5 text-accent" />
                                 <div className="flex-1">
                                   <h2 className="text-lg font-bold text-foreground">{entity.name}</h2>
