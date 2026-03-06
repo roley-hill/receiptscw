@@ -16,6 +16,29 @@ type OwnerEntity = { id: string; name: string };
 
 const fmt = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 2 });
 
+function formatRentMonth(rm: string | null): string {
+  if (!rm) return "No Month Assigned";
+  const [year, month] = rm.split("-");
+  const date = new Date(Number(year), Number(month) - 1);
+  return date.toLocaleDateString("en-US", { year: "numeric", month: "long" });
+}
+
+function getBatchMonth(batchId: string, allReceipts: any[]): string {
+  const receipts = allReceipts.filter(r => r.batch_id === batchId);
+  // Find predominant rent_month
+  const counts: Record<string, number> = {};
+  for (const r of receipts) {
+    const m = r.rent_month || "__none__";
+    counts[m] = (counts[m] || 0) + 1;
+  }
+  let best = "__none__";
+  let bestCount = 0;
+  for (const [m, c] of Object.entries(counts)) {
+    if (c > bestCount) { best = m; bestCount = c; }
+  }
+  return best;
+}
+
 export default function DepositBatches() {
   const queryClient = useQueryClient();
   const { session } = useAuth();
