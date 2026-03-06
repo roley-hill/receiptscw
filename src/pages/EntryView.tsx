@@ -785,6 +785,9 @@ export default function EntryView() {
           <div className="flex items-center gap-4 text-sm">
             <span className="font-semibold text-foreground">{selectedReceipts.size} receipts selected</span>
             <span className="vault-mono font-bold text-accent">${fmt(selectedTotal)}</span>
+            <Button size="sm" variant="ghost" onClick={() => setSelectedReceipts(new Set())} className="text-xs text-muted-foreground h-7">
+              Clear
+            </Button>
           </div>
           <div className="flex items-center gap-2">
             <Button
