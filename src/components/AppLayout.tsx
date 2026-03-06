@@ -189,6 +189,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 <SidebarGroupContent>
                   <SidebarMenu>
                     {navItems.slice(9, 10).map(renderNavItem)}
+                    {navItems.slice(12, 13).map(renderNavItem)}
                   </SidebarMenu>
                 </SidebarGroupContent>
               </SidebarGroup>
