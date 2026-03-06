@@ -24,12 +24,30 @@ export function ZoomablePreview({ children }: { children: React.ReactNode }) {
   );
 }
 
-export function SpreadsheetPreview({ csv }: { csv: string }) {
-  const lines = csv.split("\n").filter((l) => l.trim());
-  const rows: string[][] = [];
-  for (const line of lines) { if (line.startsWith("=== Sheet:")) continue; rows.push(line.split(",").map((c) => c.trim())); }
-  if (rows.length === 0) return <pre className="text-xs text-muted-foreground whitespace-pre-wrap font-mono">{csv}</pre>;
-  const headerRow = rows[0]; const dataRows = rows.slice(1);
+export function SpreadsheetPreview({ csv, rows: structuredRows }: { csv?: string; rows?: string[][] }) {
+  let headerRow: string[];
+  let dataRows: string[][];
+
+  if (structuredRows && structuredRows.length > 0) {
+    // Use pre-parsed structured rows (no delimiter issues)
+    headerRow = structuredRows[0];
+    dataRows = structuredRows.slice(1);
+  } else if (csv) {
+    // Legacy CSV path — use tab delimiter first, fall back to comma
+    const lines = csv.split("\n").filter((l) => l.trim());
+    const parsed: string[][] = [];
+    for (const line of lines) {
+      if (line.startsWith("=== Sheet:")) continue;
+      // Use tab as primary delimiter (safe for amounts with commas)
+      parsed.push(line.includes("\t") ? line.split("\t").map((c) => c.trim()) : line.split(",").map((c) => c.trim()));
+    }
+    if (parsed.length === 0) return <pre className="text-xs text-muted-foreground whitespace-pre-wrap font-mono">{csv}</pre>;
+    headerRow = parsed[0];
+    dataRows = parsed.slice(1);
+  } else {
+    return null;
+  }
+
   return (
     <div className="overflow-auto rounded-md border border-border">
       <table className="w-full text-xs">
