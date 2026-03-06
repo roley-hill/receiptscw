@@ -792,35 +792,24 @@ export default function EntryView() {
           <div className="flex items-center gap-2">
             <Button
               size="sm"
-              variant="outline"
-              onClick={() => handleCreateBatches("individual")}
-              disabled={isBatchCreating}
+              onClick={async () => {
+                const selectedArr = finalized.filter(r => selectedReceipts.has(r.id) && !(r as any).appfolio_recorded);
+                if (selectedArr.length === 0) {
+                  toast({ title: "All selected receipts are already recorded" });
+                  return;
+                }
+                for (const r of selectedArr) {
+                  await markAppfolioRecorded(r.id, true, user!.id);
+                }
+                queryClient.invalidateQueries({ queryKey: ["receipts"] });
+                toast({ title: `${selectedArr.length} receipt${selectedArr.length > 1 ? "s" : ""} marked as recorded` });
+                setSelectedReceipts(new Set());
+              }}
+              disabled={toggleMutation.isPending}
             >
-              <Layers className="h-3.5 w-3.5 mr-1" />
-              Create Individual Batches
+              <CheckSquare className="h-3.5 w-3.5 mr-1" />
+              Mark Selected as Recorded
             </Button>
-            <AlertDialog open={groupedBatchDialogOpen} onOpenChange={setGroupedBatchDialogOpen}>
-              <AlertDialogTrigger asChild>
-                <Button size="sm" disabled={isBatchCreating}>
-                  <Building2 className="h-3.5 w-3.5 mr-1" />
-                  Create Grouped Batch by Owner
-                </Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>Create Grouped Batches?</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    This will create a parent batch for each ownership entity with child batches per property. Properties without an owner will get individual batches.
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                  <AlertDialogAction onClick={() => handleCreateBatches("grouped")} disabled={isBatchCreating}>
-                    {isBatchCreating ? "Creating..." : "Create Grouped Batches"}
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
           </div>
         </div>
       )}
