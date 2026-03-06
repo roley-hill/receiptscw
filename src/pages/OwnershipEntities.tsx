@@ -87,15 +87,16 @@ function parsePropertyDirectoryCsv(text: string): CsvMapping[] {
     const rawOwner = cols[ownerColIdx]?.trim() || "";
     if (!rawProperty || !rawOwner) continue;
 
-    // Extract the short property name (before the " - " full address)
-    const propertyAddress = rawProperty.includes(" - ")
-      ? rawProperty.split(" - ")[0].trim()
-      : rawProperty;
+    // Extract all address variants from compound names like "14652 Blythe St. (Rear) - 14652-R Blythe Street Panorama City, CA 91402"
+    const addressVariants = rawProperty.includes(" - ")
+      ? rawProperty.split(" - ").map(s => s.trim()).filter(Boolean)
+      : [rawProperty];
+    const propertyAddress = addressVariants[0];
 
     const ownerName = cleanOwnerName(rawOwner);
     if (!ownerName) continue;
 
-    results.push({ propertyAddress, ownerName, selected: true });
+    results.push({ propertyAddress, addressVariants, ownerName, selected: true });
   }
   return results;
 }
