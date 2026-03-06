@@ -49,6 +49,8 @@ function cleanOwnerName(raw: string): string {
 
 type CsvMapping = {
   propertyAddress: string;
+  /** All address variants parsed from the CSV (e.g. both sides of " - ") */
+  addressVariants: string[];
   ownerName: string;
   selected: boolean;
 };
