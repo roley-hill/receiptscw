@@ -893,14 +893,12 @@ export default function EntryView() {
                           onClick={() => { handleSelectProperty(property); togglePropertyExpand(property); }}
                           className={`w-full flex items-center gap-2 pl-7 pr-3 py-2 text-xs transition-colors ${selectedProperty === property && !selectedTenant ? "bg-accent/10 text-accent font-semibold border-l-2 border-accent" : "text-foreground hover:bg-muted/50 border-l-2 border-transparent"}`}
                         >
-                          {batchMode && (
-                            <Checkbox
-                              checked={isPropertySelected(property)}
-                              onCheckedChange={() => toggleSelectProperty(property)}
-                              onClick={(e) => e.stopPropagation()}
-                              className="h-3.5 w-3.5"
-                            />
-                          )}
+                          <Checkbox
+                            checked={isPropertySelected(property)}
+                            onCheckedChange={() => toggleSelectProperty(property)}
+                            onClick={(e) => e.stopPropagation()}
+                            className="h-3.5 w-3.5"
+                          />
                           {isPropExpanded ? <ChevronDown className="h-3 w-3 shrink-0" /> : <ChevronRight className="h-3 w-3 shrink-0" />}
                           <span className="truncate text-left flex-1">{property}</span>
                           <span className="text-[10px] vault-mono text-muted-foreground shrink-0">{recCount}/{count}</span>
