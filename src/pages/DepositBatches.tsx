@@ -127,8 +127,9 @@ export default function DepositBatches() {
     );
   };
 
-  // Organize batches: entity → grouped/standalone (no month at top level)
-  type EntityGroup = { entity: OwnerEntity | null; parentBatch: typeof batches[0] | null; children: typeof batches; standalone: typeof batches };
+  // Organize batches: entity → multiple grouped sets + standalone
+  type GroupedSet = { parentBatch: typeof batches[0]; children: typeof batches };
+  type EntityGroup = { entity: OwnerEntity | null; groupedSets: GroupedSet[]; standalone: typeof batches };
 
   const { entityGroups, unassignedBatches, reversedBatches } = useMemo(() => {
     const active = batches.filter(b => b.status !== "reversed");
@@ -146,14 +147,15 @@ export default function DepositBatches() {
         if (!entityMap[entityId]) {
           entityMap[entityId] = {
             entity: ownerEntities.find(e => e.id === entityId) || null,
-            parentBatch: null,
-            children: [],
+            groupedSets: [],
             standalone: [],
           };
         }
         if (parentBatchIds.has(batch.id)) {
-          entityMap[entityId].parentBatch = batch;
-          entityMap[entityId].children = active.filter(b => b.parent_batch_id === batch.id);
+          entityMap[entityId].groupedSets.push({
+            parentBatch: batch,
+            children: active.filter(b => b.parent_batch_id === batch.id),
+          });
         } else {
           entityMap[entityId].standalone.push(batch);
         }
@@ -177,18 +179,20 @@ export default function DepositBatches() {
 
   const renderEntityGroup = (entityId: string, group: EntityGroup) => {
     const isCollapsed = collapsedEntities.has(entityId);
-    const allGroupBatches = [...(group.parentBatch ? [group.parentBatch] : []), ...group.children, ...group.standalone];
+    const allChildren = group.groupedSets.flatMap(gs => gs.children);
+    const allGroupBatches = [...group.groupedSets.map(gs => gs.parentBatch), ...allChildren, ...group.standalone];
     const allGroupReceipts = allGroupBatches.flatMap(b => allReceipts.filter(r => r.batch_id === b.id));
     const entityTotal = allGroupReceipts.reduce((s, r) => s + Number(r.amount), 0);
     const entityReceiptCount = allGroupReceipts.length;
-    const batchCount = group.children.length > 0 ? group.children.length : group.standalone.length;
-    const isGrouped = group.children.length > 0;
-    const childBatches = isGrouped ? group.children : group.standalone;
-    const buildingBatches = childBatches
+    const hasGrouped = group.groupedSets.length > 0;
+    const batchCount = allChildren.length + group.standalone.length;
+    // For entity-level actions, combine all children across all grouped sets
+    const allChildBatches = hasGrouped ? allChildren : group.standalone;
+    const buildingBatches = allChildBatches
       .sort((a, b) => a.property.localeCompare(b.property))
       .map(b => ({ batch: b, receipts: allReceipts.filter(r => r.batch_id === b.id) }));
     const entityName = group.entity?.name || "Unknown Entity";
-    const allChildBatchIds = childBatches.map(b => b.id);
+    const allChildBatchIds = allChildBatches.map(b => b.id);
 
     return (
       <div key={entityId} className="space-y-3">
@@ -214,7 +218,7 @@ export default function DepositBatches() {
             <div className="text-left">
               <h2 className="text-base font-bold text-foreground">{entityName}</h2>
               <p className="text-xs text-muted-foreground">
-                {batchCount} {batchCount === 1 ? "property" : "properties"} · {entityReceiptCount} receipts
+                {batchCount} {batchCount === 1 ? "property batch" : "property batches"} · {entityReceiptCount} receipts
               </p>
             </div>
           </button>
@@ -223,7 +227,7 @@ export default function DepositBatches() {
               <p className="text-lg vault-mono font-bold text-foreground">${fmt(entityTotal)}</p>
               <p className="text-xs text-muted-foreground">Total</p>
             </div>
-            {isGrouped && (
+            {hasGrouped && (
               <div className="flex gap-1">
                 <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); setPreviewEntityId(entityId); }} title="Preview all documents">
                   <Eye className="h-3.5 w-3.5" />
@@ -255,7 +259,7 @@ export default function DepositBatches() {
                     <AlertDialogHeader>
                       <AlertDialogTitle>Reverse all batches for {entityName}?</AlertDialogTitle>
                       <AlertDialogDescription>
-                        This will reverse all {childBatches.length} property batches in this group, unlinking {entityReceiptCount} receipts. They will be available for re-batching.
+                        This will reverse all {allChildBatchIds.length} property batches in this group, unlinking {entityReceiptCount} receipts. They will be available for re-batching.
                       </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
@@ -268,7 +272,7 @@ export default function DepositBatches() {
                 </AlertDialog>
               </div>
             )}
-            {!isGrouped && (
+            {!hasGrouped && (
               <Button
                 variant="outline"
                 size="sm"
@@ -287,23 +291,23 @@ export default function DepositBatches() {
 
         {!isCollapsed && (
           <div className="space-y-4 pl-6 border-l-2 border-accent/20 ml-4">
-            {group.children.length > 0 && (() => {
-              const sectionKey = `${entityId}__grouped`;
+            {group.groupedSets.map((gs, gsIndex) => {
+              const sectionKey = `${entityId}__grouped_${gsIndex}`;
               const isSectionCollapsed = collapsedSections.has(sectionKey);
-              const groupedReceipts = group.children.flatMap(b => allReceipts.filter(r => r.batch_id === b.id));
+              const groupedReceipts = gs.children.flatMap(b => allReceipts.filter(r => r.batch_id === b.id));
               const groupedTotal = groupedReceipts.reduce((s, r) => s + Number(r.amount), 0);
               return (
-                <div className="space-y-3">
+                <div key={sectionKey} className="space-y-3">
                   <button onClick={() => toggleSection(sectionKey)} className="flex items-center gap-2 text-sm font-semibold text-foreground hover:opacity-80 transition-opacity cursor-pointer">
                     {isSectionCollapsed ? <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />}
                     <Layers className="h-3.5 w-3.5 text-accent" />
-                    <span>Grouped Deposit Batches</span>
-                    <span className="text-xs vault-mono text-muted-foreground font-normal ml-1">{group.children.length} properties · ${fmt(groupedTotal)}</span>
+                    <span>Grouped Deposit Batch — {gs.parentBatch.batch_id}</span>
+                    <span className="text-xs vault-mono text-muted-foreground font-normal ml-1">{gs.children.length} properties · ${fmt(groupedTotal)}</span>
                   </button>
-                  {!isSectionCollapsed && <div className="space-y-3">{group.children.sort((a, b) => a.property.localeCompare(b.property)).map((batch, i) => renderBatchCard(batch, i, true))}</div>}
+                  {!isSectionCollapsed && <div className="space-y-3">{gs.children.sort((a, b) => a.property.localeCompare(b.property)).map((batch, i) => renderBatchCard(batch, i, true))}</div>}
                 </div>
               );
-            })()}
+            })}
             {group.standalone.length > 0 && (() => {
               const sectionKey = `${entityId}__single`;
               const isSectionCollapsed = collapsedSections.has(sectionKey);
@@ -332,7 +336,8 @@ export default function DepositBatches() {
     const entry = entityGroups.find(([id]) => id === previewEntityId);
     if (!entry) return null;
     const [, group] = entry;
-    const childBatches = group.children.length > 0 ? group.children : group.standalone;
+    const allChildren = group.groupedSets.flatMap(gs => gs.children);
+    const childBatches = allChildren.length > 0 ? allChildren : group.standalone;
     const buildingBatches = childBatches.map(b => ({ batch: b, receipts: allReceipts.filter(r => r.batch_id === b.id) }));
     const entityAllReceipts = buildingBatches.flatMap(bb => bb.receipts);
     return {
