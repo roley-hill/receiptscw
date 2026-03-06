@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchBatches, fetchReceipts, reverseBatch, moveReceiptsToNewBatch } from "@/lib/api";
 import { downloadBatchPDF, generateBatchXLSX, downloadBatchZIP } from "@/lib/batchReports";
 import { supabase } from "@/integrations/supabase/client";
-import { Layers, Building2, ChevronDown, ChevronRight } from "lucide-react";
+import { Building2, ChevronDown, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/hooks/use-toast";
 import { useState, useMemo, lazy, Suspense } from "react";
