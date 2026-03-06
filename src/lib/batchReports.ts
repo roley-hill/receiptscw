@@ -4,6 +4,7 @@ import JSZip from "jszip";
 import ExcelJS from "exceljs";
 import { toast } from "@/hooks/use-toast";
 import { getSignedUrlForFile } from "@/lib/api";
+import { highlightExcelRows, highlightPdfLines, type BatchReceipt } from "@/lib/batchHighlighting";
 
 
 /**
@@ -281,13 +282,23 @@ export async function downloadBatchZIP(batch: any, receipts: any[]) {
   const pdfBlob = doc.output("blob");
   zip.file(`batch-report-${batch.batch_id}.pdf`, pdfBlob);
 
+  // Build receipt matching data for highlighting
+  const batchReceipts: BatchReceipt[] = receipts.map((r) => ({
+    tenant: r.tenant,
+    unit: r.unit,
+    amount: Number(r.amount),
+    receipt_date: r.receipt_date,
+    reference: r.reference,
+    receipt_id: r.receipt_id,
+  }));
+
   // 2. Collect unique source documents from receipts
   const filePaths = new Set<string>();
   for (const r of receipts) {
     if (r.file_path) filePaths.add(r.file_path);
   }
 
-  // 3. Download each source document and add to ZIP
+  // 3. Download each source document, highlight matching rows, and add to ZIP
   const docsFolder = zip.folder("source-documents");
   let docCount = 0;
   for (const fp of filePaths) {
@@ -297,9 +308,30 @@ export async function downloadBatchZIP(batch: any, receipts: any[]) {
       const resp = await fetch(signedUrl);
       if (!resp.ok) continue;
       const blob = await resp.blob();
-      // Extract filename from path
       const fileName = fp.split("/").pop() || `document-${docCount + 1}`;
-      docsFolder?.file(fileName, blob);
+      const ext = fileName.toLowerCase().split(".").pop();
+
+      if (ext === "xlsx" || ext === "xls") {
+        // Highlight matching rows in Excel files
+        try {
+          const highlighted = await highlightExcelRows(blob, batchReceipts);
+          docsFolder?.file(fileName, highlighted);
+        } catch (e) {
+          console.warn(`Could not highlight Excel: ${fileName}`, e);
+          docsFolder?.file(fileName, blob);
+        }
+      } else if (ext === "pdf") {
+        // Highlight matching lines in PDF files
+        try {
+          const highlighted = await highlightPdfLines(blob, batchReceipts);
+          docsFolder?.file(fileName, highlighted);
+        } catch (e) {
+          console.warn(`Could not highlight PDF: ${fileName}`, e);
+          docsFolder?.file(fileName, blob);
+        }
+      } else {
+        docsFolder?.file(fileName, blob);
+      }
       docCount++;
     } catch (e) {
       console.warn(`Could not fetch document: ${fp}`, e);
@@ -317,6 +349,6 @@ export async function downloadBatchZIP(batch: any, receipts: any[]) {
 
   toast({
     title: "Deposit package downloaded",
-    description: `ZIP includes report + ${docCount} source document${docCount !== 1 ? "s" : ""}.`,
+    description: `ZIP includes report + ${docCount} highlighted source document${docCount !== 1 ? "s" : ""}.`,
   });
 }
