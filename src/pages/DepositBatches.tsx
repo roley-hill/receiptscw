@@ -249,7 +249,17 @@ export default function DepositBatches() {
                       {isSectionCollapsed ? <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />}
                       <Layers className="h-3.5 w-3.5 text-accent" />
                       <span>Deposit Batch — {gs.parentBatch.batch_id}</span>
-                      <span className="text-xs vault-mono text-muted-foreground font-normal ml-1">{childBatches.length} properties · {groupedReceipts.length} receipts · ${fmt(groupedTotal)}</span>
+                      <span className="text-xs vault-mono text-muted-foreground font-normal ml-1">
+                        {childBatches.length} properties · {groupedReceipts.length} receipts ·{" "}
+                        <button
+                          onClick={(e) => { e.stopPropagation(); copyAmount(sectionKey, groupedTotal); }}
+                          className="inline-flex items-center gap-1 hover:text-foreground transition-colors cursor-copy"
+                          title="Click to copy amount"
+                        >
+                          ${fmt(groupedTotal)}
+                          {copiedKey === sectionKey ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3 opacity-0 group-hover:opacity-100" />}
+                        </button>
+                      </span>
                     </button>
                     <div className="flex gap-1">
                       <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); setPreviewEntityId(entityId + "__gs__" + gsIndex); }} title="Preview all documents">
