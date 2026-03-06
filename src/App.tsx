@@ -59,6 +59,7 @@ function ProtectedRoutes() {
         <Route path="/team" element={<TeamManagement />} />
         <Route path="/dd/upload" element={<DdUpload />} />
         <Route path="/dd/sort" element={<DdFileSorter />} />
+        <Route path="/ownership" element={<OwnershipEntities />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
     </AppLayout>
