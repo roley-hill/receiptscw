@@ -4,6 +4,7 @@ import JSZip from "jszip";
 import ExcelJS from "exceljs";
 import { toast } from "@/hooks/use-toast";
 import { getSignedUrlForFile } from "@/lib/api";
+import { highlightExcelRows, highlightPdfLines, type BatchReceipt } from "@/lib/batchHighlighting";
 
 
 /**
