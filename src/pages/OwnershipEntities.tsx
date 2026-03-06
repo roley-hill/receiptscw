@@ -617,11 +617,7 @@ export default function OwnershipEntities() {
                 {Object.entries(csvByOwner).map(([ownerName, { mappings, indices }]) => (
                   mappings.map((m, j) => {
                     const idx = indices[j];
-                    const normalizedCsv = m.propertyAddress.toLowerCase().replace(/[.,]/g, " ").replace(/\s+/g, " ").trim();
-                    const hasMatch = properties.some(p => {
-                      const normalizedDb = p.address.toLowerCase().replace(/[.,]/g, " ").replace(/\s+/g, " ").trim();
-                      return normalizedDb.startsWith(normalizedCsv) || normalizedCsv.startsWith(normalizedDb);
-                    });
+                    const hasMatch = properties.some(p => matchesProperty(m.addressVariants, p.address));
                     const entityExists = entities.some(e => e.name.toLowerCase() === m.ownerName.trim().toLowerCase());
 
                     return (
