@@ -23,6 +23,7 @@ import AcceptInvite from "@/pages/AcceptInvite";
 import NotFound from "@/pages/NotFound";
 import DdUpload from "@/pages/DdUpload";
 import DdFileSorter from "@/pages/DdFileSorter";
+import OwnershipEntities from "@/pages/OwnershipEntities";
 
 const queryClient = new QueryClient();
 
