@@ -47,7 +47,7 @@ function formatRentMonth(rm: string | null): string {
 export default function BatchCard({
   batch, receipts, index, isZipping,
   onPreview, onZipDownload, onPdfDownload, onXlsxDownload, onReverse,
-  onMoveReceipts, isMoving,
+  onMoveReceipts, isMoving, hideActions = false,
 }: BatchCardProps) {
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
