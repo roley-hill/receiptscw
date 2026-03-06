@@ -736,7 +736,7 @@ export default function EntryView() {
             <Checkbox
               checked={propSelected}
               data-state={propPartial ? "indeterminate" : propSelected ? "checked" : "unchecked"}
-              onCheckedChange={() => toggleSelectProperty(property)}
+              onCheckedChange={() => toggleSelectScoped(receipts)}
               className="h-3.5 w-3.5"
             />
             <h3 className="text-sm font-bold text-foreground">{property}</h3>
