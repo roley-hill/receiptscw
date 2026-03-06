@@ -184,18 +184,12 @@ export default function DepositBatches() {
     const allGroupReceipts = allGroupBatches.flatMap(b => allReceipts.filter(r => r.batch_id === b.id));
     const entityTotal = allGroupReceipts.reduce((s, r) => s + Number(r.amount), 0);
     const entityReceiptCount = allGroupReceipts.length;
-    const hasGrouped = group.groupedSets.length > 0;
-    const batchCount = allChildren.length + group.standalone.length;
-    // For entity-level actions, combine all children across all grouped sets
-    const allChildBatches = hasGrouped ? allChildren : group.standalone;
-    const buildingBatches = allChildBatches
-      .sort((a, b) => a.property.localeCompare(b.property))
-      .map(b => ({ batch: b, receipts: allReceipts.filter(r => r.batch_id === b.id) }));
+    const batchCount = group.groupedSets.length + group.standalone.length;
     const entityName = group.entity?.name || "Unknown Entity";
-    const allChildBatchIds = allChildBatches.map(b => b.id);
 
     return (
       <div key={entityId} className="space-y-3">
+        {/* Entity header — collapsible grouping only, no actions */}
         <motion.div
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
@@ -218,136 +212,96 @@ export default function DepositBatches() {
             <div className="text-left">
               <h2 className="text-base font-bold text-foreground">{entityName}</h2>
               <p className="text-xs text-muted-foreground">
-                {batchCount} {batchCount === 1 ? "property batch" : "property batches"} · {entityReceiptCount} receipts
+                {batchCount} {batchCount === 1 ? "deposit batch" : "deposit batches"} · {entityReceiptCount} receipts
               </p>
             </div>
           </button>
-          <div className="flex items-center gap-4">
-            <div className="text-right">
-              <p className="text-lg vault-mono font-bold text-foreground">${fmt(entityTotal)}</p>
-              <p className="text-xs text-muted-foreground">Total</p>
-            </div>
-            {hasGrouped && (
-              <div className="flex gap-1">
-                <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); setPreviewEntityId(entityId); }} title="Preview all documents">
-                  <Eye className="h-3.5 w-3.5" />
-                </Button>
-                <Button
-                  variant="outline" size="sm"
-                  disabled={downloadingEntityZip === entityId}
-                  onClick={(e) => { e.stopPropagation(); handleEntityZipDownload(entityId, entityName, buildingBatches); }}
-                  title="Download grouped deposit package (ZIP)"
-                >
-                  {downloadingEntityZip === entityId ? <div className="h-3.5 w-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" /> : <PackageOpen className="h-3.5 w-3.5" />}
-                </Button>
-                <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); downloadGroupedOwnerPDF(entityName, buildingBatches); }} title="Download grouped PDF report">
-                  <FileTextIcon className="h-3.5 w-3.5" />
-                </Button>
-                <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); generateGroupedXLSX(entityName, buildingBatches); }} title="Download grouped XLSX report">
-                  <FileSpreadsheet className="h-3.5 w-3.5" />
-                </Button>
-                <Button variant="outline" size="sm" title="Email grouped report" onClick={(e) => e.stopPropagation()}>
-                  <Mail className="h-3.5 w-3.5" />
-                </Button>
-                <AlertDialog>
-                  <AlertDialogTrigger asChild>
-                    <Button variant="outline" size="sm" title="Reverse all batches in group" className="text-destructive hover:text-destructive" onClick={(e) => e.stopPropagation()}>
-                      <Undo2 className="h-3.5 w-3.5" />
-                    </Button>
-                  </AlertDialogTrigger>
-                  <AlertDialogContent>
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>Reverse all batches for {entityName}?</AlertDialogTitle>
-                      <AlertDialogDescription>
-                        This will reverse all {allChildBatchIds.length} property batches in this group, unlinking {entityReceiptCount} receipts. They will be available for re-batching.
-                      </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel>Cancel</AlertDialogCancel>
-                      <AlertDialogAction onClick={() => reverseEntityMutation.mutate(allChildBatchIds)} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-                        Reverse All Batches
-                      </AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
-              </div>
-            )}
-            {!hasGrouped && (
-              <Button
-                variant="outline"
-                size="sm"
-                title="Download grouped owner PDF"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  downloadGroupedOwnerPDF(entityName, buildingBatches);
-                }}
-              >
-                <FileTextIcon className="h-3.5 w-3.5 mr-1" />
-                Owner PDF
-              </Button>
-            )}
+          <div className="text-right">
+            <p className="text-lg vault-mono font-bold text-foreground">${fmt(entityTotal)}</p>
+            <p className="text-xs text-muted-foreground">Total</p>
           </div>
         </motion.div>
 
         {!isCollapsed && (
           <div className="space-y-4 pl-6 border-l-2 border-accent/20 ml-4">
+            {/* Each grouped deposit batch gets its own header with full actions */}
             {group.groupedSets.map((gs, gsIndex) => {
               const sectionKey = `${entityId}__grouped_${gsIndex}`;
               const isSectionCollapsed = collapsedSections.has(sectionKey);
-              const groupedReceipts = gs.children.flatMap(b => allReceipts.filter(r => r.batch_id === b.id));
+              const childBatches = gs.children.sort((a, b) => a.property.localeCompare(b.property));
+              const groupedReceipts = childBatches.flatMap(b => allReceipts.filter(r => r.batch_id === b.id));
               const groupedTotal = groupedReceipts.reduce((s, r) => s + Number(r.amount), 0);
+              const buildingBatches = childBatches.map(b => ({ batch: b, receipts: allReceipts.filter(r => r.batch_id === b.id) }));
+              const childBatchIds = childBatches.map(b => b.id);
+
               return (
                 <div key={sectionKey} className="space-y-3">
-                  <button onClick={() => toggleSection(sectionKey)} className="flex items-center gap-2 text-sm font-semibold text-foreground hover:opacity-80 transition-opacity cursor-pointer">
-                    {isSectionCollapsed ? <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />}
-                    <Layers className="h-3.5 w-3.5 text-accent" />
-                    <span>Grouped Deposit Batch — {gs.parentBatch.batch_id}</span>
-                    <span className="text-xs vault-mono text-muted-foreground font-normal ml-1">{gs.children.length} properties · ${fmt(groupedTotal)}</span>
-                  </button>
-                  {!isSectionCollapsed && <div className="space-y-3">{gs.children.sort((a, b) => a.property.localeCompare(b.property)).map((batch, i) => renderBatchCard(batch, i, true))}</div>}
+                  {/* Batch-level header with ALL actions */}
+                  <div className="vault-card px-4 py-3 flex items-center justify-between">
+                    <button onClick={() => toggleSection(sectionKey)} className="flex items-center gap-2 text-sm font-semibold text-foreground hover:opacity-80 transition-opacity cursor-pointer flex-1">
+                      {isSectionCollapsed ? <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />}
+                      <Layers className="h-3.5 w-3.5 text-accent" />
+                      <span>Deposit Batch — {gs.parentBatch.batch_id}</span>
+                      <span className="text-xs vault-mono text-muted-foreground font-normal ml-1">{childBatches.length} properties · {groupedReceipts.length} receipts · ${fmt(groupedTotal)}</span>
+                    </button>
+                    <div className="flex gap-1">
+                      <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); setPreviewEntityId(entityId + "__gs__" + gsIndex); }} title="Preview all documents">
+                        <Eye className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        variant="outline" size="sm"
+                        disabled={downloadingEntityZip === sectionKey}
+                        onClick={(e) => { e.stopPropagation(); handleEntityZipDownload(sectionKey, entityName, buildingBatches); }}
+                        title="Download deposit package (ZIP)"
+                      >
+                        {downloadingEntityZip === sectionKey ? <div className="h-3.5 w-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" /> : <PackageOpen className="h-3.5 w-3.5" />}
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); downloadGroupedOwnerPDF(entityName, buildingBatches); }} title="Download PDF report">
+                        <FileTextIcon className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); generateGroupedXLSX(entityName, buildingBatches); }} title="Download XLSX report">
+                        <FileSpreadsheet className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button variant="outline" size="sm" title="Email report" onClick={(e) => e.stopPropagation()}>
+                        <Mail className="h-3.5 w-3.5" />
+                      </Button>
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button variant="outline" size="sm" title="Reverse this batch" className="text-destructive hover:text-destructive" onClick={(e) => e.stopPropagation()}>
+                            <Undo2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Reverse Batch {gs.parentBatch.batch_id}?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              This will reverse all {childBatchIds.length} property batches in this deposit batch, unlinking {groupedReceipts.length} receipts. They will be available for re-batching.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>Cancel</AlertDialogCancel>
+                            <AlertDialogAction onClick={() => reverseEntityMutation.mutate(childBatchIds)} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                              Reverse Batch
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    </div>
+                  </div>
+                  {/* Property cards within this batch — no individual actions */}
+                  {!isSectionCollapsed && <div className="space-y-3 pl-4">{childBatches.map((batch, i) => renderBatchCard(batch, i, true))}</div>}
                 </div>
               );
             })}
-            {group.standalone.length > 0 && (() => {
-              const sectionKey = `${entityId}__single`;
-              const isSectionCollapsed = collapsedSections.has(sectionKey);
-              const singleReceipts = group.standalone.flatMap(b => allReceipts.filter(r => r.batch_id === b.id));
-              const singleTotal = singleReceipts.reduce((s, r) => s + Number(r.amount), 0);
-              return (
-                <div className="space-y-3">
-                  <button onClick={() => toggleSection(sectionKey)} className="flex items-center gap-2 text-sm font-semibold text-foreground hover:opacity-80 transition-opacity cursor-pointer">
-                    {isSectionCollapsed ? <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />}
-                    <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
-                    <span>Single Property Deposit Batches</span>
-                    <span className="text-xs vault-mono text-muted-foreground font-normal ml-1">{group.standalone.length} batches · ${fmt(singleTotal)}</span>
-                  </button>
-                  {!isSectionCollapsed && <div className="space-y-3">{group.standalone.sort((a, b) => a.property.localeCompare(b.property)).map((batch, i) => renderBatchCard(batch, i))}</div>}
-                </div>
-              );
-            })()}
+
+            {/* Standalone single-property batches keep their own actions */}
+            {group.standalone.length > 0 && group.standalone.sort((a, b) => a.property.localeCompare(b.property)).map((batch, i) => renderBatchCard(batch, i))}
           </div>
         )}
       </div>
     );
   };
 
-  // Find entity data for preview
-  const previewEntityData = previewEntityId ? (() => {
-    const entry = entityGroups.find(([id]) => id === previewEntityId);
-    if (!entry) return null;
-    const [, group] = entry;
-    const allChildren = group.groupedSets.flatMap(gs => gs.children);
-    const childBatches = allChildren.length > 0 ? allChildren : group.standalone;
-    const buildingBatches = childBatches.map(b => ({ batch: b, receipts: allReceipts.filter(r => r.batch_id === b.id) }));
-    const entityAllReceipts = buildingBatches.flatMap(bb => bb.receipts);
-    return {
-      entityName: group.entity?.name || "Unknown Entity",
-      buildingBatches,
-      allReceipts: entityAllReceipts,
-      // Use first child batch as the "batch" prop for BatchDocumentPreview
-      firstBatch: childBatches[0],
-    };
-  })() : null;
 
   return (
     <div className="space-y-6 max-w-6xl">
@@ -402,19 +356,31 @@ export default function DepositBatches() {
         </Suspense>
       )}
 
-      {previewEntityData && (
-        <Suspense fallback={null}>
-          <BatchDocumentPreview
-            receipts={previewEntityData.allReceipts}
-            batch={previewEntityData.firstBatch}
-            onClose={() => setPreviewEntityId(null)}
-            groupedMode={{
-              entityName: previewEntityData.entityName,
-              buildingBatches: previewEntityData.buildingBatches,
-            }}
-          />
-        </Suspense>
-      )}
+      {previewEntityId && (() => {
+        const parts = previewEntityId.split("__gs__");
+        if (parts.length !== 2) return null;
+        const [eid, gsIdxStr] = parts;
+        const gsIdx = Number(gsIdxStr);
+        const entry = entityGroups.find(([id]) => id === eid);
+        if (!entry) return null;
+        const [, group] = entry;
+        const gs = group.groupedSets[gsIdx];
+        if (!gs) return null;
+        const childBatches = gs.children.sort((a, b) => a.property.localeCompare(b.property));
+        const buildingBatches = childBatches.map(b => ({ batch: b, receipts: allReceipts.filter(r => r.batch_id === b.id) }));
+        const previewReceipts = buildingBatches.flatMap(bb => bb.receipts);
+        const entityName = group.entity?.name || "Unknown Entity";
+        return (
+          <Suspense fallback={null}>
+            <BatchDocumentPreview
+              receipts={previewReceipts}
+              batch={childBatches[0]}
+              onClose={() => setPreviewEntityId(null)}
+              groupedMode={{ entityName, buildingBatches }}
+            />
+          </Suspense>
+        );
+      })()}
     </div>
   );
 }
