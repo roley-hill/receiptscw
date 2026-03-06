@@ -85,6 +85,21 @@ type PropertyRecord = { id: string; address: string; normalized_address: string;
 
 const fmt = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 2 });
 
+/** Format YYYY-MM rent_month to readable label */
+function formatRentMonth(rm: string | null): string {
+  if (!rm) return "No Month Assigned";
+  const [year, month] = rm.split("-");
+  const date = new Date(Number(year), Number(month) - 1);
+  return date.toLocaleDateString("en-US", { year: "numeric", month: "long" });
+}
+
+/** Sort rent months newest first; null goes last */
+function sortRentMonths(a: string, b: string): number {
+  if (a === "__none__") return 1;
+  if (b === "__none__") return -1;
+  return b.localeCompare(a);
+}
+
 /* ─── Main page ─── */
 export default function EntryView() {
   const { user } = useAuth();
