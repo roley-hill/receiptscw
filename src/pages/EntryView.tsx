@@ -831,7 +831,7 @@ export default function EntryView() {
                     {batchMode && (
                       <Checkbox
                         checked={isEntitySelected(entityId)}
-                        onCheckedChange={(e) => { e.stopPropagation?.(); toggleSelectEntity(entityId); }}
+                        onCheckedChange={() => toggleSelectEntity(entityId)}
                         onClick={(e) => e.stopPropagation()}
                         className="h-3.5 w-3.5"
                       />
