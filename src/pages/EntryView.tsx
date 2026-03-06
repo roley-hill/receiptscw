@@ -483,31 +483,57 @@ export default function EntryView() {
     toast({ title: "Copied all fields" });
   };
 
-  // Group flatGrouped by entity for main content display
-  const mainContentGroups = useMemo(() => {
-    const entityMap: Record<string, { entity: OwnerEntity | null; properties: Record<string, DbReceipt[]> }> = {};
-
-    for (const [prop, receipts] of Object.entries(flatGrouped)) {
-      const entityId = propertyToEntity.get(prop);
-      const key = entityId || "__unassigned__";
-      if (!entityMap[key]) {
-        entityMap[key] = {
-          entity: entityId ? ownerEntities.find(e => e.id === entityId) || null : null,
-          properties: {},
-        };
-      }
-      entityMap[key].properties[prop] = receipts;
+  // Group by rent_month → entity → property
+  const monthGroups = useMemo(() => {
+    // First group all filtered receipts by rent_month
+    const byMonth: Record<string, DbReceipt[]> = {};
+    for (const r of filtered) {
+      const monthKey = r.rent_month || "__none__";
+      if (!byMonth[monthKey]) byMonth[monthKey] = [];
+      byMonth[monthKey].push(r);
     }
 
-    // Sort: entities first (alphabetically), then unassigned
-    const sorted = Object.entries(entityMap).sort(([a, va], [b, vb]) => {
-      if (a === "__unassigned__") return 1;
-      if (b === "__unassigned__") return -1;
-      return (va.entity?.name || "").localeCompare(vb.entity?.name || "");
-    });
+    // For each month, build entity → property groups
+    const result: { monthKey: string; label: string; receipts: DbReceipt[]; entityGroups: [string, { entity: OwnerEntity | null; properties: Record<string, DbReceipt[]> }][] }[] = [];
 
-    return sorted;
-  }, [flatGrouped, propertyToEntity, ownerEntities]);
+    for (const monthKey of Object.keys(byMonth).sort(sortRentMonths)) {
+      const monthReceipts = byMonth[monthKey];
+      const flatByProp: Record<string, DbReceipt[]> = {};
+      for (const r of monthReceipts) {
+        const prop = canonical(r.property);
+        if (!flatByProp[prop]) flatByProp[prop] = [];
+        flatByProp[prop].push(r);
+      }
+
+      const entityMap: Record<string, { entity: OwnerEntity | null; properties: Record<string, DbReceipt[]> }> = {};
+      for (const [prop, receipts] of Object.entries(flatByProp)) {
+        const entityId = propertyToEntity.get(prop);
+        const key = entityId || "__unassigned__";
+        if (!entityMap[key]) {
+          entityMap[key] = {
+            entity: entityId ? ownerEntities.find(e => e.id === entityId) || null : null,
+            properties: {},
+          };
+        }
+        entityMap[key].properties[prop] = receipts;
+      }
+
+      const sortedEntities = Object.entries(entityMap).sort(([a, va], [b, vb]) => {
+        if (a === "__unassigned__") return 1;
+        if (b === "__unassigned__") return -1;
+        return (va.entity?.name || "").localeCompare(vb.entity?.name || "");
+      });
+
+      result.push({
+        monthKey,
+        label: monthKey === "__none__" ? "No Month Assigned" : formatRentMonth(monthKey),
+        receipts: monthReceipts,
+        entityGroups: sortedEntities,
+      });
+    }
+
+    return result;
+  }, [filtered, propertyToEntity, ownerEntities, canonical]);
 
   if (isLoading) {
     return <div className="flex items-center justify-center py-20"><div className="h-8 w-8 border-2 border-accent border-t-transparent rounded-full animate-spin" /></div>;
