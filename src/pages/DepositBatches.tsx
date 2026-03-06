@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchBatches, fetchReceipts, reverseBatch, moveReceiptsToNewBatch } from "@/lib/api";
 import { downloadBatchPDF, generateBatchXLSX, downloadBatchZIP, downloadGroupedOwnerPDF, generateGroupedXLSX, downloadGroupedZIP } from "@/lib/batchReports";
 import { supabase } from "@/integrations/supabase/client";
-import { Building2, ChevronDown, ChevronRight, FileText as FileTextIcon, FileSpreadsheet, Layers, Eye, PackageOpen, Mail, Undo2, SquareCheck } from "lucide-react";
+import { Building2, ChevronDown, ChevronRight, FileText as FileTextIcon, FileSpreadsheet, Layers, Eye, PackageOpen, Mail, Undo2, SquareCheck, Copy, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
