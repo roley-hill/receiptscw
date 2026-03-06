@@ -238,8 +238,8 @@ export default function EntryView() {
 
   // ─── Selection helpers ───
   const hasSelections = selectedReceipts.size > 0;
-  const getPropertyReceipts = (property: string) =>
-    finalized.filter(r => canonical(r.property) === property && (r as any).appfolio_recorded && !r.batch_id);
+   const getPropertyReceipts = (property: string) =>
+    finalized.filter(r => canonical(r.property) === property && !r.batch_id);
 
   const getEntityReceipts = (entityId: string) => {
     const props = entityGroups.groups[entityId] || [];
