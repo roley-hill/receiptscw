@@ -302,23 +302,6 @@ export default function DepositBatches() {
     );
   };
 
-  // Find entity data for preview
-  const previewEntityData = previewEntityId ? (() => {
-    const entry = entityGroups.find(([id]) => id === previewEntityId);
-    if (!entry) return null;
-    const [, group] = entry;
-    const allChildren = group.groupedSets.flatMap(gs => gs.children);
-    const childBatches = allChildren.length > 0 ? allChildren : group.standalone;
-    const buildingBatches = childBatches.map(b => ({ batch: b, receipts: allReceipts.filter(r => r.batch_id === b.id) }));
-    const entityAllReceipts = buildingBatches.flatMap(bb => bb.receipts);
-    return {
-      entityName: group.entity?.name || "Unknown Entity",
-      buildingBatches,
-      allReceipts: entityAllReceipts,
-      // Use first child batch as the "batch" prop for BatchDocumentPreview
-      firstBatch: childBatches[0],
-    };
-  })() : null;
 
   return (
     <div className="space-y-6 max-w-6xl">
