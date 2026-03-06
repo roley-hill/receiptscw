@@ -257,7 +257,7 @@ export default function DepositBatches() {
                           title="Click to copy amount"
                         >
                           ${fmt(groupedTotal)}
-                          {copiedKey === sectionKey ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3 opacity-0 group-hover:opacity-100" />}
+                          {copiedKey === sectionKey ? <Check className="h-3 w-3 text-accent" /> : <Copy className="h-3 w-3 opacity-0 group-hover:opacity-100" />}
                         </button>
                       </span>
                     </button>
