@@ -24,6 +24,7 @@ interface BatchCardProps {
   onReverse: () => void;
   onMoveReceipts: (receiptIds: string[]) => void;
   isMoving: boolean;
+  hideActions?: boolean;
 }
 
 function BatchStatusBadge({ status }: { status: string }) {
