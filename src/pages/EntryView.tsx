@@ -1040,6 +1040,7 @@ export default function EntryView() {
                                   <h2 className="text-lg font-bold text-foreground">{entity.name}</h2>
                                   <p className="text-xs text-muted-foreground">{propCount} properties • {entityReceiptCount} receipts • ${fmt(entityTotal)}</p>
                                 </div>
+                                {renderBulkActions(Object.values(propMap).flat() as DbReceipt[])}
                               </div>
                             )}
                             {key === "__unassigned__" && ownerEntities.length > 0 && (
