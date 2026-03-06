@@ -303,6 +303,26 @@ export default function EntryView() {
   const selectedTotal = finalized.filter(r => selectedReceipts.has(r.id)).reduce((s, r) => s + Number(r.amount), 0);
 
   // ─── Inline bulk action buttons for a set of receipts ───
+  const bulkDeleteMutation = useMutation({
+    mutationFn: async (ids: string[]) => {
+      for (const id of ids) {
+        const { error } = await supabase.from("receipts").delete().eq("id", id);
+        if (error) throw error;
+      }
+    },
+    onSuccess: (_data, ids) => {
+      toast({ title: `${ids.length} receipt${ids.length > 1 ? "s" : ""} deleted` });
+      queryClient.invalidateQueries({ queryKey: ["receipts"] });
+      queryClient.invalidateQueries({ queryKey: ["pending_counts"] });
+      setSelectedReceipts(prev => {
+        const next = new Set(prev);
+        ids.forEach(id => next.delete(id));
+        return next;
+      });
+    },
+    onError: (err: Error) => toast({ title: "Delete failed", description: err.message, variant: "destructive" }),
+  });
+
   const renderBulkActions = (scopeReceipts: DbReceipt[]) => {
     const selected = scopeReceipts.filter(r => selectedReceipts.has(r.id));
     if (selected.length === 0) return null;
@@ -332,6 +352,31 @@ export default function EntryView() {
           }} disabled={toggleMutation.isPending}>
             <Square className="h-3 w-3 mr-0.5" />Unmark ({recorded.length})
           </Button>
+        )}
+        {isAdmin && (
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button size="sm" variant="destructive" className="h-6 text-[10px] px-2" onClick={(e) => e.stopPropagation()}>
+                <Trash2 className="h-3 w-3 mr-0.5" />Delete ({selected.length})
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent onClick={(e) => e.stopPropagation()}>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete {selected.length} receipt{selected.length > 1 ? "s" : ""}?</AlertDialogTitle>
+                <AlertDialogDescription>This action cannot be undone. The selected receipts will be permanently removed.</AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  onClick={() => bulkDeleteMutation.mutate(selected.map(r => r.id))}
+                  disabled={bulkDeleteMutation.isPending}
+                >
+                  {bulkDeleteMutation.isPending ? "Deleting…" : "Delete"}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         )}
         <Button size="sm" variant="ghost" className="h-6 text-[10px] px-1.5 text-muted-foreground" onClick={(e) => {
           e.stopPropagation();
