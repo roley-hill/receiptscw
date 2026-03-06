@@ -236,13 +236,63 @@ export default function DepositBatches() {
                   </div>
                 </motion.div>
 
-                {/* Child/standalone batches */}
                 {!isCollapsed && (
-                  <div className="space-y-3 pl-6 border-l-2 border-accent/20 ml-4">
-                    {group.children.length > 0
-                      ? group.children.sort((a, b) => a.property.localeCompare(b.property)).map((batch, i) => renderBatchCard(batch, i))
-                      : group.standalone.sort((a, b) => a.property.localeCompare(b.property)).map((batch, i) => renderBatchCard(batch, i))
-                    }
+                  <div className="space-y-4 pl-6 border-l-2 border-accent/20 ml-4">
+                    {/* Grouped Deposit Batches (parent with children) */}
+                    {group.children.length > 0 && (() => {
+                      const sectionKey = `${entityId}__grouped`;
+                      const isSectionCollapsed = collapsedSections.has(sectionKey);
+                      const groupedReceipts = group.children.flatMap(b => allReceipts.filter(r => r.batch_id === b.id));
+                      const groupedTotal = groupedReceipts.reduce((s, r) => s + Number(r.amount), 0);
+                      return (
+                        <div className="space-y-3">
+                          <button
+                            onClick={() => toggleSection(sectionKey)}
+                            className="flex items-center gap-2 text-sm font-semibold text-foreground hover:opacity-80 transition-opacity cursor-pointer"
+                          >
+                            {isSectionCollapsed ? <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />}
+                            <Layers className="h-3.5 w-3.5 text-accent" />
+                            <span>Grouped Deposit Batches</span>
+                            <span className="text-xs vault-mono text-muted-foreground font-normal ml-1">
+                              {group.children.length} properties · ${fmt(groupedTotal)}
+                            </span>
+                          </button>
+                          {!isSectionCollapsed && (
+                            <div className="space-y-3">
+                              {group.children.sort((a, b) => a.property.localeCompare(b.property)).map((batch, i) => renderBatchCard(batch, i))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+
+                    {/* Single Property Deposit Batches */}
+                    {group.standalone.length > 0 && (() => {
+                      const sectionKey = `${entityId}__single`;
+                      const isSectionCollapsed = collapsedSections.has(sectionKey);
+                      const singleReceipts = group.standalone.flatMap(b => allReceipts.filter(r => r.batch_id === b.id));
+                      const singleTotal = singleReceipts.reduce((s, r) => s + Number(r.amount), 0);
+                      return (
+                        <div className="space-y-3">
+                          <button
+                            onClick={() => toggleSection(sectionKey)}
+                            className="flex items-center gap-2 text-sm font-semibold text-foreground hover:opacity-80 transition-opacity cursor-pointer"
+                          >
+                            {isSectionCollapsed ? <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />}
+                            <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
+                            <span>Single Property Deposit Batches</span>
+                            <span className="text-xs vault-mono text-muted-foreground font-normal ml-1">
+                              {group.standalone.length} batches · ${fmt(singleTotal)}
+                            </span>
+                          </button>
+                          {!isSectionCollapsed && (
+                            <div className="space-y-3">
+                              {group.standalone.sort((a, b) => a.property.localeCompare(b.property)).map((batch, i) => renderBatchCard(batch, i))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
               </div>
