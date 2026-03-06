@@ -79,6 +79,14 @@ export default function DepositBatches() {
     });
   };
 
+  const toggleSection = (key: string) => {
+    setCollapsedSections(prev => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  };
+
   const renderBatchCard = (batch: any, index: number) => {
     const receipts = allReceipts.filter((r) => r.batch_id === batch.id);
     return (
