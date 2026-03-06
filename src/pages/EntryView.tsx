@@ -717,8 +717,8 @@ export default function EntryView() {
     const recorded = receipts.filter((r) => (r as any).appfolio_recorded);
     const recordedAmt = recorded.reduce((s, r) => s + Number(r.amount), 0);
     const unbatched = recorded.filter((r) => !r.batch_id);
-    const propSelected = isPropertySelected(property);
-    const propPartial = isPropertyPartial(property);
+    const propSelected = isScopedSelected(receipts);
+    const propPartial = isScopedPartial(receipts);
 
     // Build tenant groups
     const tenantGroups: Record<string, DbReceipt[]> = {};
