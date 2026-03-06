@@ -630,14 +630,12 @@ export default function EntryView() {
       <motion.div key={property} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="vault-card overflow-hidden">
         <div className="px-4 py-3 border-b border-border bg-muted/30 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            {batchMode && (
-              <Checkbox
-                checked={propSelected}
-                // @ts-ignore - indeterminate support
-                data-state={propPartial ? "indeterminate" : propSelected ? "checked" : "unchecked"}
-                onCheckedChange={() => toggleSelectProperty(property)}
-              />
-            )}
+            <Checkbox
+              checked={propSelected}
+              data-state={propPartial ? "indeterminate" : propSelected ? "checked" : "unchecked"}
+              onCheckedChange={() => toggleSelectProperty(property)}
+              className="h-3.5 w-3.5"
+            />
             <h3 className="text-sm font-bold text-foreground">{property}</h3>
           </div>
           <div className="flex items-center gap-4 text-xs">
