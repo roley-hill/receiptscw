@@ -373,19 +373,31 @@ export default function DepositBatches() {
         </Suspense>
       )}
 
-      {previewEntityData && (
-        <Suspense fallback={null}>
-          <BatchDocumentPreview
-            receipts={previewEntityData.allReceipts}
-            batch={previewEntityData.firstBatch}
-            onClose={() => setPreviewEntityId(null)}
-            groupedMode={{
-              entityName: previewEntityData.entityName,
-              buildingBatches: previewEntityData.buildingBatches,
-            }}
-          />
-        </Suspense>
-      )}
+      {previewEntityId && (() => {
+        const parts = previewEntityId.split("__gs__");
+        if (parts.length !== 2) return null;
+        const [eid, gsIdxStr] = parts;
+        const gsIdx = Number(gsIdxStr);
+        const entry = entityGroups.find(([id]) => id === eid);
+        if (!entry) return null;
+        const [, group] = entry;
+        const gs = group.groupedSets[gsIdx];
+        if (!gs) return null;
+        const childBatches = gs.children.sort((a, b) => a.property.localeCompare(b.property));
+        const buildingBatches = childBatches.map(b => ({ batch: b, receipts: allReceipts.filter(r => r.batch_id === b.id) }));
+        const previewReceipts = buildingBatches.flatMap(bb => bb.receipts);
+        const entityName = group.entity?.name || "Unknown Entity";
+        return (
+          <Suspense fallback={null}>
+            <BatchDocumentPreview
+              receipts={previewReceipts}
+              batch={childBatches[0]}
+              onClose={() => setPreviewEntityId(null)}
+              groupedMode={{ entityName, buildingBatches }}
+            />
+          </Suspense>
+        );
+      })()}
     </div>
   );
 }
