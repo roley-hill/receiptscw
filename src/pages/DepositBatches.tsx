@@ -127,8 +127,9 @@ export default function DepositBatches() {
     );
   };
 
-  // Organize batches: entity → grouped/standalone (no month at top level)
-  type EntityGroup = { entity: OwnerEntity | null; parentBatch: typeof batches[0] | null; children: typeof batches; standalone: typeof batches };
+  // Organize batches: entity → multiple grouped sets + standalone
+  type GroupedSet = { parentBatch: typeof batches[0]; children: typeof batches };
+  type EntityGroup = { entity: OwnerEntity | null; groupedSets: GroupedSet[]; standalone: typeof batches };
 
   const { entityGroups, unassignedBatches, reversedBatches } = useMemo(() => {
     const active = batches.filter(b => b.status !== "reversed");
@@ -146,14 +147,15 @@ export default function DepositBatches() {
         if (!entityMap[entityId]) {
           entityMap[entityId] = {
             entity: ownerEntities.find(e => e.id === entityId) || null,
-            parentBatch: null,
-            children: [],
+            groupedSets: [],
             standalone: [],
           };
         }
         if (parentBatchIds.has(batch.id)) {
-          entityMap[entityId].parentBatch = batch;
-          entityMap[entityId].children = active.filter(b => b.parent_batch_id === batch.id);
+          entityMap[entityId].groupedSets.push({
+            parentBatch: batch,
+            children: active.filter(b => b.parent_batch_id === batch.id),
+          });
         } else {
           entityMap[entityId].standalone.push(batch);
         }
