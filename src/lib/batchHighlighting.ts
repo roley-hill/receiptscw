@@ -31,20 +31,15 @@ function parseDateFromCell(val: unknown): Date | null {
   if (val == null) return null;
   const s = String(val).trim();
   // Try MM/DD/YYYY, MM/DD/YY, YYYY-MM-DD
-  for (const fmt of [
-    /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/,
-    /^(\d{1,2})\/(\d{1,2})\/(\d{2})$/,
-    /^(\d{4})-(\d{1,2})-(\d{1,2})$/,
-  ]) {
-    const m = s.match(fmt);
-    if (m) {
-      if (fmt === /^(\d{4})-(\d{1,2})-(\d{1,2})$/) {
-        return new Date(+m[1], +m[2] - 1, +m[3]);
-      }
-      let yr = +m[3];
-      if (yr < 100) yr += 2000;
-      return new Date(yr, +m[1] - 1, +m[2]);
-    }
+  // YYYY-MM-DD
+  const isoMatch = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (isoMatch) return new Date(+isoMatch[1], +isoMatch[2] - 1, +isoMatch[3]);
+  // MM/DD/YYYY or MM/DD/YY
+  const usMatch = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if (usMatch) {
+    let yr = +usMatch[3];
+    if (yr < 100) yr += 2000;
+    return new Date(yr, +usMatch[1] - 1, +usMatch[2]);
   }
   // Try Date.parse as fallback
   const d = new Date(s);
