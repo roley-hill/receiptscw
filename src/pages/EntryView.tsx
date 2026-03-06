@@ -237,6 +237,7 @@ export default function EntryView() {
   };
 
   // ─── Selection helpers ───
+  const hasSelections = selectedReceipts.size > 0;
   const getPropertyReceipts = (property: string) =>
     finalized.filter(r => canonical(r.property) === property && (r as any).appfolio_recorded && !r.batch_id);
 
@@ -551,7 +552,7 @@ export default function EntryView() {
   /* ─── Render receipt row (shared between single and multi-tenant) ─── */
   const renderReceiptRow = (r: DbReceipt, indent = false, isDupMonth = false) => (
     <tr key={r.id} className={`vault-table-row ${isDupMonth ? "bg-[hsl(var(--vault-amber)/0.05)]" : ""}`}>
-      {batchMode && (
+      {(batchMode || hasSelections) && (
         <td className="px-3 py-2.5">
           <Checkbox
             checked={selectedReceipts.has(r.id)}
@@ -629,20 +630,18 @@ export default function EntryView() {
       <motion.div key={property} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="vault-card overflow-hidden">
         <div className="px-4 py-3 border-b border-border bg-muted/30 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            {batchMode && (
-              <Checkbox
-                checked={propSelected}
-                // @ts-ignore - indeterminate support
-                data-state={propPartial ? "indeterminate" : propSelected ? "checked" : "unchecked"}
-                onCheckedChange={() => toggleSelectProperty(property)}
-              />
-            )}
+            <Checkbox
+              checked={propSelected}
+              data-state={propPartial ? "indeterminate" : propSelected ? "checked" : "unchecked"}
+              onCheckedChange={() => toggleSelectProperty(property)}
+              className="h-3.5 w-3.5"
+            />
             <h3 className="text-sm font-bold text-foreground">{property}</h3>
           </div>
           <div className="flex items-center gap-4 text-xs">
             <span className="text-muted-foreground">{recorded.length}/{receipts.length} recorded</span>
             <span className="vault-mono font-bold text-foreground">${fmt(subtotal)}</span>
-            {!batchMode && (
+            {!batchMode && !hasSelections && (
               <Button variant="default" size="sm" onClick={() => openBatchDialog(property)} disabled={unbatched.length === 0}>
                 <Layers className="h-3.5 w-3.5 mr-1" /> Create Batch ({unbatched.length})
               </Button>
@@ -653,7 +652,7 @@ export default function EntryView() {
           <table className="w-full min-w-[1200px]">
             <thead className="sticky top-0 z-10 bg-card">
               <tr className="border-b border-border">
-                {batchMode && <th className="px-3 py-2.5 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide w-10">Select</th>}
+                {(batchMode || hasSelections) && <th className="px-3 py-2.5 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide w-10">Select</th>}
                 <th className="px-3 py-2.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide w-10">Recorded?</th>
                 <th className="px-3 py-2.5 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide w-[40px]">Doc</th>
                 <th className="px-3 py-2.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide w-[70px]">Unit</th>
@@ -700,7 +699,7 @@ export default function EntryView() {
                       return next;
                     })}
                   >
-                    <td className="px-3 py-2.5" colSpan={batchMode ? 3 : 2}>
+                    <td className="px-3 py-2.5" colSpan={(batchMode || hasSelections) ? 3 : 2}>
                       <div className="flex items-center gap-1.5">
                         {isOpen ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />}
                       </div>
@@ -722,7 +721,7 @@ export default function EntryView() {
                       </div>
                     </td>
                     <td className="px-3 py-2.5 text-right text-sm vault-mono font-semibold text-foreground">${fmt(tenantTotal)}</td>
-                    <td colSpan={batchMode ? 10 : 9}></td>
+                    <td colSpan={(batchMode || hasSelections) ? 10 : 9}></td>
                   </tr>
                 );
 
@@ -781,11 +780,14 @@ export default function EntryView() {
       </div>
 
       {/* Batch mode action bar */}
-      {batchMode && selectedReceipts.size > 0 && (
+      {selectedReceipts.size > 0 && (
         <div className="mb-4 vault-card px-4 py-3 flex items-center justify-between bg-accent/5 border-accent/20">
           <div className="flex items-center gap-4 text-sm">
             <span className="font-semibold text-foreground">{selectedReceipts.size} receipts selected</span>
             <span className="vault-mono font-bold text-accent">${fmt(selectedTotal)}</span>
+            <Button size="sm" variant="ghost" onClick={() => setSelectedReceipts(new Set())} className="text-xs text-muted-foreground h-7">
+              Clear
+            </Button>
           </div>
           <div className="flex items-center gap-2">
             <Button
@@ -870,14 +872,12 @@ export default function EntryView() {
                     onClick={() => toggleEntityExpand(entityId)}
                     className="w-full flex items-center gap-2 px-3 py-2.5 text-xs transition-colors hover:bg-muted/50 bg-muted/20 border-l-2 border-transparent"
                   >
-                    {batchMode && (
-                      <Checkbox
-                        checked={isEntitySelected(entityId)}
-                        onCheckedChange={() => toggleSelectEntity(entityId)}
-                        onClick={(e) => e.stopPropagation()}
-                        className="h-3.5 w-3.5"
-                      />
-                    )}
+                    <Checkbox
+                      checked={isEntitySelected(entityId)}
+                      onCheckedChange={() => toggleSelectEntity(entityId)}
+                      onClick={(e) => e.stopPropagation()}
+                      className="h-3.5 w-3.5"
+                    />
                     {isEntityExpanded ? <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" /> : <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />}
                     <Building2 className="h-3.5 w-3.5 shrink-0 text-accent" />
                     <span className="truncate text-left flex-1 font-semibold text-foreground">{entity.name}</span>
@@ -896,14 +896,12 @@ export default function EntryView() {
                           onClick={() => { handleSelectProperty(property); togglePropertyExpand(property); }}
                           className={`w-full flex items-center gap-2 pl-7 pr-3 py-2 text-xs transition-colors ${selectedProperty === property && !selectedTenant ? "bg-accent/10 text-accent font-semibold border-l-2 border-accent" : "text-foreground hover:bg-muted/50 border-l-2 border-transparent"}`}
                         >
-                          {batchMode && (
-                            <Checkbox
-                              checked={isPropertySelected(property)}
-                              onCheckedChange={() => toggleSelectProperty(property)}
-                              onClick={(e) => e.stopPropagation()}
-                              className="h-3.5 w-3.5"
-                            />
-                          )}
+                          <Checkbox
+                            checked={isPropertySelected(property)}
+                            onCheckedChange={() => toggleSelectProperty(property)}
+                            onClick={(e) => e.stopPropagation()}
+                            className="h-3.5 w-3.5"
+                          />
                           {isPropExpanded ? <ChevronDown className="h-3 w-3 shrink-0" /> : <ChevronRight className="h-3 w-3 shrink-0" />}
                           <span className="truncate text-left flex-1">{property}</span>
                           <span className="text-[10px] vault-mono text-muted-foreground shrink-0">{recCount}/{count}</span>
@@ -950,14 +948,12 @@ export default function EntryView() {
                         onClick={() => { handleSelectProperty(property); togglePropertyExpand(property); }}
                         className={`w-full flex items-center gap-2 px-4 py-2.5 text-xs transition-colors ${selectedProperty === property && !selectedTenant ? "bg-accent/10 text-accent font-semibold border-l-2 border-accent" : "text-foreground hover:bg-muted/50 border-l-2 border-transparent"}`}
                       >
-                        {batchMode && (
                           <Checkbox
                             checked={isPropertySelected(property)}
                             onCheckedChange={() => toggleSelectProperty(property)}
                             onClick={(e) => e.stopPropagation()}
                             className="h-3.5 w-3.5"
                           />
-                        )}
                         {isPropExpanded ? <ChevronDown className="h-3.5 w-3.5 shrink-0" /> : <ChevronRight className="h-3.5 w-3.5 shrink-0" />}
                         <span className="truncate text-left flex-1">{property}</span>
                         <span className="text-[10px] vault-mono text-muted-foreground shrink-0">{recCount}/{count}</span>
@@ -1040,12 +1036,11 @@ export default function EntryView() {
                             {/* Entity header */}
                             {entity && (
                               <div className="flex items-center gap-3 px-1">
-                                {batchMode && (
-                                  <Checkbox
-                                    checked={isEntitySelected(entity.id)}
-                                    onCheckedChange={() => toggleSelectEntity(entity.id)}
-                                  />
-                                )}
+                                <Checkbox
+                                  checked={isEntitySelected(entity.id)}
+                                  onCheckedChange={() => toggleSelectEntity(entity.id)}
+                                  className="h-4 w-4"
+                                />
                                 <Building2 className="h-5 w-5 text-accent" />
                                 <div className="flex-1">
                                   <h2 className="text-lg font-bold text-foreground">{entity.name}</h2>
