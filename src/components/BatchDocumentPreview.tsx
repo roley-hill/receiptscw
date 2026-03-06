@@ -29,7 +29,7 @@ type SidebarItem = {
   originalText?: string | null;
 };
 
-export default function BatchDocumentPreview({ receipts, batch, onClose }: BatchDocumentPreviewProps) {
+export default function BatchDocumentPreview({ receipts, batch, onClose, groupedMode }: BatchDocumentPreviewProps) {
   // Build sidebar items: PDF report first, then source documents (deduplicated by file_path)
   const items: SidebarItem[] = useMemo(() => {
     const list: SidebarItem[] = [
