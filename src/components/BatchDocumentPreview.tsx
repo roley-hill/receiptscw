@@ -5,12 +5,17 @@ import { motion, AnimatePresence } from "framer-motion";
 import { AttachmentContent } from "@/components/FilePreview";
 import PdfViewer from "@/components/PdfViewer";
 import { getFilePreviewUrl } from "@/lib/api";
-import { generateBatchPDF } from "@/lib/batchReports";
+import { generateBatchPDF, generateGroupedOwnerPDF } from "@/lib/batchReports";
 
 interface BatchDocumentPreviewProps {
   receipts: any[];
   batch: any;
   onClose: () => void;
+  /** For grouped entity preview: entity name + building batches */
+  groupedMode?: {
+    entityName: string;
+    buildingBatches: { batch: any; receipts: any[] }[];
+  };
 }
 
 type SidebarItem = {
@@ -24,7 +29,7 @@ type SidebarItem = {
   originalText?: string | null;
 };
 
-export default function BatchDocumentPreview({ receipts, batch, onClose }: BatchDocumentPreviewProps) {
+export default function BatchDocumentPreview({ receipts, batch, onClose, groupedMode }: BatchDocumentPreviewProps) {
   // Build sidebar items: PDF report first, then source documents (deduplicated by file_path)
   const items: SidebarItem[] = useMemo(() => {
     const list: SidebarItem[] = [
@@ -68,7 +73,9 @@ export default function BatchDocumentPreview({ receipts, batch, onClose }: Batch
   // Generate report PDF blob URL once
   useEffect(() => {
     try {
-      const doc = generateBatchPDF(batch, receipts);
+      const doc = groupedMode
+        ? generateGroupedOwnerPDF(groupedMode.entityName, groupedMode.buildingBatches)
+        : generateBatchPDF(batch, receipts);
       const blob = doc.output("blob");
       const url = URL.createObjectURL(blob);
       setReportBlobUrl(url);
@@ -76,7 +83,7 @@ export default function BatchDocumentPreview({ receipts, batch, onClose }: Batch
     } catch {
       setReportBlobUrl(null);
     }
-  }, [batch, receipts]);
+  }, [batch, receipts, groupedMode]);
 
   // Load file URL for document items — depend on stable primitives, not objects
   useEffect(() => {

@@ -1,9 +1,13 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchBatches, fetchReceipts, reverseBatch, moveReceiptsToNewBatch } from "@/lib/api";
-import { downloadBatchPDF, generateBatchXLSX, downloadBatchZIP, downloadGroupedOwnerPDF } from "@/lib/batchReports";
+import { downloadBatchPDF, generateBatchXLSX, downloadBatchZIP, downloadGroupedOwnerPDF, generateGroupedXLSX, downloadGroupedZIP } from "@/lib/batchReports";
 import { supabase } from "@/integrations/supabase/client";
-import { Building2, ChevronDown, ChevronRight, FileText as FileTextIcon, Layers } from "lucide-react";
+import { Building2, ChevronDown, ChevronRight, FileText as FileTextIcon, FileSpreadsheet, Layers, Eye, PackageOpen, Mail, Undo2, SquareCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { toast } from "@/hooks/use-toast";
 import { useState, useMemo, lazy, Suspense } from "react";
 import { useAuth } from "@/hooks/useAuth";
@@ -31,7 +35,9 @@ export default function DepositBatches() {
   });
 
   const [downloadingZip, setDownloadingZip] = useState<string | null>(null);
+  const [downloadingEntityZip, setDownloadingEntityZip] = useState<string | null>(null);
   const [previewBatchId, setPreviewBatchId] = useState<string | null>(null);
+  const [previewEntityId, setPreviewEntityId] = useState<string | null>(null);
   const [movingBatchId, setMovingBatchId] = useState<string | null>(null);
   const [collapsedEntities, setCollapsedEntities] = useState<Set<string>>(new Set());
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
@@ -43,6 +49,20 @@ export default function DepositBatches() {
       queryClient.invalidateQueries({ queryKey: ["batches"] });
       queryClient.invalidateQueries({ queryKey: ["receipts"] });
       toast({ title: "Batch reversed", description: "Receipts have been unlinked and are available for re-batching." });
+    },
+    onError: (e: Error) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
+
+  const reverseEntityMutation = useMutation({
+    mutationFn: async (batchIds: string[]) => {
+      for (const id of batchIds) {
+        await reverseBatch(id);
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["batches"] });
+      queryClient.invalidateQueries({ queryKey: ["receipts"] });
+      toast({ title: "All batches reversed", description: "All property batches in this group have been reversed." });
     },
     onError: (e: Error) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
@@ -66,6 +86,13 @@ export default function DepositBatches() {
     finally { setDownloadingZip(null); }
   };
 
+  const handleEntityZipDownload = async (entityId: string, entityName: string, buildingBatches: { batch: any; receipts: any[] }[]) => {
+    setDownloadingEntityZip(entityId);
+    try { await downloadGroupedZIP(entityName, buildingBatches); }
+    catch (e) { toast({ title: "Error", description: e instanceof Error ? e.message : "ZIP download failed", variant: "destructive" }); }
+    finally { setDownloadingEntityZip(null); }
+  };
+
   const handleMoveReceipts = (batchId: string, property: string, receiptIds: string[]) => {
     setMovingBatchId(batchId);
     moveMutation.mutate({ sourceBatchId: batchId, receiptIds, property });
@@ -79,7 +106,7 @@ export default function DepositBatches() {
     });
   };
 
-  const renderBatchCard = (batch: any, index: number) => {
+  const renderBatchCard = (batch: any, index: number, hideActions = false) => {
     const receipts = allReceipts.filter((r) => r.batch_id === batch.id);
     return (
       <BatchCard
@@ -95,6 +122,7 @@ export default function DepositBatches() {
         onReverse={() => reverseMutation.mutate(batch.id)}
         onMoveReceipts={(ids) => handleMoveReceipts(batch.id, batch.property, ids)}
         isMoving={movingBatchId === batch.id}
+        hideActions={hideActions}
       />
     );
   };
@@ -112,7 +140,7 @@ export default function DepositBatches() {
     const unassigned: typeof batches = [];
 
     for (const batch of active) {
-      if (childBatchIds.has(batch.id)) continue; // skip children, they'll be nested
+      if (childBatchIds.has(batch.id)) continue;
       const entityId = batch.ownership_entity_id;
       if (entityId) {
         if (!entityMap[entityId]) {
@@ -154,6 +182,13 @@ export default function DepositBatches() {
     const entityTotal = allGroupReceipts.reduce((s, r) => s + Number(r.amount), 0);
     const entityReceiptCount = allGroupReceipts.length;
     const batchCount = group.children.length > 0 ? group.children.length : group.standalone.length;
+    const isGrouped = group.children.length > 0;
+    const childBatches = isGrouped ? group.children : group.standalone;
+    const buildingBatches = childBatches
+      .sort((a, b) => a.property.localeCompare(b.property))
+      .map(b => ({ batch: b, receipts: allReceipts.filter(r => r.batch_id === b.id) }));
+    const entityName = group.entity?.name || "Unknown Entity";
+    const allChildBatchIds = childBatches.map(b => b.id);
 
     return (
       <div key={entityId} className="space-y-3">
@@ -177,7 +212,7 @@ export default function DepositBatches() {
               <Building2 className="h-4.5 w-4.5 text-accent" />
             </div>
             <div className="text-left">
-              <h2 className="text-base font-bold text-foreground">{group.entity?.name || "Unknown Entity"}</h2>
+              <h2 className="text-base font-bold text-foreground">{entityName}</h2>
               <p className="text-xs text-muted-foreground">
                 {batchCount} {batchCount === 1 ? "property" : "properties"} · {entityReceiptCount} receipts
               </p>
@@ -188,22 +223,65 @@ export default function DepositBatches() {
               <p className="text-lg vault-mono font-bold text-foreground">${fmt(entityTotal)}</p>
               <p className="text-xs text-muted-foreground">Total</p>
             </div>
-            <Button
-              variant="outline"
-              size="sm"
-              title="Download grouped owner PDF"
-              onClick={(e) => {
-                e.stopPropagation();
-                const childBatches = group.children.length > 0 ? group.children : group.standalone;
-                const buildingBatches = childBatches
-                  .sort((a, b) => a.property.localeCompare(b.property))
-                  .map(b => ({ batch: b, receipts: allReceipts.filter(r => r.batch_id === b.id) }));
-                downloadGroupedOwnerPDF(group.entity?.name || "Unknown Entity", buildingBatches);
-              }}
-            >
-              <FileTextIcon className="h-3.5 w-3.5 mr-1" />
-              Owner PDF
-            </Button>
+            {isGrouped && (
+              <div className="flex gap-1">
+                <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); setPreviewEntityId(entityId); }} title="Preview all documents">
+                  <Eye className="h-3.5 w-3.5" />
+                </Button>
+                <Button
+                  variant="outline" size="sm"
+                  disabled={downloadingEntityZip === entityId}
+                  onClick={(e) => { e.stopPropagation(); handleEntityZipDownload(entityId, entityName, buildingBatches); }}
+                  title="Download grouped deposit package (ZIP)"
+                >
+                  {downloadingEntityZip === entityId ? <div className="h-3.5 w-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" /> : <PackageOpen className="h-3.5 w-3.5" />}
+                </Button>
+                <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); downloadGroupedOwnerPDF(entityName, buildingBatches); }} title="Download grouped PDF report">
+                  <FileTextIcon className="h-3.5 w-3.5" />
+                </Button>
+                <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); generateGroupedXLSX(entityName, buildingBatches); }} title="Download grouped XLSX report">
+                  <FileSpreadsheet className="h-3.5 w-3.5" />
+                </Button>
+                <Button variant="outline" size="sm" title="Email grouped report" onClick={(e) => e.stopPropagation()}>
+                  <Mail className="h-3.5 w-3.5" />
+                </Button>
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button variant="outline" size="sm" title="Reverse all batches in group" className="text-destructive hover:text-destructive" onClick={(e) => e.stopPropagation()}>
+                      <Undo2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Reverse all batches for {entityName}?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        This will reverse all {childBatches.length} property batches in this group, unlinking {entityReceiptCount} receipts. They will be available for re-batching.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                      <AlertDialogAction onClick={() => reverseEntityMutation.mutate(allChildBatchIds)} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                        Reverse All Batches
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              </div>
+            )}
+            {!isGrouped && (
+              <Button
+                variant="outline"
+                size="sm"
+                title="Download grouped owner PDF"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  downloadGroupedOwnerPDF(entityName, buildingBatches);
+                }}
+              >
+                <FileTextIcon className="h-3.5 w-3.5 mr-1" />
+                Owner PDF
+              </Button>
+            )}
           </div>
         </motion.div>
 
@@ -222,7 +300,7 @@ export default function DepositBatches() {
                     <span>Grouped Deposit Batches</span>
                     <span className="text-xs vault-mono text-muted-foreground font-normal ml-1">{group.children.length} properties · ${fmt(groupedTotal)}</span>
                   </button>
-                  {!isSectionCollapsed && <div className="space-y-3">{group.children.sort((a, b) => a.property.localeCompare(b.property)).map((batch, i) => renderBatchCard(batch, i))}</div>}
+                  {!isSectionCollapsed && <div className="space-y-3">{group.children.sort((a, b) => a.property.localeCompare(b.property)).map((batch, i) => renderBatchCard(batch, i, true))}</div>}
                 </div>
               );
             })()}
@@ -248,6 +326,23 @@ export default function DepositBatches() {
       </div>
     );
   };
+
+  // Find entity data for preview
+  const previewEntityData = previewEntityId ? (() => {
+    const entry = entityGroups.find(([id]) => id === previewEntityId);
+    if (!entry) return null;
+    const [, group] = entry;
+    const childBatches = group.children.length > 0 ? group.children : group.standalone;
+    const buildingBatches = childBatches.map(b => ({ batch: b, receipts: allReceipts.filter(r => r.batch_id === b.id) }));
+    const entityAllReceipts = buildingBatches.flatMap(bb => bb.receipts);
+    return {
+      entityName: group.entity?.name || "Unknown Entity",
+      buildingBatches,
+      allReceipts: entityAllReceipts,
+      // Use first child batch as the "batch" prop for BatchDocumentPreview
+      firstBatch: childBatches[0],
+    };
+  })() : null;
 
   return (
     <div className="space-y-6 max-w-6xl">
@@ -298,6 +393,20 @@ export default function DepositBatches() {
             receipts={allReceipts.filter((r) => r.batch_id === previewBatchId)}
             batch={batches.find((b) => b.id === previewBatchId)}
             onClose={() => setPreviewBatchId(null)}
+          />
+        </Suspense>
+      )}
+
+      {previewEntityData && (
+        <Suspense fallback={null}>
+          <BatchDocumentPreview
+            receipts={previewEntityData.allReceipts}
+            batch={previewEntityData.firstBatch}
+            onClose={() => setPreviewEntityId(null)}
+            groupedMode={{
+              entityName: previewEntityData.entityName,
+              buildingBatches: previewEntityData.buildingBatches,
+            }}
           />
         </Suspense>
       )}
