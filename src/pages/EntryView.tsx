@@ -302,6 +302,45 @@ export default function EntryView() {
 
   const selectedTotal = finalized.filter(r => selectedReceipts.has(r.id)).reduce((s, r) => s + Number(r.amount), 0);
 
+  // ─── Inline bulk action buttons for a set of receipts ───
+  const renderBulkActions = (scopeReceipts: DbReceipt[]) => {
+    const selected = scopeReceipts.filter(r => selectedReceipts.has(r.id));
+    if (selected.length === 0) return null;
+    const unrecorded = selected.filter(r => !(r as any).appfolio_recorded);
+    const recorded = selected.filter(r => (r as any).appfolio_recorded);
+    return (
+      <div className="flex items-center gap-1.5">
+        <span className="text-[10px] text-muted-foreground vault-mono">{selected.length} sel</span>
+        {unrecorded.length > 0 && (
+          <Button size="sm" className="h-6 text-[10px] px-2" onClick={async (e) => {
+            e.stopPropagation();
+            for (const r of unrecorded) await markAppfolioRecorded(r.id, true, user!.id);
+            queryClient.invalidateQueries({ queryKey: ["receipts"] });
+            toast({ title: `${unrecorded.length} marked as recorded` });
+            setSelectedReceipts(prev => { const next = new Set(prev); unrecorded.forEach(r => next.delete(r.id)); return next; });
+          }} disabled={toggleMutation.isPending}>
+            <CheckSquare className="h-3 w-3 mr-0.5" />Mark ({unrecorded.length})
+          </Button>
+        )}
+        {recorded.length > 0 && (
+          <Button size="sm" variant="outline" className="h-6 text-[10px] px-2" onClick={async (e) => {
+            e.stopPropagation();
+            for (const r of recorded) await markAppfolioRecorded(r.id, false, user!.id);
+            queryClient.invalidateQueries({ queryKey: ["receipts"] });
+            toast({ title: `${recorded.length} unmarked` });
+            setSelectedReceipts(prev => { const next = new Set(prev); recorded.forEach(r => next.delete(r.id)); return next; });
+          }} disabled={toggleMutation.isPending}>
+            <Square className="h-3 w-3 mr-0.5" />Unmark ({recorded.length})
+          </Button>
+        )}
+        <Button size="sm" variant="ghost" className="h-6 text-[10px] px-1.5 text-muted-foreground" onClick={(e) => {
+          e.stopPropagation();
+          setSelectedReceipts(prev => { const next = new Set(prev); selected.forEach(r => next.delete(r.id)); return next; });
+        }}>Clear</Button>
+      </div>
+    );
+  };
+
   // ─── Batch creation ───
   const handleCreateBatches = async (type: "individual" | "grouped") => {
     if (selectedReceipts.size === 0) return;
