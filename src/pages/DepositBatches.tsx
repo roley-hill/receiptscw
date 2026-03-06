@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchBatches, fetchReceipts, reverseBatch, moveReceiptsToNewBatch } from "@/lib/api";
 import { downloadBatchPDF, generateBatchXLSX, downloadBatchZIP, downloadGroupedOwnerPDF, generateGroupedXLSX, downloadGroupedZIP } from "@/lib/batchReports";
 import { supabase } from "@/integrations/supabase/client";
-import { Building2, ChevronDown, ChevronRight, FileText as FileTextIcon, FileSpreadsheet, Layers, Eye, PackageOpen, Mail, Undo2, SquareCheck } from "lucide-react";
+import { Building2, ChevronDown, ChevronRight, FileText as FileTextIcon, FileSpreadsheet, Layers, Eye, PackageOpen, Mail, Undo2, SquareCheck, Copy, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -42,6 +42,13 @@ export default function DepositBatches() {
   const [collapsedEntities, setCollapsedEntities] = useState<Set<string>>(new Set());
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
   const [reversedCollapsed, setReversedCollapsed] = useState(true);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  const copyAmount = (key: string, amount: number) => {
+    navigator.clipboard.writeText(amount.toFixed(2));
+    setCopiedKey(key);
+    setTimeout(() => setCopiedKey(null), 1500);
+  };
 
   const reverseMutation = useMutation({
     mutationFn: (batchId: string) => reverseBatch(batchId),
@@ -238,11 +245,21 @@ export default function DepositBatches() {
                 <div key={sectionKey} className="space-y-3">
                   {/* Batch-level header with ALL actions */}
                   <div className="vault-card px-4 py-3 flex items-center justify-between">
-                    <button onClick={() => toggleSection(sectionKey)} className="flex items-center gap-2 text-sm font-semibold text-foreground hover:opacity-80 transition-opacity cursor-pointer flex-1">
+                    <button onClick={() => toggleSection(sectionKey)} className="group flex items-center gap-2 text-sm font-semibold text-foreground hover:opacity-80 transition-opacity cursor-pointer flex-1">
                       {isSectionCollapsed ? <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />}
                       <Layers className="h-3.5 w-3.5 text-accent" />
                       <span>Deposit Batch — {gs.parentBatch.batch_id}</span>
-                      <span className="text-xs vault-mono text-muted-foreground font-normal ml-1">{childBatches.length} properties · {groupedReceipts.length} receipts · ${fmt(groupedTotal)}</span>
+                      <span className="text-xs vault-mono text-muted-foreground font-normal ml-1">
+                        {childBatches.length} properties · {groupedReceipts.length} receipts ·{" "}
+                        <button
+                          onClick={(e) => { e.stopPropagation(); copyAmount(sectionKey, groupedTotal); }}
+                          className="inline-flex items-center gap-1 hover:text-foreground transition-colors cursor-copy"
+                          title="Click to copy amount"
+                        >
+                          ${fmt(groupedTotal)}
+                          {copiedKey === sectionKey ? <Check className="h-3 w-3 text-accent" /> : <Copy className="h-3 w-3 opacity-0 group-hover:opacity-100" />}
+                        </button>
+                      </span>
                     </button>
                     <div className="flex gap-1">
                       <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); setPreviewEntityId(entityId + "__gs__" + gsIndex); }} title="Preview all documents">
