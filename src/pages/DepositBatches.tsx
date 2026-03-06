@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchBatches, fetchReceipts, reverseBatch, moveReceiptsToNewBatch } from "@/lib/api";
 import { downloadBatchPDF, generateBatchXLSX, downloadBatchZIP } from "@/lib/batchReports";
 import { supabase } from "@/integrations/supabase/client";
-import { Layers, Building2, ChevronDown, ChevronRight } from "lucide-react";
+import { Building2, ChevronDown, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/hooks/use-toast";
 import { useState, useMemo, lazy, Suspense } from "react";
@@ -158,12 +158,9 @@ export default function DepositBatches() {
 
   return (
     <div className="space-y-6 max-w-6xl">
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Deposit Batches</h1>
-          <p className="text-sm text-muted-foreground mt-1">Group receipts into one transfer per property. Download reports for your accountant.</p>
-        </div>
-        <Button variant="default" size="sm"><Layers className="h-4 w-4 mr-2" />Create Batch</Button>
+      <div>
+        <h1 className="text-2xl font-bold text-foreground">Deposit Batches</h1>
+        <p className="text-sm text-muted-foreground mt-1">Group receipts into one transfer per property. Download reports for your accountant.</p>
       </div>
 
       {!hasAnyBatches && reversedBatches.length === 0 ? (
