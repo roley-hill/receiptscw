@@ -869,14 +869,12 @@ export default function EntryView() {
                     onClick={() => toggleEntityExpand(entityId)}
                     className="w-full flex items-center gap-2 px-3 py-2.5 text-xs transition-colors hover:bg-muted/50 bg-muted/20 border-l-2 border-transparent"
                   >
-                    {batchMode && (
-                      <Checkbox
-                        checked={isEntitySelected(entityId)}
-                        onCheckedChange={() => toggleSelectEntity(entityId)}
-                        onClick={(e) => e.stopPropagation()}
-                        className="h-3.5 w-3.5"
-                      />
-                    )}
+                    <Checkbox
+                      checked={isEntitySelected(entityId)}
+                      onCheckedChange={() => toggleSelectEntity(entityId)}
+                      onClick={(e) => e.stopPropagation()}
+                      className="h-3.5 w-3.5"
+                    />
                     {isEntityExpanded ? <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" /> : <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />}
                     <Building2 className="h-3.5 w-3.5 shrink-0 text-accent" />
                     <span className="truncate text-left flex-1 font-semibold text-foreground">{entity.name}</span>
