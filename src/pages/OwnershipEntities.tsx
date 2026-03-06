@@ -313,12 +313,8 @@ export default function OwnershipEntities() {
         const entity = allEntities.find(e => e.name.toLowerCase() === mapping.ownerName.trim().toLowerCase());
         if (!entity) continue;
 
-        // Try to find matching property by normalized address prefix
-        const normalizedCsv = mapping.propertyAddress.toLowerCase().replace(/[.,]/g, " ").replace(/\s+/g, " ").trim();
-        let matchedProperty = properties.find(p => {
-          const normalizedDb = p.address.toLowerCase().replace(/[.,]/g, " ").replace(/\s+/g, " ").trim();
-          return normalizedDb.startsWith(normalizedCsv) || normalizedCsv.startsWith(normalizedDb);
-        });
+        // Try to find matching property using all address variants
+        let matchedProperty = properties.find(p => matchesProperty(mapping.addressVariants, p.address));
 
         if (matchedProperty) {
           const { error } = await supabase
