@@ -92,7 +92,7 @@ export function EmlImageAttachment({ imgPath }: { imgPath: string }) {
 
 /* ─── XLSX fetcher: downloads and parses XLSX from URL ─── */
 function XlsxFetchPreview({ url }: { url: string }) {
-  const [csv, setCsv] = useState<string | null>(null);
+  const [rows, setRows] = useState<string[][] | null>(null);
   const [error, setError] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -102,27 +102,24 @@ function XlsxFetchPreview({ url }: { url: string }) {
       .then(async (buf) => {
         const wb = new ExcelJS.Workbook();
         await wb.xlsx.load(buf);
-        const parts: string[] = [];
+        const allRows: string[][] = [];
         wb.eachSheet((sheet) => {
-          parts.push(`=== Sheet: ${sheet.name} ===`);
-          const rows: string[] = [];
           sheet.eachRow((row) => {
             const cells = (row.values as any[]).slice(1).map((v) =>
               v === null || v === undefined ? "" : String(typeof v === "object" && v.result !== undefined ? v.result : v)
             );
-            rows.push(cells.join(","));
+            allRows.push(cells);
           });
-          parts.push(rows.join("\n"));
         });
-        setCsv(parts.join("\n"));
+        setRows(allRows);
       })
       .catch(() => setError(true))
       .finally(() => setLoading(false));
   }, [url]);
 
   if (loading) return <div className="flex items-center justify-center min-h-[300px]"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
-  if (error || !csv) return <p className="text-sm text-muted-foreground text-center py-8">Could not parse spreadsheet.</p>;
-  return <ZoomablePreview><div className="p-4"><SpreadsheetPreview csv={csv} /></div></ZoomablePreview>;
+  if (error || !rows) return <p className="text-sm text-muted-foreground text-center py-8">Could not parse spreadsheet.</p>;
+  return <ZoomablePreview><div className="p-4"><SpreadsheetPreview rows={rows} /></div></ZoomablePreview>;
 }
 
 export function AttachmentContent({ url, fileName, originalText }: { url: string; fileName: string; originalText: string | null }) {
