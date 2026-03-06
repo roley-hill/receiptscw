@@ -329,7 +329,7 @@ export default function OwnershipEntities() {
             .from("properties")
             .insert({
               address: mapping.propertyAddress,
-              normalized_address: normalizedCsv,
+              normalized_address: normalizeAddr(mapping.propertyAddress),
               ownership_entity_id: entity.id,
             });
           if (error && !error.message.includes("duplicate")) {
