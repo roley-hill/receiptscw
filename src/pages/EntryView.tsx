@@ -270,6 +270,26 @@ export default function EntryView() {
     });
   };
 
+  // Scoped selection helpers — operate on a specific set of receipts
+  const toggleSelectScoped = (scopeReceipts: DbReceipt[]) => {
+    const allSelected = scopeReceipts.length > 0 && scopeReceipts.every(r => selectedReceipts.has(r.id));
+    setSelectedReceipts(prev => {
+      const next = new Set(prev);
+      for (const r of scopeReceipts) {
+        allSelected ? next.delete(r.id) : next.add(r.id);
+      }
+      return next;
+    });
+  };
+
+  const isScopedSelected = (scopeReceipts: DbReceipt[]) =>
+    scopeReceipts.length > 0 && scopeReceipts.every(r => selectedReceipts.has(r.id));
+
+  const isScopedPartial = (scopeReceipts: DbReceipt[]) => {
+    const sel = scopeReceipts.filter(r => selectedReceipts.has(r.id));
+    return sel.length > 0 && sel.length < scopeReceipts.length;
+  };
+
   const toggleSelectReceipt = (id: string) => {
     setSelectedReceipts(prev => {
       const next = new Set(prev);
