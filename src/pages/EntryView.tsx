@@ -676,10 +676,11 @@ export default function EntryView() {
             />
             <h3 className="text-sm font-bold text-foreground">{property}</h3>
           </div>
-          <div className="flex items-center gap-4 text-xs">
+          <div className="flex items-center gap-3 text-xs">
             <span className="text-muted-foreground">{recorded.length}/{receipts.length} recorded</span>
             <span className="vault-mono font-bold text-foreground">${fmt(subtotal)}</span>
-            {!batchMode && !hasSelections && (
+            {renderBulkActions(receipts)}
+            {!hasSelections && (
               <Button variant="default" size="sm" onClick={() => openBatchDialog(property)} disabled={unbatched.length === 0}>
                 <Layers className="h-3.5 w-3.5 mr-1" /> Create Batch ({unbatched.length})
               </Button>
