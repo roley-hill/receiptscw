@@ -167,6 +167,7 @@ export default function EntryView() {
   const [groupedBatchDialogOpen, setGroupedBatchDialogOpen] = useState(false);
   const [batchCreationType, setBatchCreationType] = useState<"individual" | "grouped">("individual");
   const [isBatchCreating, setIsBatchCreating] = useState(false);
+  const [collapsedMonths, setCollapsedMonths] = useState<Set<string>>(new Set());
 
   const filteredProperties = [...new Set(finalized.map((r) => canonical(r.property)).filter(Boolean))];
 
