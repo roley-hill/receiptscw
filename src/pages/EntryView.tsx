@@ -780,7 +780,7 @@ export default function EntryView() {
       </div>
 
       {/* Batch mode action bar */}
-      {batchMode && selectedReceipts.size > 0 && (
+      {selectedReceipts.size > 0 && (
         <div className="mb-4 vault-card px-4 py-3 flex items-center justify-between bg-accent/5 border-accent/20">
           <div className="flex items-center gap-4 text-sm">
             <span className="font-semibold text-foreground">{selectedReceipts.size} receipts selected</span>
