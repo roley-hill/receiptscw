@@ -1108,6 +1108,86 @@ export default function EntryView() {
                                   <p className="text-xs text-muted-foreground">{propCount} properties • {entityReceiptCount} receipts • ${fmt(entityTotal)}</p>
                                 </div>
                                 {renderBulkActions(Object.values(propMap).flat() as DbReceipt[])}
+                                {(() => {
+                                  const allEntityReceipts = Object.values(propMap).flat() as DbReceipt[];
+                                  const entityRecorded = allEntityReceipts.filter(r => (r as any).appfolio_recorded && !r.batch_id);
+                                  const hasSelectedInScope = allEntityReceipts.some(r => selectedReceipts.has(r.id));
+                                  if (hasSelectedInScope) return null;
+                                  return (
+                                    <Button
+                                      variant="default"
+                                      size="sm"
+                                      disabled={entityRecorded.length === 0 || isBatchCreating}
+                                      onClick={async (e) => {
+                                        e.stopPropagation();
+                                        setIsBatchCreating(true);
+                                        try {
+                                          const today = new Date();
+                                          const period = `${today.getMonth() + 1}/${today.getDate()}/${String(today.getFullYear()).slice(-2)}`;
+                                          const byProp: Record<string, DbReceipt[]> = {};
+                                          for (const r of entityRecorded) {
+                                            const prop = canonical(r.property);
+                                            if (!byProp[prop]) byProp[prop] = [];
+                                            byProp[prop].push(r);
+                                          }
+                                          const allIds = entityRecorded.map(r => r.id);
+                                          const allTotal = entityRecorded.reduce((s, r) => s + Number(r.amount), 0);
+                                          const entityName = entity!.name;
+
+                                          // Create parent batch
+                                          const { data: parentBatch, error: parentErr } = await supabase
+                                            .from("deposit_batches")
+                                            .insert({
+                                              property: entityName,
+                                              deposit_period: period,
+                                              total_amount: allTotal,
+                                              receipt_count: allIds.length,
+                                              created_by: user!.id,
+                                              ownership_entity_id: entity!.id,
+                                              status: "draft" as any,
+                                            })
+                                            .select()
+                                            .single();
+                                          if (parentErr) throw parentErr;
+
+                                          // Create child batches per property
+                                          for (const [prop, receipts] of Object.entries(byProp)) {
+                                            const ids = receipts.map(r => r.id);
+                                            const propTotal = receipts.reduce((s, r) => s + Number(r.amount), 0);
+                                            const { data: childBatch, error: childErr } = await supabase
+                                              .from("deposit_batches")
+                                              .insert({
+                                                property: prop,
+                                                deposit_period: period,
+                                                total_amount: propTotal,
+                                                receipt_count: ids.length,
+                                                created_by: user!.id,
+                                                parent_batch_id: parentBatch.id,
+                                                ownership_entity_id: entity!.id,
+                                                status: "draft" as any,
+                                              })
+                                              .select()
+                                              .single();
+                                            if (childErr) throw childErr;
+                                            for (const id of ids) {
+                                              await supabase.from("receipts").update({ batch_id: childBatch.id }).eq("id", id);
+                                            }
+                                          }
+
+                                          queryClient.invalidateQueries({ queryKey: ["receipts"] });
+                                          queryClient.invalidateQueries({ queryKey: ["batches"] });
+                                          toast({ title: "Entity batch created", description: `Batched ${entityRecorded.length} receipts across ${Object.keys(byProp).length} properties.` });
+                                        } catch (err) {
+                                          toast({ title: "Error", description: err instanceof Error ? err.message : "Batch creation failed", variant: "destructive" });
+                                        } finally {
+                                          setIsBatchCreating(false);
+                                        }
+                                      }}
+                                    >
+                                      <Layers className="h-3.5 w-3.5 mr-1" /> Create Batch ({entityRecorded.length})
+                                    </Button>
+                                  );
+                                })()}
                               </div>
                             )}
                             {key === "__unassigned__" && ownerEntities.length > 0 && (
