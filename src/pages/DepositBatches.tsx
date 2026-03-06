@@ -80,27 +80,61 @@ export default function DepositBatches() {
       {batches.length === 0 ? (
         <div className="vault-card p-8 text-center text-muted-foreground text-sm">No deposit batches yet. Create one from the Entry & Recording page.</div>
       ) : (
-        <div className="space-y-4">
-          {batches.map((batch, i) => {
-            const receipts = allReceipts.filter((r) => r.batch_id === batch.id);
+        <>
+          {(() => {
+            const activeBatches = batches.filter((b) => b.status !== "reversed");
+            const reversedBatches = batches.filter((b) => b.status === "reversed");
             return (
-              <BatchCard
-                key={batch.id}
-                batch={batch}
-                receipts={receipts}
-                index={i}
-                isZipping={downloadingZip === batch.id}
-                onPreview={() => setPreviewBatchId(batch.id)}
-                onZipDownload={() => handleZipDownload(batch, receipts)}
-                onPdfDownload={() => downloadBatchPDF(batch, receipts)}
-                onXlsxDownload={() => generateBatchXLSX(batch, receipts)}
-                onReverse={() => reverseMutation.mutate(batch.id)}
-                onMoveReceipts={(ids) => handleMoveReceipts(batch.id, batch.property, ids)}
-                isMoving={movingBatchId === batch.id}
-              />
+              <>
+                <div className="space-y-4">
+                  {activeBatches.map((batch, i) => {
+                    const receipts = allReceipts.filter((r) => r.batch_id === batch.id);
+                    return (
+                      <BatchCard
+                        key={batch.id}
+                        batch={batch}
+                        receipts={receipts}
+                        index={i}
+                        isZipping={downloadingZip === batch.id}
+                        onPreview={() => setPreviewBatchId(batch.id)}
+                        onZipDownload={() => handleZipDownload(batch, receipts)}
+                        onPdfDownload={() => downloadBatchPDF(batch, receipts)}
+                        onXlsxDownload={() => generateBatchXLSX(batch, receipts)}
+                        onReverse={() => reverseMutation.mutate(batch.id)}
+                        onMoveReceipts={(ids) => handleMoveReceipts(batch.id, batch.property, ids)}
+                        isMoving={movingBatchId === batch.id}
+                      />
+                    );
+                  })}
+                </div>
+                {reversedBatches.length > 0 && (
+                  <div className="space-y-4 mt-10">
+                    <h2 className="text-lg font-semibold text-muted-foreground">Reversed Batches</h2>
+                    {reversedBatches.map((batch, i) => {
+                      const receipts = allReceipts.filter((r) => r.batch_id === batch.id);
+                      return (
+                        <BatchCard
+                          key={batch.id}
+                          batch={batch}
+                          receipts={receipts}
+                          index={i}
+                          isZipping={downloadingZip === batch.id}
+                          onPreview={() => setPreviewBatchId(batch.id)}
+                          onZipDownload={() => handleZipDownload(batch, receipts)}
+                          onPdfDownload={() => downloadBatchPDF(batch, receipts)}
+                          onXlsxDownload={() => generateBatchXLSX(batch, receipts)}
+                          onReverse={() => reverseMutation.mutate(batch.id)}
+                          onMoveReceipts={(ids) => handleMoveReceipts(batch.id, batch.property, ids)}
+                          isMoving={movingBatchId === batch.id}
+                        />
+                      );
+                    })}
+                  </div>
+                )}
+              </>
             );
-          })}
-        </div>
+          })()}
+        </>
       )}
       {previewBatchId && (
         <Suspense fallback={null}>
