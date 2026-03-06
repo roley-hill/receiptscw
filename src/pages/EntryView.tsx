@@ -1097,8 +1097,9 @@ export default function EntryView() {
                             {entity && (
                               <div className="flex items-center gap-3 px-1">
                                 <Checkbox
-                                  checked={isEntitySelected(entity.id)}
-                                  onCheckedChange={() => toggleSelectEntity(entity.id)}
+                                  checked={isScopedSelected(Object.values(propMap).flat() as DbReceipt[])}
+                                  data-state={isScopedPartial(Object.values(propMap).flat() as DbReceipt[]) ? "indeterminate" : undefined}
+                                  onCheckedChange={() => toggleSelectScoped(Object.values(propMap).flat() as DbReceipt[])}
                                   className="h-4 w-4"
                                 />
                                 <Building2 className="h-5 w-5 text-accent" />
