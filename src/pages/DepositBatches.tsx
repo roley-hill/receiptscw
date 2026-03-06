@@ -131,54 +131,102 @@ export default function DepositBatches() {
     );
   };
 
-  // Organize batches into entity groups
-  const { entityGroupedBatches, standaloneBatches, reversedBatches } = useMemo(() => {
+  // Determine month for each batch
+  const batchMonthMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const b of batches) {
+      map.set(b.id, getBatchMonth(b.id, allReceipts));
+    }
+    return map;
+  }, [batches, allReceipts]);
+
+  // Organize batches: month → entity → grouped/standalone
+  type EntityGroup = { entity: OwnerEntity | null; parentBatch: typeof batches[0] | null; children: typeof batches; standalone: typeof batches };
+  type MonthGroup = {
+    monthKey: string;
+    label: string;
+    entityGroups: [string, EntityGroup][];
+    standaloneBatches: typeof batches;
+    totalAmount: number;
+    receiptCount: number;
+  };
+
+  const { monthGroups, reversedBatches } = useMemo(() => {
     const active = batches.filter(b => b.status !== "reversed");
     const reversed = batches.filter(b => b.status === "reversed");
-
-    // Parent batches (have ownership_entity_id and no parent_batch_id, or are parents of children)
     const parentBatchIds = new Set(active.filter(b => b.parent_batch_id).map(b => b.parent_batch_id!));
-    const childBatches = new Set(active.filter(b => b.parent_batch_id).map(b => b.id));
+    const childBatchIds = new Set(active.filter(b => b.parent_batch_id).map(b => b.id));
 
-    // Group by ownership entity
-    const entityMap: Record<string, { entity: OwnerEntity | null; parentBatch: typeof batches[0] | null; children: typeof batches; standalone: typeof batches }> = {};
-
+    // Group active top-level batches by month
+    const byMonth: Record<string, typeof batches> = {};
     for (const batch of active) {
-      if (childBatches.has(batch.id)) continue; // handled under parent
+      if (childBatchIds.has(batch.id)) continue;
+      const month = batchMonthMap.get(batch.id) || "__none__";
+      if (!byMonth[month]) byMonth[month] = [];
+      byMonth[month].push(batch);
+    }
 
-      const entityId = batch.ownership_entity_id;
-      if (entityId && (parentBatchIds.has(batch.id) || batch.parent_batch_id === null)) {
-        if (!entityMap[entityId]) {
-          entityMap[entityId] = {
-            entity: ownerEntities.find(e => e.id === entityId) || null,
-            parentBatch: null,
-            children: [],
-            standalone: [],
-          };
-        }
+    const result: MonthGroup[] = [];
+    for (const monthKey of Object.keys(byMonth).sort((a, b) => {
+      if (a === "__none__") return 1;
+      if (b === "__none__") return -1;
+      return b.localeCompare(a);
+    })) {
+      const monthBatches = byMonth[monthKey];
+      const entityMap: Record<string, EntityGroup> = {};
+      const unassigned: typeof batches = [];
 
-        if (parentBatchIds.has(batch.id)) {
-          // This is a parent batch — find its children
-          entityMap[entityId].parentBatch = batch;
-          entityMap[entityId].children = active.filter(b => b.parent_batch_id === batch.id);
+      for (const batch of monthBatches) {
+        const entityId = batch.ownership_entity_id;
+        if (entityId) {
+          if (!entityMap[entityId]) {
+            entityMap[entityId] = {
+              entity: ownerEntities.find(e => e.id === entityId) || null,
+              parentBatch: null,
+              children: [],
+              standalone: [],
+            };
+          }
+          if (parentBatchIds.has(batch.id)) {
+            entityMap[entityId].parentBatch = batch;
+            entityMap[entityId].children = active.filter(b => b.parent_batch_id === batch.id);
+          } else {
+            entityMap[entityId].standalone.push(batch);
+          }
         } else {
-          // Standalone batch with entity assignment (individual batch)
-          entityMap[entityId].standalone.push(batch);
+          unassigned.push(batch);
         }
       }
+
+      const sortedEntities = Object.entries(entityMap).sort(([, a], [, b]) =>
+        (a.entity?.name || "").localeCompare(b.entity?.name || "")
+      );
+
+      // Compute totals for month
+      const allMonthBatchIds = new Set<string>();
+      for (const [, g] of sortedEntities) {
+        if (g.parentBatch) allMonthBatchIds.add(g.parentBatch.id);
+        for (const c of g.children) allMonthBatchIds.add(c.id);
+        for (const s of g.standalone) allMonthBatchIds.add(s.id);
+      }
+      for (const b of unassigned) allMonthBatchIds.add(b.id);
+      const monthReceipts = allReceipts.filter(r => {
+        if (!r.batch_id) return false;
+        return allMonthBatchIds.has(r.batch_id);
+      });
+
+      result.push({
+        monthKey,
+        label: monthKey === "__none__" ? "No Month Assigned" : formatRentMonth(monthKey),
+        entityGroups: sortedEntities,
+        standaloneBatches: unassigned,
+        totalAmount: monthReceipts.reduce((s, r) => s + Number(r.amount), 0),
+        receiptCount: monthReceipts.length,
+      });
     }
 
-    // Standalone batches: no entity assignment, not a child
-    const entityBatchIds = new Set<string>();
-    for (const group of Object.values(entityMap)) {
-      if (group.parentBatch) entityBatchIds.add(group.parentBatch.id);
-      for (const c of group.children) entityBatchIds.add(c.id);
-      for (const s of group.standalone) entityBatchIds.add(s.id);
-    }
-    const standalone = active.filter(b => !entityBatchIds.has(b.id) && !childBatches.has(b.id));
-
-    return { entityGroupedBatches: entityMap, standaloneBatches: standalone, reversedBatches: reversed };
-  }, [batches, ownerEntities]);
+    return { monthGroups: result, reversedBatches: reversed };
+  }, [batches, ownerEntities, allReceipts, batchMonthMap]);
 
   if (isLoading) {
     return <div className="flex items-center justify-center py-20"><div className="h-8 w-8 border-2 border-accent border-t-transparent rounded-full animate-spin" /></div>;
