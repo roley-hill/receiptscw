@@ -182,14 +182,14 @@ function ColumnSection({
                 {opConfig?.needsValue && (filter.operator === "is" || filter.operator === "is_not") ? (
                   <Select
                     value={filter.value || "__pick__"}
-                    onValueChange={(v) => updateFilter(filter.id, { value: v === "__pick__" ? "" : v })}
+                    onValueChange={(v) => updateFilter(filter.id, { value: v === "__pick__" ? "" : v === "__empty__" ? "" : v })}
                   >
                     <SelectTrigger className="h-7 text-[11px] w-full">
                       <SelectValue placeholder="Select value" />
                     </SelectTrigger>
                     <SelectContent className="z-[300] max-h-[200px]">
                       <SelectItem value="__pick__" className="text-xs text-muted-foreground">Select value...</SelectItem>
-                      <SelectItem value="" className="text-xs italic text-muted-foreground">(empty)</SelectItem>
+                      <SelectItem value="__empty__" className="text-xs italic text-muted-foreground">(empty)</SelectItem>
                       {distinctValues.map(v => (
                         <SelectItem key={v} value={v} className="text-xs">{v}</SelectItem>
                       ))}
