@@ -39,15 +39,39 @@ const OPERATORS: { value: FilterOperator; label: string; needsValue: boolean }[]
 let _filterId = 0;
 const nextId = () => `f-${++_filterId}`;
 
+/* ─── Parse multi-value string (pipe-separated) ─── */
+function parseMultiValue(value: string): string[] {
+  if (!value) return [];
+  return value.split("|");
+}
+
+function toMultiValue(values: string[]): string {
+  return values.join("|");
+}
+
 /* ─── Evaluate a single filter against a cell value ─── */
 function evalFilter(cellValue: string, filter: ColumnFilter): boolean {
   const cell = (cellValue || "").toLowerCase();
-  const val = (filter.value || "").toLowerCase();
   switch (filter.operator) {
-    case "contains": return cell.includes(val);
-    case "does_not_contain": return !cell.includes(val);
-    case "is": return cell === val;
-    case "is_not": return cell !== val;
+    case "contains": return cell.includes((filter.value || "").toLowerCase());
+    case "does_not_contain": return !cell.includes((filter.value || "").toLowerCase());
+    case "is": {
+      const vals = parseMultiValue(filter.value).map(v => v.toLowerCase());
+      if (vals.length === 0) return true;
+      // Include empty match if __empty__ is in the list
+      if (vals.includes("__empty__")) {
+        return (!cellValue || cellValue.trim() === "") || vals.includes(cell);
+      }
+      return vals.includes(cell);
+    }
+    case "is_not": {
+      const vals = parseMultiValue(filter.value).map(v => v.toLowerCase());
+      if (vals.length === 0) return true;
+      if (vals.includes("__empty__")) {
+        return (!!cellValue && cellValue.trim() !== "") && !vals.includes(cell);
+      }
+      return !vals.includes(cell);
+    }
     case "is_empty": return !cellValue || cellValue.trim() === "";
     case "is_not_empty": return !!cellValue && cellValue.trim() !== "";
     default: return true;
