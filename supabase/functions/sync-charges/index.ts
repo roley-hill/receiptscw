@@ -319,6 +319,7 @@ serve(async (req) => {
       success: true,
       charges_synced: upserted,
       receipts_tagged: receiptsUpdated,
+      subsidy_mismatches: mismatchesFlagged,
       subsidy_charges_found: subsidyCharges?.length || 0,
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
