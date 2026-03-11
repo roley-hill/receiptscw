@@ -179,14 +179,30 @@ function ColumnSection({
                     <X className="h-3 w-3" />
                   </button>
                 </div>
-                {opConfig?.needsValue && (
+                {opConfig?.needsValue && (filter.operator === "is" || filter.operator === "is_not") ? (
+                  <Select
+                    value={filter.value || "__pick__"}
+                    onValueChange={(v) => updateFilter(filter.id, { value: v === "__pick__" ? "" : v })}
+                  >
+                    <SelectTrigger className="h-7 text-[11px] w-full">
+                      <SelectValue placeholder="Select value" />
+                    </SelectTrigger>
+                    <SelectContent className="z-[300] max-h-[200px]">
+                      <SelectItem value="__pick__" className="text-xs text-muted-foreground">Select value...</SelectItem>
+                      <SelectItem value="" className="text-xs italic text-muted-foreground">(empty)</SelectItem>
+                      {distinctValues.map(v => (
+                        <SelectItem key={v} value={v} className="text-xs">{v}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : opConfig?.needsValue ? (
                   <Input
                     value={filter.value}
                     onChange={(e) => updateFilter(filter.id, { value: e.target.value })}
                     placeholder="Value"
                     className="h-7 text-xs"
                   />
-                )}
+                ) : null}
               </div>
             );
           })}
