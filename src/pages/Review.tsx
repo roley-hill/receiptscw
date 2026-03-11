@@ -82,33 +82,39 @@ function normalizeUnit(unit: string): string {
 }
 
 // Hook to batch-lookup which receipts are already paid in AppFolio charge_details
+// Returns Map<receiptId, latestReceiptDate>
 function useAppfolioPaidLookup(receipts: any[]) {
-  const { data: paidSet } = useQuery({
+  const { data: paidMap } = useQuery({
     queryKey: ["appfolio_paid_lookup", receipts.map(r => r.id).join(",")],
     queryFn: async () => {
-      if (receipts.length === 0) return new Set<string>();
-      // Fetch all charge_details with paid_amount > 0
+      if (receipts.length === 0) return new Map<string, string>();
       const { data: charges } = await supabase
         .from("charge_details")
-        .select("charged_to, unit, paid_amount, property_address")
+        .select("charged_to, unit, paid_amount, property_address, receipt_date")
         .gt("paid_amount", 0);
-      if (!charges || charges.length === 0) return new Set<string>();
+      if (!charges || charges.length === 0) return new Map<string, string>();
 
-      // Build a lookup set of "normalizedName|normalizedUnit" from paid charges
-      const paidKeys = new Set<string>();
+      // Build lookup: "normalizedName|normalizedUnit" → latest receipt_date
+      const paidKeys = new Map<string, string>();
       for (const c of charges) {
         const name = normalizeName(c.charged_to || "");
         const unit = normalizeUnit(c.unit || "");
-        if (name && unit) paidKeys.add(`${name}|${unit}`);
+        if (!name || !unit) continue;
+        const key = `${name}|${unit}`;
+        const date = c.receipt_date || "";
+        if (!paidKeys.has(key) || date > (paidKeys.get(key) || "")) {
+          paidKeys.set(key, date);
+        }
       }
 
-      // Match receipts against paid charges
-      const matched = new Set<string>();
+      // Match receipts
+      const matched = new Map<string, string>();
       for (const r of receipts) {
         const tenant = normalizeName(r.tenant || "");
         const unit = normalizeUnit(r.unit || "");
-        if (tenant && unit && paidKeys.has(`${tenant}|${unit}`)) {
-          matched.add(r.id);
+        const key = `${tenant}|${unit}`;
+        if (tenant && unit && paidKeys.has(key)) {
+          matched.set(r.id, paidKeys.get(key)!);
         }
       }
       return matched;
@@ -116,7 +122,7 @@ function useAppfolioPaidLookup(receipts: any[]) {
     staleTime: 60000,
     enabled: receipts.length > 0,
   });
-  return paidSet || new Set<string>();
+  return paidMap || new Map<string, string>();
 }
 
 export default function ReviewPage() {
