@@ -1297,11 +1297,13 @@ ${knownTenantsList}` : ""}`;
       }
 
       // ---- CHECK 4: APPFOLIO PAID-AMOUNT CROSS-CHECK ----
-      // If charge_details shows this tenant/unit/amount already has a payment recorded, flag as duplicate
+      // If charge_details shows this tenant/unit/amount already has a payment recorded for the SAME MONTH, flag as duplicate
       if (allChargeDetails.length > 0 && item.tenant && item.amount) {
         const itemTenant = (item.tenant || "").toLowerCase().trim();
         const itemUnit = cleanUnit(item.unit || "").toLowerCase();
         const itemAmount = Math.abs(item.amount);
+        // Determine the month this receipt belongs to (prefer rent_month, fall back to receipt_date month)
+        const itemMonth = item.rent_month || (item.receipt_date ? item.receipt_date.substring(0, 7) : null);
 
         const alreadyPaid = allChargeDetails.find(cd => {
           const cdTenant = (cd.charged_to || "").toLowerCase().trim();
@@ -1318,11 +1320,23 @@ ${knownTenantsList}` : ""}`;
           );
           const amountMatch = Math.abs(cdPaid - itemAmount) < 0.01;
 
-          return amountMatch && (tenantMatch || unitMatch);
+          // Date match: the charge's receipt_date month must match the item's rent month
+          let dateMatch = false;
+          if (itemMonth && cd.receipt_date) {
+            const cdMonth = cd.receipt_date.substring(0, 7); // "YYYY-MM"
+            dateMatch = cdMonth === itemMonth;
+          } else if (!itemMonth && !cd.receipt_date) {
+            // Both have no date — still consider it a potential match
+            dateMatch = true;
+          }
+          // If we have date info, require it to match; otherwise skip date check
+          const dateOk = itemMonth ? dateMatch : true;
+
+          return amountMatch && (tenantMatch || unitMatch) && dateOk;
         });
 
         if (alreadyPaid) {
-          console.log(`AppFolio cross-check: "${item.tenant}" $${itemAmount} already recorded (paid_amount=$${alreadyPaid.paid_amount} for ${alreadyPaid.charged_to} @ ${alreadyPaid.unit})`);
+          console.log(`AppFolio cross-check: "${item.tenant}" $${itemAmount} month=${itemMonth} already recorded (paid_amount=$${alreadyPaid.paid_amount} for ${alreadyPaid.charged_to} @ ${alreadyPaid.unit}, receipt_date=${alreadyPaid.receipt_date})`);
           await recordSkippedDuplicate(item, "APPFOLIO_ALREADY_RECORDED", null, "appfolio_paid");
           continue;
         }
