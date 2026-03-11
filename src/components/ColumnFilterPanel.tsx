@@ -96,6 +96,79 @@ export function applyColumnFilters<T>(rows: T[], groups: ColumnFilterGroup[], co
   });
 }
 
+/* ─── Multi-value checkbox picker for is/is_not ─── */
+function MultiValuePicker({
+  selectedValues,
+  distinctValues,
+  onChange,
+}: {
+  selectedValues: string[];
+  distinctValues: string[];
+  onChange: (values: string[]) => void;
+}) {
+  const [search, setSearch] = useState("");
+  const filtered = distinctValues.filter(v =>
+    !search || v.toLowerCase().includes(search.toLowerCase())
+  );
+
+  const toggle = (val: string) => {
+    if (selectedValues.includes(val)) {
+      onChange(selectedValues.filter(v => v !== val));
+    } else {
+      onChange([...selectedValues, val]);
+    }
+  };
+
+  const selectedCount = selectedValues.filter(v => v !== "__empty__").length + (selectedValues.includes("__empty__") ? 1 : 0);
+
+  return (
+    <div className="border border-input rounded-md overflow-hidden">
+      <div className="relative">
+        <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+        <input
+          type="text"
+          placeholder="Search values..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="h-7 w-full bg-background pl-7 pr-2 text-[11px] placeholder:text-muted-foreground focus:outline-none border-b border-input"
+        />
+      </div>
+      <div className="max-h-[140px] overflow-auto">
+        {/* Empty option */}
+        <button
+          onClick={() => toggle("__empty__")}
+          className="w-full flex items-center gap-2 px-2 py-1 text-[11px] hover:bg-muted/50 transition-colors"
+        >
+          <div className={`h-3.5 w-3.5 rounded-sm border flex items-center justify-center shrink-0 ${selectedValues.includes("__empty__") ? "bg-primary border-primary" : "border-input"}`}>
+            {selectedValues.includes("__empty__") && <Check className="h-2.5 w-2.5 text-primary-foreground" />}
+          </div>
+          <span className="italic text-muted-foreground">(empty)</span>
+        </button>
+        {filtered.map(v => (
+          <button
+            key={v}
+            onClick={() => toggle(v)}
+            className="w-full flex items-center gap-2 px-2 py-1 text-[11px] hover:bg-muted/50 transition-colors"
+          >
+            <div className={`h-3.5 w-3.5 rounded-sm border flex items-center justify-center shrink-0 ${selectedValues.includes(v) ? "bg-primary border-primary" : "border-input"}`}>
+              {selectedValues.includes(v) && <Check className="h-2.5 w-2.5 text-primary-foreground" />}
+            </div>
+            <span className="truncate text-left">{v}</span>
+          </button>
+        ))}
+        {filtered.length === 0 && (
+          <div className="px-2 py-2 text-[11px] text-muted-foreground text-center">No matches</div>
+        )}
+      </div>
+      {selectedCount > 0 && (
+        <div className="px-2 py-1 border-t border-input bg-muted/20 text-[10px] text-muted-foreground">
+          {selectedCount} selected
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ─── Single column section ─── */
 function ColumnSection({
   column,
