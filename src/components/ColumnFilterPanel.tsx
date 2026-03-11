@@ -304,14 +304,12 @@ export default function ColumnFilterPanel({
 
       <div className="max-h-[calc(100vh-260px)] overflow-auto">
         {filteredColumns.map(col => {
-          const distinctValues = useMemo(() => {
-            const set = new Set<string>();
-            for (const row of filteredRows) {
-              const v = col.accessor(row);
-              if (v && v.trim()) set.add(v);
-            }
-            return Array.from(set).sort();
-          }, [filteredRows, col]);
+          const set = new Set<string>();
+          for (const row of filteredRows) {
+            const v = col.accessor(row);
+            if (v && v.trim()) set.add(v);
+          }
+          const distinctValues = Array.from(set).sort();
 
           return (
             <ColumnSection
