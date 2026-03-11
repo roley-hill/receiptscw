@@ -157,9 +157,12 @@ export default function Duplicates() {
           setExistingReceipts((prev) => ({ ...prev, [cacheKey]: { ...data, source: "receipt" } as ExistingReceipt }));
         }
       } else if (dup.existing_receipt_id === "APPFOLIO_ALREADY_RECORDED") {
-        // AppFolio charge match — query charge_details by unit + amount
+        // AppFolio charge match — query charge_details by unit + amount + month
         const cleanUnit = (u: string) => u.replace(/^[^-]*-/, "").replace(/^0+/, "").trim();
         const normalizedUnit = cleanUnit(dup.unit || "");
+        
+        // Determine the target month from rent_month or receipt_date
+        const targetMonth = dup.rent_month || (dup.receipt_date ? dup.receipt_date.substring(0, 7) : null);
         
         const { data: charges } = await supabase
           .from("charge_details")
@@ -167,12 +170,20 @@ export default function Duplicates() {
           .gt("paid_amount", 0);
 
         if (charges && charges.length > 0) {
-          const match = charges.find((c) => {
+          // Try matching with month constraint first, then fall back to unit+amount only
+          const matchWithMonth = (monthStrict: boolean) => charges.find((c) => {
             const cUnit = cleanUnit(c.unit || "");
             const unitMatch = cUnit === normalizedUnit || cUnit.endsWith(normalizedUnit) || normalizedUnit.endsWith(cUnit);
             const amountMatch = Math.abs(Math.abs(c.paid_amount) - Math.abs(dup.amount)) < 0.01;
-            return unitMatch && amountMatch;
+            if (!unitMatch || !amountMatch) return false;
+            if (monthStrict && targetMonth) {
+              const chargeMonth = c.receipt_date ? c.receipt_date.substring(0, 7) : (c.charge_date ? c.charge_date.substring(0, 7) : null);
+              return chargeMonth === targetMonth;
+            }
+            return true;
           });
+
+          const match = matchWithMonth(true) || matchWithMonth(false);
 
           if (match) {
             setExistingReceipts((prev) => ({
