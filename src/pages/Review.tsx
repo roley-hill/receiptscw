@@ -170,6 +170,125 @@ export default function ReviewPage() {
   const selectedInMonth = (receipts: typeof filteredReviewable) =>
     receipts.filter(r => selected.has(r.id)).length;
 
+  const handleBulkDelete = async () => {
+    if (selected.size === 0) return;
+    setDeleting(true);
+    try {
+      const ids = Array.from(selected);
+      const { softDeleteReceipts } = await import("@/hooks/useAdminDelete");
+      await softDeleteReceipts(ids);
+      toast.success(`Deleted ${selected.size} receipt(s)`);
+      setSelected(new Set());
+      queryClient.invalidateQueries({ queryKey: ["receipts"] });
+    } catch (err: any) {
+      toast.error(err.message || "Delete failed");
+    }
+    setDeleting(false);
+  };
+
+  const handleBulkFinalize = async () => {
+    if (selected.size === 0) return;
+    setFinalizing(true);
+    try {
+      const ids = Array.from(selected);
+      for (let i = 0; i < ids.length; i += 100) {
+        const chunk = ids.slice(i, i + 100);
+        const { error } = await supabase
+          .from("receipts")
+          .update({ status: "finalized" as any, finalized_at: new Date().toISOString() })
+          .in("id", chunk);
+        if (error) throw error;
+      }
+      toast.success(`Finalized ${selected.size} receipt(s)`);
+      setSelected(new Set());
+      queryClient.invalidateQueries({ queryKey: ["receipts"] });
+    } catch (err: any) {
+      toast.error(err.message || "Finalize failed");
+    }
+    setFinalizing(false);
+  };
+
+  const handleDeleteByFile = async (fileName: string) => {
+    setDeleting(true);
+    try {
+      const idsToDelete = reviewable
+        .filter((r) => (r.file_name || "No file") === fileName)
+        .map((r) => r.id);
+      const { softDeleteReceipts } = await import("@/hooks/useAdminDelete");
+      await softDeleteReceipts(idsToDelete);
+      toast.success(`Deleted ${idsToDelete.length} receipt(s) from "${fileName}"`);
+      setSelected(new Set());
+      if (fileFilter === fileName) setFileFilter("all");
+      queryClient.invalidateQueries({ queryKey: ["receipts"] });
+    } catch (err: any) {
+      toast.error(err.message || "Delete failed");
+    }
+    setDeleting(false);
+  };
+
+  const handleFinalizeByFile = async (fileName: string) => {
+    setFinalizing(true);
+    try {
+      const idsToFinalize = reviewable
+        .filter((r) => (r.file_name || "No file") === fileName)
+        .map((r) => r.id);
+      for (let i = 0; i < idsToFinalize.length; i += 100) {
+        const chunk = idsToFinalize.slice(i, i + 100);
+        const { error } = await supabase
+          .from("receipts")
+          .update({ status: "finalized" as any, finalized_at: new Date().toISOString() })
+          .in("id", chunk);
+        if (error) throw error;
+      }
+      toast.success(`Finalized ${idsToFinalize.length} receipt(s) from "${fileName}"`);
+      setSelected(new Set());
+      if (fileFilter === fileName) setFileFilter("all");
+      queryClient.invalidateQueries({ queryKey: ["receipts"] });
+    } catch (err: any) {
+      toast.error(err.message || "Finalize failed");
+    }
+    setFinalizing(false);
+  };
+
+  if (isLoading) {
+    return <div className="flex items-center justify-center py-20"><div className="h-8 w-8 border-2 border-accent border-t-transparent rounded-full animate-spin" /></div>;
+  }
+
+  if (reviewable.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-center">
+        <CheckCircle2 className="h-12 w-12 text-vault-emerald mb-4" />
+        <h2 className="text-xl font-bold text-foreground">All caught up!</h2>
+        <p className="text-sm text-muted-foreground mt-1">No receipts pending review.</p>
+      </div>
+    );
+  }
+
+  // Detail view for a single receipt
+  const activeReceipt = activeReceiptId ? reviewable.find((r) => r.id === activeReceiptId) : null;
+  const activeIndex = activeReceipt ? filteredReviewable.findIndex((r) => r.id === activeReceiptId) : -1;
+
+  const handleNavigate = (direction: "prev" | "next") => {
+    const newIndex = direction === "prev" ? activeIndex - 1 : activeIndex + 1;
+    if (newIndex >= 0 && newIndex < filteredReviewable.length) {
+      setActiveReceiptId(filteredReviewable[newIndex].id);
+    }
+  };
+
+  if (activeReceipt) {
+    return (
+      <ReviewDetail
+        receipt={activeReceipt}
+        reviewable={filteredReviewable}
+        currentIndex={activeIndex}
+        isAdmin={isAdmin}
+        onBack={() => setActiveReceiptId(null)}
+        onNavigate={handleNavigate}
+        queryClient={queryClient}
+      />
+    );
+  }
+
   // List view
   return (
     <div className="space-y-6 max-w-5xl">
