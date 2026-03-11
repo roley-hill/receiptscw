@@ -137,60 +137,22 @@ export default function Duplicates() {
     }
   };
 
-  const closePreview = () => {
-    setPreviewOpen(false);
-    setPreviewUrl(null);
-  };
+  // Shared charge cache to avoid re-fetching for every AppFolio duplicate
+  const chargesCacheRef = useRef<any[] | null>(null);
 
-  const handleBulkDelete = async (ids?: string[]) => {
-    setBulkDeleting(true);
-    try {
-      const toDelete = ids || duplicates.map((d) => d.id);
-      const { error } = await supabase.from("skipped_duplicates").delete().in("id", toDelete);
-      if (error) throw error;
-      toast.success(`Deleted ${toDelete.length} duplicate(s)`);
-      setExpandedId(null);
-      queryClient.invalidateQueries({ queryKey: ["skipped_duplicates"] });
-      queryClient.invalidateQueries({ queryKey: ["pending_counts"] });
-    } catch (err: any) {
-      toast.error(err.message || "Failed to bulk delete");
-    }
-    setBulkDeleting(false);
-  };
-
-  const toggleExpand = async (dup: SkippedDuplicate) => {
-    if (expandedId === dup.id) {
-      setExpandedId(null);
-      return;
-    }
-    setExpandedId(dup.id);
-
+  const fetchExistingForDup = useCallback(async (dup: SkippedDuplicate): Promise<{ key: string; record: ExistingReceipt } | null> => {
     const cacheKey = dup.existing_receipt_uuid || `appfolio-${dup.id}`;
-    if (existingReceipts[cacheKey]) return;
 
-    setLoadingExisting((prev) => new Set(prev).add(dup.id));
-
-    try {
-      if (dup.existing_receipt_uuid) {
-        // Normal receipt duplicate
-        const { data } = await supabase
-          .from("receipts")
-          .select("id, receipt_id, tenant, property, unit, amount, receipt_date, rent_month, payment_type, reference, memo, status, file_name, file_path, original_text")
-          .eq("id", dup.existing_receipt_uuid)
-          .single();
-        if (data) {
-          setExistingReceipts((prev) => ({ ...prev, [cacheKey]: { ...data, source: "receipt" } as ExistingReceipt }));
-        }
-      } else if (dup.existing_receipt_id === "APPFOLIO_ALREADY_RECORDED") {
-        // AppFolio charge match — query charge_details by unit + amount + month
-        // Paginate to avoid 1000-row default limit
-        const cleanUnit = (u: string) => u.replace(/^[^-]*-/, "").replace(/^0+/, "").trim();
-        const normalizedUnit = cleanUnit(dup.unit || "");
-        
-        // Determine the target month from rent_month or receipt_date
-        const targetMonth = dup.rent_month || (dup.receipt_date ? dup.receipt_date.substring(0, 7) : null);
-        
-        // Fetch all paid charges with pagination
+    if (dup.existing_receipt_uuid) {
+      const { data } = await supabase
+        .from("receipts")
+        .select("id, receipt_id, tenant, property, unit, amount, receipt_date, rent_month, payment_type, reference, memo, status, file_name, file_path, original_text")
+        .eq("id", dup.existing_receipt_uuid)
+        .single();
+      if (data) return { key: cacheKey, record: { ...data, source: "receipt" } as ExistingReceipt };
+    } else if (dup.existing_receipt_id === "APPFOLIO_ALREADY_RECORDED") {
+      // Fetch charges once and cache
+      if (!chargesCacheRef.current) {
         let allCharges: any[] = [];
         let from = 0;
         const pageSize = 1000;
@@ -205,59 +167,89 @@ export default function Duplicates() {
           if (page.length < pageSize) break;
           from += pageSize;
         }
+        chargesCacheRef.current = allCharges;
+      }
 
-        if (allCharges.length > 0) {
-          // Try matching with month constraint first, then fall back to unit+amount only
-          const matchWithMonth = (monthStrict: boolean) => allCharges.find((c) => {
-            const cUnit = cleanUnit(c.unit || "");
-            const unitMatch = cUnit === normalizedUnit || cUnit.endsWith(normalizedUnit) || normalizedUnit.endsWith(cUnit);
-            const amountMatch = Math.abs(Math.abs(c.paid_amount) - Math.abs(dup.amount)) < 0.01;
-            if (!unitMatch || !amountMatch) return false;
-            if (monthStrict && targetMonth) {
-              const chargeMonth = c.receipt_date ? c.receipt_date.substring(0, 7) : (c.charge_date ? c.charge_date.substring(0, 7) : null);
-              return chargeMonth === targetMonth;
-            }
-            return true;
-          });
+      const allCharges = chargesCacheRef.current;
+      const cleanUnitFn = (u: string) => u.replace(/^[^-]*-/, "").replace(/^0+/, "").trim();
+      const normalizedUnit = cleanUnitFn(dup.unit || "");
+      const targetMonth = dup.rent_month || (dup.receipt_date ? dup.receipt_date.substring(0, 7) : null);
 
-          const match = matchWithMonth(true) || matchWithMonth(false);
-
-          if (match) {
-            setExistingReceipts((prev) => ({
-              ...prev,
-              [cacheKey]: {
-                id: match.id,
-                receipt_id: "AppFolio Charge",
-                tenant: match.charged_to,
-                property: match.property_address,
-                unit: match.unit || "",
-                amount: match.paid_amount,
-                receipt_date: match.receipt_date,
-                rent_month: null,
-                payment_type: null,
-                reference: match.reference,
-                memo: null,
-                status: "recorded",
-                file_name: null,
-                file_path: null,
-                original_text: null,
-                source: "appfolio",
-                charge_date: match.charge_date,
-                paid_amount: match.paid_amount,
-                account_name: match.account_name,
-                charged_to: match.charged_to,
-              },
-            }));
+      if (allCharges.length > 0) {
+        const matchWithMonth = (monthStrict: boolean) => allCharges.find((c) => {
+          const cUnit = cleanUnitFn(c.unit || "");
+          const unitMatch = cUnit === normalizedUnit || cUnit.endsWith(normalizedUnit) || normalizedUnit.endsWith(cUnit);
+          const amountMatch = Math.abs(Math.abs(c.paid_amount) - Math.abs(dup.amount)) < 0.01;
+          if (!unitMatch || !amountMatch) return false;
+          if (monthStrict && targetMonth) {
+            const chargeMonth = c.receipt_date ? c.receipt_date.substring(0, 7) : (c.charge_date ? c.charge_date.substring(0, 7) : null);
+            return chargeMonth === targetMonth;
           }
+          return true;
+        });
+
+        const match = matchWithMonth(true) || matchWithMonth(false);
+        if (match) {
+          return {
+            key: cacheKey,
+            record: {
+              id: match.id,
+              receipt_id: "AppFolio Charge",
+              tenant: match.charged_to,
+              property: match.property_address,
+              unit: match.unit || "",
+              amount: match.paid_amount,
+              receipt_date: match.receipt_date,
+              rent_month: null,
+              payment_type: null,
+              reference: match.reference,
+              memo: null,
+              status: "recorded",
+              file_name: null,
+              file_path: null,
+              original_text: null,
+              source: "appfolio",
+              charge_date: match.charge_date,
+              paid_amount: match.paid_amount,
+              account_name: match.account_name,
+              charged_to: match.charged_to,
+            },
+          };
         }
       }
-    } catch (err) {
-      console.error("Failed to load existing record", err);
     }
+    return null;
+  }, []);
 
-    setLoadingExisting((prev) => {
-      const next = new Set(prev);
-      next.delete(dup.id);
+  // Auto-load all existing records when duplicates change
+  useEffect(() => {
+    if (duplicates.length === 0) return;
+    const toLoad = duplicates.filter(d => {
+      const key = d.existing_receipt_uuid || `appfolio-${d.id}`;
+      return !existingReceipts[key];
+    });
+    if (toLoad.length === 0) return;
+
+    setLoadingExisting(new Set(toLoad.map(d => d.id)));
+
+    (async () => {
+      const results: Record<string, ExistingReceipt> = {};
+      for (const dup of toLoad) {
+        try {
+          const result = await fetchExistingForDup(dup);
+          if (result) results[result.key] = result.record;
+        } catch (err) {
+          console.error("Failed to load existing record for", dup.id, err);
+        }
+      }
+      setExistingReceipts(prev => ({ ...prev, ...results }));
+      setLoadingExisting(new Set());
+    })();
+  }, [duplicates, fetchExistingForDup]);
+
+  const toggleExpand = (dup: SkippedDuplicate) => {
+    setExpandedId(prev => prev === dup.id ? null : dup.id);
+  };
       return next;
     });
   };
