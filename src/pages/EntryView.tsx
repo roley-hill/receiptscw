@@ -1,7 +1,7 @@
 import { useState, useRef, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { fetchReceipts, markAppfolioRecorded, getFilePreviewUrl, createDepositBatch } from "@/lib/api";
+import { fetchReceipts, markAppfolioRecorded, getFilePreviewUrl, createDepositBatch, updateReceipt } from "@/lib/api";
 import { motion } from "framer-motion";
 import { Copy, Check, FileText, Layers, Loader2, ChevronRight, ChevronDown, Building2, Search, User, AlertTriangle, Trash2, CheckSquare, Square, Calendar, Filter, X, SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,9 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { FilePreviewOverlay, AttachmentContent } from "@/components/FilePreview";
 import { useAdminDelete } from "@/hooks/useAdminDelete";
@@ -172,6 +175,7 @@ export default function EntryView() {
   const [selectedSubsidies, setSelectedSubsidies] = useState<Set<string>>(new Set());
   const [selectedPayTypes, setSelectedPayTypes] = useState<Set<string>>(new Set());
   const [filterSearch, setFilterSearch] = useState("");
+  const [includeNoSubsidy, setIncludeNoSubsidy] = useState(false);
 
   // Collect unique subsidy providers and payment types from finalized receipts
   const uniqueSubsidies = useMemo(() => {
@@ -190,7 +194,7 @@ export default function EntryView() {
     return Array.from(set).sort();
   }, [finalized]);
 
-  const hasActiveFilters = selectedSubsidies.size > 0 || selectedPayTypes.size > 0;
+  const hasActiveFilters = selectedSubsidies.size > 0 || selectedPayTypes.size > 0 || includeNoSubsidy;
 
   const toggleSubsidy = (s: string) => {
     setSelectedSubsidies(prev => {
@@ -211,6 +215,7 @@ export default function EntryView() {
   const clearAllFilters = () => {
     setSelectedSubsidies(new Set());
     setSelectedPayTypes(new Set());
+    setIncludeNoSubsidy(false);
     setFilterSearch("");
   };
 
@@ -229,14 +234,19 @@ export default function EntryView() {
   // Apply sidebar filters first
   const sidebarFiltered = useMemo(() => {
     let result = finalized;
-    if (selectedSubsidies.size > 0) {
-      result = result.filter(r => r.subsidy_provider && selectedSubsidies.has(r.subsidy_provider));
+    if (selectedSubsidies.size > 0 || includeNoSubsidy) {
+      result = result.filter(r => {
+        if (includeNoSubsidy && !r.subsidy_provider) return true;
+        if (selectedSubsidies.size > 0 && r.subsidy_provider && selectedSubsidies.has(r.subsidy_provider)) return true;
+        if (selectedSubsidies.size === 0 && includeNoSubsidy) return !r.subsidy_provider;
+        return false;
+      });
     }
     if (selectedPayTypes.size > 0) {
       result = result.filter(r => r.payment_type && selectedPayTypes.has(r.payment_type));
     }
     return result;
-  }, [finalized, selectedSubsidies, selectedPayTypes]);
+  }, [finalized, selectedSubsidies, selectedPayTypes, includeNoSubsidy]);
 
   const filtered = selectedProperty === "all"
     ? (selectedTenant ? sidebarFiltered.filter(r => (r.tenant || "(No Tenant)") === selectedTenant) : sidebarFiltered)
@@ -740,7 +750,30 @@ export default function EntryView() {
       <td className={`px-3 py-2.5 ${isDupMonth ? "font-semibold" : ""}`}><CopyCell value={r.rent_month || "—"} mono id={`month-${r.id}`} /></td>
       <td className="px-3 py-2.5"><CopyCell value={r.payment_type || "—"} id={`ptype-${r.id}`} /></td>
       <td className="px-3 py-2.5"><CopyCell value={r.reference || "—"} mono id={`ref-${r.id}`} /></td>
-      <td className="px-3 py-2.5"><CopyCell value={r.subsidy_provider || "—"} id={`sub-${r.id}`} /></td>
+      <td className="px-3 py-2.5">
+        <Select
+          value={r.subsidy_provider || "__none__"}
+          onValueChange={async (v) => {
+            const newVal = v === "__none__" ? null : v;
+            try {
+              await updateReceipt(r.id, { subsidy_provider: newVal });
+              queryClient.invalidateQueries({ queryKey: ["receipts"] });
+            } catch (err: any) {
+              toast({ title: "Error", description: err.message, variant: "destructive" });
+            }
+          }}
+        >
+          <SelectTrigger className="h-7 text-xs w-[130px] border-transparent hover:border-input transition-colors">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent className="z-[200]">
+            <SelectItem value="__none__"><span className="text-muted-foreground">None</span></SelectItem>
+            {uniqueSubsidies.map(s => (
+              <SelectItem key={s} value={s}>{s}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </td>
       <td className="px-3 py-2.5"><CopyCell value={r.memo || "—"} id={`memo-${r.id}`} /></td>
       <td className="px-3 py-2.5 text-xs vault-mono text-vault-blue">{r.receipt_id}</td>
       <td className="px-3 py-2.5">{r.transfer_status === "transferred" ? <span className="vault-badge-success">Transferred</span> : <span className="vault-badge-neutral">Pending</span>}</td>
@@ -936,7 +969,7 @@ export default function EntryView() {
             Filters
             {hasActiveFilters && (
               <span className="absolute -top-1.5 -right-1.5 h-4 w-4 rounded-full bg-accent text-[10px] font-bold text-accent-foreground flex items-center justify-center">
-                {selectedSubsidies.size + selectedPayTypes.size}
+                {selectedSubsidies.size + selectedPayTypes.size + (includeNoSubsidy ? 1 : 0)}
               </span>
             )}
           </Button>
@@ -1366,11 +1399,21 @@ export default function EntryView() {
                         );
                       })}
                     {/* No subsidy option */}
-                    {!filterSearch && (
+                    {(!filterSearch || "no subsidy".includes(filterSearch.toLowerCase())) && (
                       <label
-                        className={`flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer text-xs transition-colors text-muted-foreground hover:bg-muted/50`}
+                        className={`flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer text-xs transition-colors ${
+                          includeNoSubsidy
+                            ? "bg-accent/10 text-accent font-medium"
+                            : "text-muted-foreground hover:bg-muted/50"
+                        }`}
                       >
-                        <span className="flex-1 truncate italic">No subsidy: {finalized.filter(r => !r.subsidy_provider).length}</span>
+                        <Checkbox
+                          checked={includeNoSubsidy}
+                          onCheckedChange={() => setIncludeNoSubsidy(prev => !prev)}
+                          className="h-3.5 w-3.5"
+                        />
+                        <span className="flex-1 truncate italic">No subsidy</span>
+                        <span className="text-[10px] vault-mono text-muted-foreground shrink-0">{finalized.filter(r => !r.subsidy_provider).length}</span>
                       </label>
                     )}
                   </div>
@@ -1431,6 +1474,14 @@ export default function EntryView() {
                         </button>
                       </span>
                     ))}
+                    {includeNoSubsidy && (
+                      <span className="inline-flex items-center gap-1 bg-accent/10 text-accent text-[10px] font-medium rounded-full px-2 py-0.5">
+                        No subsidy
+                        <button onClick={() => setIncludeNoSubsidy(false)} className="hover:text-accent-foreground">
+                          <X className="h-2.5 w-2.5" />
+                        </button>
+                      </span>
+                    )}
                     {Array.from(selectedPayTypes).map(p => (
                       <span key={p} className="inline-flex items-center gap-1 bg-primary/10 text-primary text-[10px] font-medium rounded-full px-2 py-0.5">
                         {p}
