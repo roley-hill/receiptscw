@@ -78,11 +78,13 @@ function ColumnSection({
   group,
   onUpdate,
   onRemoveGroup,
+  distinctValues,
 }: {
   column: FilterableColumn;
   group: ColumnFilterGroup | undefined;
   onUpdate: (group: ColumnFilterGroup) => void;
   onRemoveGroup: () => void;
+  distinctValues: string[];
 }) {
   const [open, setOpen] = useState(!!group);
   const hasFilters = group && group.filters.length > 0;
