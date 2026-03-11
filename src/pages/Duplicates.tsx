@@ -158,20 +158,32 @@ export default function Duplicates() {
         }
       } else if (dup.existing_receipt_id === "APPFOLIO_ALREADY_RECORDED") {
         // AppFolio charge match — query charge_details by unit + amount + month
+        // Paginate to avoid 1000-row default limit
         const cleanUnit = (u: string) => u.replace(/^[^-]*-/, "").replace(/^0+/, "").trim();
         const normalizedUnit = cleanUnit(dup.unit || "");
         
         // Determine the target month from rent_month or receipt_date
         const targetMonth = dup.rent_month || (dup.receipt_date ? dup.receipt_date.substring(0, 7) : null);
         
-        const { data: charges } = await supabase
-          .from("charge_details")
-          .select("*")
-          .gt("paid_amount", 0);
+        // Fetch all paid charges with pagination
+        let allCharges: any[] = [];
+        let from = 0;
+        const pageSize = 1000;
+        while (true) {
+          const { data: page } = await supabase
+            .from("charge_details")
+            .select("*")
+            .gt("paid_amount", 0)
+            .range(from, from + pageSize - 1);
+          if (!page || page.length === 0) break;
+          allCharges = allCharges.concat(page);
+          if (page.length < pageSize) break;
+          from += pageSize;
+        }
 
-        if (charges && charges.length > 0) {
+        if (allCharges.length > 0) {
           // Try matching with month constraint first, then fall back to unit+amount only
-          const matchWithMonth = (monthStrict: boolean) => charges.find((c) => {
+          const matchWithMonth = (monthStrict: boolean) => allCharges.find((c) => {
             const cUnit = cleanUnit(c.unit || "");
             const unitMatch = cUnit === normalizedUnit || cUnit.endsWith(normalizedUnit) || normalizedUnit.endsWith(cUnit);
             const amountMatch = Math.abs(Math.abs(c.paid_amount) - Math.abs(dup.amount)) < 0.01;
