@@ -1,0 +1,1 @@
+ALTER TABLE public.receipts ADD COLUMN IF NOT EXISTS subsidy_amount_mismatch boolean NOT NULL DEFAULT false;

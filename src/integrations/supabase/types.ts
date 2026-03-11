@@ -491,6 +491,7 @@ export type Database = {
           reference: string | null
           rent_month: string | null
           status: Database["public"]["Enums"]["receipt_status"]
+          subsidy_amount_mismatch: boolean
           subsidy_provider: string | null
           tenant: string
           transfer_status: Database["public"]["Enums"]["transfer_status"]
@@ -523,6 +524,7 @@ export type Database = {
           reference?: string | null
           rent_month?: string | null
           status?: Database["public"]["Enums"]["receipt_status"]
+          subsidy_amount_mismatch?: boolean
           subsidy_provider?: string | null
           tenant?: string
           transfer_status?: Database["public"]["Enums"]["transfer_status"]
@@ -555,6 +557,7 @@ export type Database = {
           reference?: string | null
           rent_month?: string | null
           status?: Database["public"]["Enums"]["receipt_status"]
+          subsidy_amount_mismatch?: boolean
           subsidy_provider?: string | null
           tenant?: string
           transfer_status?: Database["public"]["Enums"]["transfer_status"]

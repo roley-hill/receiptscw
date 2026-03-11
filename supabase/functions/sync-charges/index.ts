@@ -253,50 +253,73 @@ serve(async (req) => {
     // Match receipts to charges by unit number + amount (exact match within $0.01).
     // This correctly uses the account name (e.g. "Subsidy Rent - Brilliant Corners")
     // from AppFolio rather than unreliable memo/reference text patterns.
+    // ---- SUBSIDY MATCHING: unit-based (not amount-based) ----
+    // Build a lookup: normalized_unit -> { subsidy_provider, charge_amount }
+    // If multiple entries exist for a unit, take the one with the most recent charge_date.
     const { data: subsidyCharges } = await supabase
       .from("charge_details")
-      .select("unit, charge_amount, subsidy_provider")
+      .select("unit, charge_amount, subsidy_provider, charge_date")
       .eq("is_subsidy", true)
-      .not("subsidy_provider", "is", null);
+      .not("subsidy_provider", "is", null)
+      .order("charge_date", { ascending: false });
 
     let receiptsUpdated = 0;
+    let mismatchesFlagged = 0;
     if (subsidyCharges && subsidyCharges.length > 0) {
-      // Build a lookup map: "unit|amount" -> subsidy_provider (de-duped, take first match)
-      const subsidyMap = new Map<string, string>();
+      // Map: normalized_unit -> { provider, amount } (first = most recent due to ordering)
+      const subsidyMap = new Map<string, { provider: string; amount: number }>();
       for (const sc of subsidyCharges) {
         if (!sc.unit || !sc.subsidy_provider) continue;
         const normalizedUnit = sc.unit.replace(/^#/, "").trim().toLowerCase();
-        const key = `${normalizedUnit}|${Math.round(sc.charge_amount * 100)}`;
-        if (!subsidyMap.has(key)) {
-          subsidyMap.set(key, sc.subsidy_provider);
+        if (!subsidyMap.has(normalizedUnit)) {
+          subsidyMap.set(normalizedUnit, {
+            provider: sc.subsidy_provider,
+            amount: sc.charge_amount,
+          });
         }
       }
 
-      // Fetch ALL receipts and update any where charge_details gives us a different (correct) provider
+      // Fetch ALL receipts and match by unit
       const { data: receipts } = await supabase
         .from("receipts")
-        .select("id, unit, amount, subsidy_provider");
+        .select("id, unit, amount, subsidy_provider, subsidy_amount_mismatch");
 
       if (receipts && receipts.length > 0) {
         for (const receipt of receipts) {
           const normalizedUnit = (receipt.unit || "").replace(/^#/, "").trim().toLowerCase();
-          const key = `${normalizedUnit}|${Math.round(Math.abs(Number(receipt.amount)) * 100)}`;
-          const correctProvider = subsidyMap.get(key);
+          const match = subsidyMap.get(normalizedUnit);
+          if (!match) continue;
 
-          if (correctProvider && receipt.subsidy_provider !== correctProvider) {
-            await supabase.from("receipts").update({ subsidy_provider: correctProvider }).eq("id", receipt.id);
-            receiptsUpdated++;
+          const updates: Record<string, any> = {};
+
+          // Update provider if different
+          if (receipt.subsidy_provider !== match.provider) {
+            updates.subsidy_provider = match.provider;
+          }
+
+          // Flag mismatch if receipt amount differs from charge amount (within $0.01)
+          const amountMatches = Math.abs(Math.abs(Number(receipt.amount)) - Math.abs(match.amount)) < 0.01;
+          const shouldFlag = !amountMatches;
+          if (receipt.subsidy_amount_mismatch !== shouldFlag) {
+            updates.subsidy_amount_mismatch = shouldFlag;
+          }
+
+          if (Object.keys(updates).length > 0) {
+            await supabase.from("receipts").update(updates).eq("id", receipt.id);
+            if (updates.subsidy_provider) receiptsUpdated++;
+            if (updates.subsidy_amount_mismatch === true) mismatchesFlagged++;
           }
         }
       }
     }
 
-    console.log(`Subsidy tagging: ${receiptsUpdated} receipts updated`);
+    console.log(`Subsidy tagging: ${receiptsUpdated} receipts updated, ${mismatchesFlagged} amount mismatches flagged`);
 
     return new Response(JSON.stringify({
       success: true,
       charges_synced: upserted,
       receipts_tagged: receiptsUpdated,
+      subsidy_mismatches: mismatchesFlagged,
       subsidy_charges_found: subsidyCharges?.length || 0,
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
