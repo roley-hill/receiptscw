@@ -179,13 +179,14 @@ serve(async (req) => {
       });
     }
 
-    // ---- DUPLICATE CONTENT CHECK (same content, different file name) ----
+    // ---- DUPLICATE CONTENT CHECK (same content, different file name, excluding soft-deleted) ----
     let duplicateContentFile: string | null = null;
     let duplicateContentCount = 0;
     const { data: existingHashReceipts } = await supabase
       .from("receipts")
       .select("file_name")
       .eq("file_content_hash", fileContentHash)
+      .is("deleted_at", null)
       .limit(1);
 
     if (existingHashReceipts && existingHashReceipts.length > 0) {
@@ -193,7 +194,8 @@ serve(async (req) => {
       const { count } = await supabase
         .from("receipts")
         .select("id", { count: "exact", head: true })
-        .eq("file_content_hash", fileContentHash);
+        .eq("file_content_hash", fileContentHash)
+        .is("deleted_at", null);
       duplicateContentCount = count ?? 0;
     }
 
