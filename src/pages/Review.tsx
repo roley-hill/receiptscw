@@ -655,7 +655,14 @@ function ReviewDetail({
       await softDeleteReceipts([receipt.id]);
       toast.success("Receipt deleted");
       queryClient.invalidateQueries({ queryKey: ["receipts"] });
-      onBack();
+      // Navigate to next receipt, or previous, or back to list
+      if (currentIndex < reviewable.length - 1) {
+        onNavigate("next");
+      } else if (currentIndex > 0) {
+        onNavigate("prev");
+      } else {
+        onBack();
+      }
     } catch (err: any) {
       toast.error(err.message);
     }
