@@ -415,159 +415,217 @@ export default function Duplicates() {
         </AlertDialog>
       </div>
 
-      <div className="space-y-3">
-        {duplicates.map((dup, i) => {
-          const isExpanded = expandedId === dup.id;
-          const cacheKey = dup.existing_receipt_uuid || `appfolio-${dup.id}`;
-          const existing = existingReceipts[cacheKey] || null;
-          const isLoadingThis = loadingExisting.has(dup.id);
-          const isProcessing = processing.has(dup.id);
+      <div className="space-y-6">
+        {monthGroups.map(({ key: monthKey, label, items: monthDups }) => {
+          const monthTotal = monthDups.reduce((s, d) => s + Number(d.amount), 0);
+          const isCollapsed = collapsedMonths.has(monthKey);
 
           return (
-            <motion.div
-              key={dup.id}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.04 }}
-              className="vault-card overflow-hidden"
-            >
-              <button
-                onClick={() => toggleExpand(dup)}
-                className="w-full px-4 py-3 flex items-center justify-between hover:bg-muted/30 transition-colors"
-              >
-                <div className="flex items-center gap-3 text-left">
-                  <div className="h-9 w-9 rounded-lg bg-accent/10 flex items-center justify-center">
-                    <Copy className="h-4 w-4 text-accent" />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h3 className="text-sm font-bold text-foreground">{dup.tenant || "Unknown"}</h3>
-                      <span className="vault-mono text-xs text-muted-foreground">${Number(dup.amount).toLocaleString("en-US", { minimumFractionDigits: 2 })}</span>
-                    </div>
-                    <p className="text-xs text-muted-foreground">{dup.property || "Unknown"} · Unit {dup.unit || "?"} · {dup.receipt_date || "No date"} · Matches {dup.existing_receipt_id}</p>
-                  </div>
-                </div>
-                {isExpanded ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
-              </button>
-
-              <AnimatePresence>
-                {isExpanded && (
-                  <motion.div
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: "auto", opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }}
-                    transition={{ duration: 0.2 }}
-                    className="overflow-hidden"
+            <div key={monthKey} className="space-y-3">
+              {/* Month header */}
+              <div className="flex items-center justify-between py-2 px-1 border-b border-border">
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => setCollapsedMonths(prev => {
+                      const next = new Set(prev);
+                      if (next.has(monthKey)) next.delete(monthKey); else next.add(monthKey);
+                      return next;
+                    })}
+                    className="flex items-center gap-2 hover:text-accent transition-colors"
                   >
-                    <div className="px-4 pb-4 border-t border-border pt-3">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {/* New (skipped) record */}
-                        <div className="rounded-lg border border-accent/30 bg-accent/5 p-3 space-y-2">
-                          <p className="text-xs font-semibold text-accent uppercase tracking-wide">New (Skipped)</p>
-                          <CompareField label="Tenant" value={dup.tenant} />
-                          <CompareField label="Property" value={dup.property} />
-                          <CompareField label="Unit" value={dup.unit} />
-                          <CompareField label="Amount" value={`$${Number(dup.amount).toFixed(2)}`} />
-                          <CompareField label="Date" value={dup.receipt_date || "—"} />
-                          <CompareField label="Rent Month" value={dup.rent_month || "—"} />
-                          <CompareField label="Payment" value={dup.payment_type || "—"} />
-                          <CompareField label="Reference" value={dup.reference || "—"} />
-                          <FileField
-                            label="File"
-                            value={dup.file_name || "—"}
-                            hasFile={!!dup.file_path}
-                            onView={() => openPreview(dup.file_path, dup.file_name)}
-                          />
-                        </div>
+                    {isCollapsed
+                      ? <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                      : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+                    <h2 className="text-base font-bold text-foreground">{label}</h2>
+                  </button>
+                  <span className="text-xs text-muted-foreground vault-mono">
+                    {monthDups.length} duplicate{monthDups.length !== 1 ? "s" : ""} · ${monthTotal.toLocaleString("en-US", { minimumFractionDigits: 2 })}
+                  </span>
+                </div>
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button variant="destructive" size="sm" className="h-7 text-xs" disabled={bulkDeleting}>
+                      <Trash2 className="h-3.5 w-3.5 mr-1" />
+                      Delete {monthDups.length}
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Delete {monthDups.length} duplicate(s) from {label}?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        This will permanently remove all duplicates from {label}. This action cannot be undone.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                      <AlertDialogAction onClick={() => handleBulkDelete(monthDups.map(d => d.id))} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                        Delete
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              </div>
 
-                        {/* Existing record */}
-                        <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-2">
-                          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                            {existing?.source === "appfolio" ? "AppFolio Charge Record" : `Existing Record (${dup.existing_receipt_id})`}
-                          </p>
-                          {isLoadingThis ? (
-                            <div className="flex items-center justify-center py-6">
-                              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              {/* Month items */}
+              {!isCollapsed && (
+                <div className="space-y-3">
+                  {monthDups.map((dup, i) => {
+                    const isExpanded = expandedId === dup.id;
+                    const cacheKey = dup.existing_receipt_uuid || `appfolio-${dup.id}`;
+                    const existing = existingReceipts[cacheKey] || null;
+                    const isLoadingThis = loadingExisting.has(dup.id);
+                    const isProcessing = processing.has(dup.id);
+
+                    return (
+                      <motion.div
+                        key={dup.id}
+                        initial={{ opacity: 0, y: 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: i * 0.04 }}
+                        className="vault-card overflow-hidden"
+                      >
+                        <button
+                          onClick={() => toggleExpand(dup)}
+                          className="w-full px-4 py-3 flex items-center justify-between hover:bg-muted/30 transition-colors"
+                        >
+                          <div className="flex items-center gap-3 text-left">
+                            <div className="h-9 w-9 rounded-lg bg-accent/10 flex items-center justify-center">
+                              <Copy className="h-4 w-4 text-accent" />
                             </div>
-                          ) : existing ? (
-                            existing.source === "appfolio" ? (
-                              <>
-                                <CompareField label="Charged To" value={existing.charged_to || existing.tenant} />
-                                <CompareField label="Property" value={existing.property} />
-                                <CompareField label="Unit" value={existing.unit} />
-                                <CompareField label="Paid Amount" value={`$${Number(existing.paid_amount ?? existing.amount).toFixed(2)}`} />
-                                <CompareField label="Charge Date" value={existing.charge_date || "—"} />
-                                <CompareField label="Receipt Date" value={existing.receipt_date || "—"} />
-                                <CompareField label="Account" value={existing.account_name || "—"} />
-                                <CompareField label="Reference" value={existing.reference || "—"} />
-                                <div className="pt-1 mt-1 border-t border-border">
-                                  <span className="text-[10px] text-accent font-medium">✓ Already paid in AppFolio</span>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <h3 className="text-sm font-bold text-foreground">{dup.tenant || "Unknown"}</h3>
+                                <span className="vault-mono text-xs text-muted-foreground">${Number(dup.amount).toLocaleString("en-US", { minimumFractionDigits: 2 })}</span>
+                              </div>
+                              <p className="text-xs text-muted-foreground">{dup.property || "Unknown"} · Unit {dup.unit || "?"} · {dup.receipt_date || "No date"} · Matches {dup.existing_receipt_id}</p>
+                            </div>
+                          </div>
+                          {isExpanded ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+                        </button>
+
+                        <AnimatePresence>
+                          {isExpanded && (
+                            <motion.div
+                              initial={{ height: 0, opacity: 0 }}
+                              animate={{ height: "auto", opacity: 1 }}
+                              exit={{ height: 0, opacity: 0 }}
+                              transition={{ duration: 0.2 }}
+                              className="overflow-hidden"
+                            >
+                              <div className="px-4 pb-4 border-t border-border pt-3">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                  {/* New (skipped) record */}
+                                  <div className="rounded-lg border border-accent/30 bg-accent/5 p-3 space-y-2">
+                                    <p className="text-xs font-semibold text-accent uppercase tracking-wide">New (Skipped)</p>
+                                    <CompareField label="Tenant" value={dup.tenant} />
+                                    <CompareField label="Property" value={dup.property} />
+                                    <CompareField label="Unit" value={dup.unit} />
+                                    <CompareField label="Amount" value={`$${Number(dup.amount).toFixed(2)}`} />
+                                    <CompareField label="Date" value={dup.receipt_date || "—"} />
+                                    <CompareField label="Rent Month" value={dup.rent_month || "—"} />
+                                    <CompareField label="Payment" value={dup.payment_type || "—"} />
+                                    <CompareField label="Reference" value={dup.reference || "—"} />
+                                    <FileField
+                                      label="File"
+                                      value={dup.file_name || "—"}
+                                      hasFile={!!dup.file_path}
+                                      onView={() => openPreview(dup.file_path, dup.file_name)}
+                                    />
+                                  </div>
+
+                                  {/* Existing record */}
+                                  <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-2">
+                                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                                      {existing?.source === "appfolio" ? "AppFolio Charge Record" : `Existing Record (${dup.existing_receipt_id})`}
+                                    </p>
+                                    {isLoadingThis ? (
+                                      <div className="flex items-center justify-center py-6">
+                                        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                                      </div>
+                                    ) : existing ? (
+                                      existing.source === "appfolio" ? (
+                                        <>
+                                          <CompareField label="Charged To" value={existing.charged_to || existing.tenant} />
+                                          <CompareField label="Property" value={existing.property} />
+                                          <CompareField label="Unit" value={existing.unit} />
+                                          <CompareField label="Paid Amount" value={`$${Number(existing.paid_amount ?? existing.amount).toFixed(2)}`} />
+                                          <CompareField label="Charge Date" value={existing.charge_date || "—"} />
+                                          <CompareField label="Receipt Date" value={existing.receipt_date || "—"} />
+                                          <CompareField label="Account" value={existing.account_name || "—"} />
+                                          <CompareField label="Reference" value={existing.reference || "—"} />
+                                          <div className="pt-1 mt-1 border-t border-border">
+                                            <span className="text-[10px] text-accent font-medium">✓ Already paid in AppFolio</span>
+                                          </div>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <CompareField label="Tenant" value={existing.tenant} />
+                                          <CompareField label="Property" value={existing.property} />
+                                          <CompareField label="Unit" value={existing.unit} />
+                                          <CompareField label="Amount" value={`$${Number(existing.amount).toFixed(2)}`} />
+                                          <CompareField label="Date" value={existing.receipt_date || "—"} />
+                                          <CompareField label="Rent Month" value={existing.rent_month || "—"} />
+                                          <CompareField label="Payment" value={existing.payment_type || "—"} />
+                                          <CompareField label="Reference" value={existing.reference || "—"} />
+                                          <FileField
+                                            label="File"
+                                            value={existing.file_name || "—"}
+                                            hasFile={!!existing.file_path}
+                                            onView={() => openPreview(existing.file_path, existing.file_name, existing.original_text)}
+                                          />
+                                        </>
+                                      )
+                                    ) : (
+                                      <div className="py-4 space-y-1">
+                                        <p className="text-xs text-muted-foreground">
+                                          {dup.existing_receipt_id === "APPFOLIO_ALREADY_RECORDED"
+                                            ? "No matching AppFolio charge found in synced data. The charge data for this period may not be synced yet — try re-syncing charges."
+                                            : "Could not load existing record."}
+                                        </p>
+                                      </div>
+                                    )}
+                                  </div>
                                 </div>
-                              </>
-                            ) : (
-                              <>
-                                <CompareField label="Tenant" value={existing.tenant} />
-                                <CompareField label="Property" value={existing.property} />
-                                <CompareField label="Unit" value={existing.unit} />
-                                <CompareField label="Amount" value={`$${Number(existing.amount).toFixed(2)}`} />
-                                <CompareField label="Date" value={existing.receipt_date || "—"} />
-                                <CompareField label="Rent Month" value={existing.rent_month || "—"} />
-                                <CompareField label="Payment" value={existing.payment_type || "—"} />
-                                <CompareField label="Reference" value={existing.reference || "—"} />
-                                <FileField
-                                  label="File"
-                                  value={existing.file_name || "—"}
-                                  hasFile={!!existing.file_path}
-                                  onView={() => openPreview(existing.file_path, existing.file_name, existing.original_text)}
-                                />
-                              </>
-                            )
-                          ) : (
-                            <div className="py-4 space-y-1">
-                              <p className="text-xs text-muted-foreground">
-                                {dup.existing_receipt_id === "APPFOLIO_ALREADY_RECORDED"
-                                  ? "No matching AppFolio charge found in synced data. The charge data for this period may not be synced yet — try re-syncing charges."
-                                  : "Could not load existing record."}
-                              </p>
-                            </div>
-                          )}
-                        </div>
-                      </div>
 
-                      <div className="flex items-center gap-2 mt-4 justify-end">
-                        <Button
-                          variant="destructive"
-                          size="sm"
-                          onClick={() => handleDelete(dup)}
-                          disabled={isProcessing}
-                        >
-                          <Trash2 className="h-4 w-4 mr-1" />
-                          Delete
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleDismiss(dup)}
-                          disabled={isProcessing}
-                        >
-                          <XCircle className="h-4 w-4 mr-1" />
-                          Confirm Duplicate
-                        </Button>
-                        <Button
-                          variant="default"
-                          size="sm"
-                          onClick={() => handleForceAdd(dup)}
-                          disabled={isProcessing}
-                        >
-                          <CheckCircle2 className="h-4 w-4 mr-1" />
-                          Add Anyway
-                        </Button>
-                      </div>
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </motion.div>
+                                <div className="flex items-center gap-2 mt-4 justify-end">
+                                  <Button
+                                    variant="destructive"
+                                    size="sm"
+                                    onClick={() => handleDelete(dup)}
+                                    disabled={isProcessing}
+                                  >
+                                    <Trash2 className="h-4 w-4 mr-1" />
+                                    Delete
+                                  </Button>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => handleDismiss(dup)}
+                                    disabled={isProcessing}
+                                  >
+                                    <XCircle className="h-4 w-4 mr-1" />
+                                    Confirm Duplicate
+                                  </Button>
+                                  <Button
+                                    variant="default"
+                                    size="sm"
+                                    onClick={() => handleForceAdd(dup)}
+                                    disabled={isProcessing}
+                                  >
+                                    <CheckCircle2 className="h-4 w-4 mr-1" />
+                                    Add Anyway
+                                  </Button>
+                                </div>
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </motion.div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           );
         })}
       </div>
