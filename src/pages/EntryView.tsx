@@ -212,6 +212,7 @@ export default function EntryView() {
   const clearAllFilters = () => {
     setSelectedSubsidies(new Set());
     setSelectedPayTypes(new Set());
+    setIncludeNoSubsidy(false);
     setFilterSearch("");
   };
 
