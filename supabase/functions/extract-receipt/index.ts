@@ -1175,8 +1175,44 @@ ${knownTenantsList}` : ""}`;
     const insertedReceipts: any[] = [];
     const duplicates: any[] = [];
 
+    // Helper: store a skipped duplicate record
+    async function recordSkippedDuplicate(item: any, existingId: string, existingUuid: string | null, reason: string) {
+      duplicates.push({
+        tenant: item.tenant,
+        amount: item.amount,
+        receipt_date: item.receipt_date,
+        existing_receipt_id: existingId,
+        reason,
+      });
+      await supabase.from("skipped_duplicates").insert({
+        user_id: userId,
+        tenant: item.tenant || "",
+        property: item.property || "",
+        unit: item.unit || "",
+        amount: item.amount || 0,
+        receipt_date: item.receipt_date || null,
+        rent_month: item.rent_month || null,
+        payment_type: item.payment_type || "",
+        reference: item.reference || "",
+        memo: item.memo || "",
+        file_name: file.name,
+        file_path: filePath,
+        existing_receipt_id: existingId,
+        existing_receipt_uuid: existingUuid,
+        status: "pending",
+        confidence_scores: {
+          property: item.property_confidence || 0,
+          unit: item.unit_confidence || 0,
+          tenant: item.tenant_confidence || 0,
+          amount: item.amount_confidence || 0,
+          receiptDate: item.receipt_date_confidence || 0,
+          paymentType: item.payment_type_confidence || 0,
+        },
+      });
+    }
+
     for (const item of extractedItems) {
-      // Check for duplicates: same tenant + amount + receipt_date + property + unit + rent_month
+      // ---- CHECK 1: Exact field match ----
       if (item.tenant && item.amount && item.receipt_date) {
         let dupQuery = supabase
           .from("receipts")
@@ -1188,8 +1224,6 @@ ${knownTenantsList}` : ""}`;
           .eq("unit", item.unit || "")
           .is("deleted_at", null);
 
-        // Only match rent_month: if both have a value they must be equal, 
-        // if the new item has a rent_month we filter by it
         if (item.rent_month) {
           dupQuery = dupQuery.eq("rent_month", item.rent_month);
         } else {
@@ -1199,38 +1233,37 @@ ${knownTenantsList}` : ""}`;
         const { data: existing } = await dupQuery.limit(1);
 
         if (existing && existing.length > 0) {
-          duplicates.push({
-            tenant: item.tenant,
-            amount: item.amount,
-            receipt_date: item.receipt_date,
-            existing_receipt_id: existing[0].receipt_id,
-          });
-          // Store in skipped_duplicates for user review
-          await supabase.from("skipped_duplicates").insert({
-            user_id: userId,
-            tenant: item.tenant || "",
-            property: item.property || "",
-            unit: item.unit || "",
-            amount: item.amount || 0,
-            receipt_date: item.receipt_date || null,
-            rent_month: item.rent_month || null,
-            payment_type: item.payment_type || "",
-            reference: item.reference || "",
-            memo: item.memo || "",
-            file_name: file.name,
-            file_path: filePath,
-            existing_receipt_id: existing[0].receipt_id,
-            existing_receipt_uuid: existing[0].id,
-            confidence_scores: {
-              property: item.property_confidence || 0,
-              unit: item.unit_confidence || 0,
-              tenant: item.tenant_confidence || 0,
-              amount: item.amount_confidence || 0,
-              receiptDate: item.receipt_date_confidence || 0,
-              paymentType: item.payment_type_confidence || 0,
-            },
-          });
-          continue; // skip duplicate
+          await recordSkippedDuplicate(item, existing[0].receipt_id, existing[0].id, "exact_match");
+          continue;
+        }
+      }
+
+      // ---- CHECK 2: Fuzzy match (amount + date + normalized unit, ignoring tenant name spelling) ----
+      // This catches cases like "Morgan L. Mahowald" vs "Morgan Mahowald"
+      if (item.amount && item.receipt_date && item.unit) {
+        const normalizedItemUnit = cleanUnit(item.unit || "").toLowerCase();
+        if (normalizedItemUnit) {
+          const { data: fuzzyMatches } = await supabase
+            .from("receipts")
+            .select("id, receipt_id, tenant, unit")
+            .eq("amount", item.amount)
+            .eq("receipt_date", item.receipt_date)
+            .is("deleted_at", null)
+            .limit(50);
+
+          if (fuzzyMatches && fuzzyMatches.length > 0) {
+            const fuzzyDup = fuzzyMatches.find(r => {
+              const existingUnit = cleanUnit(r.unit || "").toLowerCase();
+              return existingUnit === normalizedItemUnit ||
+                existingUnit.endsWith("-" + normalizedItemUnit) ||
+                normalizedItemUnit.endsWith("-" + existingUnit);
+            });
+            if (fuzzyDup) {
+              console.log(`Fuzzy duplicate: "${item.tenant}" matches existing "${fuzzyDup.tenant}" (unit=${fuzzyDup.unit}, amount=$${item.amount}, date=${item.receipt_date})`);
+              await recordSkippedDuplicate(item, fuzzyDup.receipt_id, fuzzyDup.id, "fuzzy_unit_amount_date");
+              continue;
+            }
+          }
         }
       }
 
