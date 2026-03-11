@@ -236,11 +236,13 @@ export default function ColumnFilterPanel({
   filterGroups,
   onFilterGroupsChange,
   onClose,
+  filteredRows,
 }: {
   columns: FilterableColumn[];
   filterGroups: ColumnFilterGroup[];
   onFilterGroupsChange: (groups: ColumnFilterGroup[]) => void;
   onClose: () => void;
+  filteredRows: any[];
 }) {
   const [search, setSearch] = useState("");
 
