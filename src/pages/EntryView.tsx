@@ -172,6 +172,7 @@ export default function EntryView() {
   const [selectedSubsidies, setSelectedSubsidies] = useState<Set<string>>(new Set());
   const [selectedPayTypes, setSelectedPayTypes] = useState<Set<string>>(new Set());
   const [filterSearch, setFilterSearch] = useState("");
+  const [includeNoSubsidy, setIncludeNoSubsidy] = useState(false);
 
   // Collect unique subsidy providers and payment types from finalized receipts
   const uniqueSubsidies = useMemo(() => {
