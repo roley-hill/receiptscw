@@ -78,11 +78,13 @@ function ColumnSection({
   group,
   onUpdate,
   onRemoveGroup,
+  distinctValues,
 }: {
   column: FilterableColumn;
   group: ColumnFilterGroup | undefined;
   onUpdate: (group: ColumnFilterGroup) => void;
   onRemoveGroup: () => void;
+  distinctValues: string[];
 }) {
   const [open, setOpen] = useState(!!group);
   const hasFilters = group && group.filters.length > 0;
@@ -177,14 +179,30 @@ function ColumnSection({
                     <X className="h-3 w-3" />
                   </button>
                 </div>
-                {opConfig?.needsValue && (
+                {opConfig?.needsValue && (filter.operator === "is" || filter.operator === "is_not") ? (
+                  <Select
+                    value={filter.value || "__pick__"}
+                    onValueChange={(v) => updateFilter(filter.id, { value: v === "__pick__" ? "" : v })}
+                  >
+                    <SelectTrigger className="h-7 text-[11px] w-full">
+                      <SelectValue placeholder="Select value" />
+                    </SelectTrigger>
+                    <SelectContent className="z-[300] max-h-[200px]">
+                      <SelectItem value="__pick__" className="text-xs text-muted-foreground">Select value...</SelectItem>
+                      <SelectItem value="" className="text-xs italic text-muted-foreground">(empty)</SelectItem>
+                      {distinctValues.map(v => (
+                        <SelectItem key={v} value={v} className="text-xs">{v}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : opConfig?.needsValue ? (
                   <Input
                     value={filter.value}
                     onChange={(e) => updateFilter(filter.id, { value: e.target.value })}
                     placeholder="Value"
                     className="h-7 text-xs"
                   />
-                )}
+                ) : null}
               </div>
             );
           })}
@@ -218,11 +236,13 @@ export default function ColumnFilterPanel({
   filterGroups,
   onFilterGroupsChange,
   onClose,
+  filteredRows,
 }: {
   columns: FilterableColumn[];
   filterGroups: ColumnFilterGroup[];
   onFilterGroupsChange: (groups: ColumnFilterGroup[]) => void;
   onClose: () => void;
+  filteredRows: any[];
 }) {
   const [search, setSearch] = useState("");
 
@@ -282,17 +302,26 @@ export default function ColumnFilterPanel({
         </div>
       </div>
 
-      {/* Column sections */}
       <div className="max-h-[calc(100vh-260px)] overflow-auto">
-        {filteredColumns.map(col => (
-          <ColumnSection
-            key={col.key}
-            column={col}
-            group={filterGroups.find(g => g.columnKey === col.key)}
-            onUpdate={(g) => updateGroup(col.key, g)}
-            onRemoveGroup={() => removeGroup(col.key)}
-          />
-        ))}
+        {filteredColumns.map(col => {
+          const set = new Set<string>();
+          for (const row of filteredRows) {
+            const v = col.accessor(row);
+            if (v && v.trim()) set.add(v);
+          }
+          const distinctValues = Array.from(set).sort();
+
+          return (
+            <ColumnSection
+              key={col.key}
+              column={col}
+              group={filterGroups.find(g => g.columnKey === col.key)}
+              onUpdate={(g) => updateGroup(col.key, g)}
+              onRemoveGroup={() => removeGroup(col.key)}
+              distinctValues={distinctValues}
+            />
+          );
+        })}
       </div>
 
       {/* Active filter summary */}
