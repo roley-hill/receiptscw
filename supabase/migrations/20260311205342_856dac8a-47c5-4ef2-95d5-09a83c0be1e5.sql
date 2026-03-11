@@ -1,0 +1,1 @@
+UPDATE receipts SET deleted_at = NULL WHERE id IN ('5b2f33ef-806e-4ece-aef8-ebbbe41599cb', 'bc8becff-609c-4924-96c7-454ab7abe6ad', 'a8093af1-6189-4100-8e24-852a3166f6ad', 'e6220733-8d51-48ef-98b2-fae981700ecb');
