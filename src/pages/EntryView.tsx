@@ -717,7 +717,21 @@ export default function EntryView() {
           {isDupMonth && <AlertTriangle className="h-3 w-3 text-[hsl(var(--vault-amber))] shrink-0" />}
         </div>
       </td>
-      <td className={`px-3 py-2.5 text-right ${Number(r.amount) < 0 ? "text-[hsl(var(--vault-red))]" : ""}`}><CopyCell value={`$${Number(r.amount).toFixed(2)}`} mono id={`amt-${r.id}`} /></td>
+      <td className={`px-3 py-2.5 text-right ${Number(r.amount) < 0 ? "text-[hsl(var(--vault-red))]" : ""}`}>
+        <div className="flex items-center justify-end gap-1">
+          {(r as any).subsidy_amount_mismatch && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <AlertTriangle className="h-3.5 w-3.5 text-[hsl(var(--vault-amber))] shrink-0" />
+              </TooltipTrigger>
+              <TooltipContent side="top" className="max-w-xs">
+                <p className="text-xs">Subsidy amount mismatch — receipt amount differs from the charge in AppFolio. Update the charge before recording.</p>
+              </TooltipContent>
+            </Tooltip>
+          )}
+          <CopyCell value={`$${Number(r.amount).toFixed(2)}`} mono id={`amt-${r.id}`} />
+        </div>
+      </td>
       <td className="px-3 py-2.5"><CopyCell value={r.receipt_date || "—"} mono id={`date-${r.id}`} /></td>
       <td className={`px-3 py-2.5 ${isDupMonth ? "font-semibold" : ""}`}><CopyCell value={r.rent_month || "—"} mono id={`month-${r.id}`} /></td>
       <td className="px-3 py-2.5"><CopyCell value={r.payment_type || "—"} id={`ptype-${r.id}`} /></td>
