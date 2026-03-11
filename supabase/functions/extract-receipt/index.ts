@@ -1080,7 +1080,30 @@ ${knownTenantsList}` : ""}`;
       console.warn("Could not load charge details:", e);
     }
 
-    // Cross-reference each extracted item's amount against rent roll
+    // ---- FETCH ALL CHARGE DETAILS FOR PAID-AMOUNT CROSS-CHECK ----
+    // If a charge shows paid_amount > 0 for this tenant/unit/amount, the receipt is already recorded in AppFolio
+    let allChargeDetails: { charged_to: string; unit: string | null; property_address: string; charge_amount: number; paid_amount: number; receipt_date: string | null }[] = [];
+    try {
+      let from = 0;
+      const pageSize = 1000;
+      while (true) {
+        const { data: page } = await supabase
+          .from("charge_details")
+          .select("charged_to, unit, property_address, charge_amount, paid_amount, receipt_date")
+          .gt("paid_amount", 0)
+          .range(from, from + pageSize - 1);
+        if (!page || page.length === 0) break;
+        allChargeDetails = allChargeDetails.concat(page);
+        if (page.length < pageSize) break;
+        from += pageSize;
+      }
+      if (allChargeDetails.length > 0) {
+        console.log(`Loaded ${allChargeDetails.length} paid charge details for AppFolio cross-check`);
+      }
+    } catch (e) {
+      console.warn("Could not load paid charge details:", e);
+    }
+
     if (rentRollCharges.length > 0) {
       for (const item of extractedItems) {
         if (!item.amount || item.amount === 0) continue;
