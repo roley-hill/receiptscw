@@ -927,6 +927,20 @@ export default function EntryView() {
         </div>
         <div className="flex items-center gap-2">
           <Button
+            variant={filterPanelOpen ? "default" : "outline"}
+            size="sm"
+            onClick={() => setFilterPanelOpen(!filterPanelOpen)}
+            className="relative"
+          >
+            <SlidersHorizontal className="h-4 w-4 mr-1" />
+            Filters
+            {hasActiveFilters && (
+              <span className="absolute -top-1.5 -right-1.5 h-4 w-4 rounded-full bg-accent text-[10px] font-bold text-accent-foreground flex items-center justify-center">
+                {selectedSubsidies.size + selectedPayTypes.size}
+              </span>
+            )}
+          </Button>
+          <Button
             variant={batchMode ? "default" : "outline"}
             size="sm"
             onClick={() => {
