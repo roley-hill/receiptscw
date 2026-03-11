@@ -231,14 +231,19 @@ export default function EntryView() {
   // Apply sidebar filters first
   const sidebarFiltered = useMemo(() => {
     let result = finalized;
-    if (selectedSubsidies.size > 0) {
-      result = result.filter(r => r.subsidy_provider && selectedSubsidies.has(r.subsidy_provider));
+    if (selectedSubsidies.size > 0 || includeNoSubsidy) {
+      result = result.filter(r => {
+        if (includeNoSubsidy && !r.subsidy_provider) return true;
+        if (selectedSubsidies.size > 0 && r.subsidy_provider && selectedSubsidies.has(r.subsidy_provider)) return true;
+        if (selectedSubsidies.size === 0 && includeNoSubsidy) return !r.subsidy_provider;
+        return false;
+      });
     }
     if (selectedPayTypes.size > 0) {
       result = result.filter(r => r.payment_type && selectedPayTypes.has(r.payment_type));
     }
     return result;
-  }, [finalized, selectedSubsidies, selectedPayTypes]);
+  }, [finalized, selectedSubsidies, selectedPayTypes, includeNoSubsidy]);
 
   const filtered = selectedProperty === "all"
     ? (selectedTenant ? sidebarFiltered.filter(r => (r.tenant || "(No Tenant)") === selectedTenant) : sidebarFiltered)
