@@ -1481,7 +1481,7 @@ export default function EntryView() {
                           <X className="h-2.5 w-2.5" />
                         </button>
                       </span>
-                    )
+                    )}
                     {Array.from(selectedPayTypes).map(p => (
                       <span key={p} className="inline-flex items-center gap-1 bg-primary/10 text-primary text-[10px] font-medium rounded-full px-2 py-0.5">
                         {p}
