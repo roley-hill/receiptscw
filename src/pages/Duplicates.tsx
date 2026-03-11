@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { getFilePreviewUrl } from "@/lib/api";
-import { Copy, CheckCircle2, XCircle, ChevronDown, ChevronUp, Loader2, Trash2, Eye } from "lucide-react";
+import { Copy, CheckCircle2, XCircle, ChevronDown, ChevronUp, ChevronRight, Loader2, Trash2, Eye } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
