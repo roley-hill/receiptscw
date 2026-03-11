@@ -649,8 +649,8 @@ function ReviewDetail({
   const currentAmount = parseFloat(getVal("amount", String(receipt.amount))) || receipt.amount;
   const chargeSubsidy = useSubsidyLookup(currentUnit, currentAmount);
   const subsidyProviders = useSubsidyProviders();
-  const detailPaidSet = useAppfolioPaidLookup([receipt]);
-  const isPaidInAppfolio = detailPaidSet.has(receipt.id);
+  const detailPaidMap = useAppfolioPaidLookup([receipt]);
+  const isPaidInAppfolio = detailPaidMap.has(receipt.id);
 
   // Subsidy value: manual edit > existing receipt value > charge_details lookup
   const subsidyValue = edits["subsidy_provider"] !== undefined
