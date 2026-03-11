@@ -181,8 +181,8 @@ function ColumnSection({
                 </div>
                 {opConfig?.needsValue && (filter.operator === "is" || filter.operator === "is_not") ? (
                   <Select
-                    value={filter.value || "__pick__"}
-                    onValueChange={(v) => updateFilter(filter.id, { value: v === "__pick__" ? "" : v })}
+                    value={filter.value === "" ? "__empty__" : (filter.value || "__pick__")}
+                    onValueChange={(v) => updateFilter(filter.id, { value: v === "__pick__" ? "" : v === "__empty__" ? "" : v })}
                   >
                     <SelectTrigger className="h-7 text-[11px] w-full">
                       <SelectValue placeholder="Select value" />
