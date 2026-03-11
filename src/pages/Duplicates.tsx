@@ -137,6 +137,27 @@ export default function Duplicates() {
     }
   };
 
+  const closePreview = () => {
+    setPreviewOpen(false);
+    setPreviewUrl(null);
+  };
+
+  const handleBulkDelete = async (ids?: string[]) => {
+    setBulkDeleting(true);
+    try {
+      const toDelete = ids || duplicates.map((d) => d.id);
+      const { error } = await supabase.from("skipped_duplicates").delete().in("id", toDelete);
+      if (error) throw error;
+      toast.success(`Deleted ${toDelete.length} duplicate(s)`);
+      setExpandedId(null);
+      queryClient.invalidateQueries({ queryKey: ["skipped_duplicates"] });
+      queryClient.invalidateQueries({ queryKey: ["pending_counts"] });
+    } catch (err: any) {
+      toast.error(err.message || "Failed to bulk delete");
+    }
+    setBulkDeleting(false);
+  };
+
   // Shared charge cache to avoid re-fetching for every AppFolio duplicate
   const chargesCacheRef = useRef<any[] | null>(null);
 
