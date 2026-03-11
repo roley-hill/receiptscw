@@ -86,6 +86,31 @@ export default function Duplicates() {
   const [loadingExisting, setLoadingExisting] = useState<Set<string>>(new Set());
   const [processing, setProcessing] = useState<Set<string>>(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [collapsedMonths, setCollapsedMonths] = useState<Set<string>>(new Set());
+
+  // Group duplicates by rent_month (newest first)
+  const monthGroups = useMemo(() => {
+    const byMonth: Record<string, SkippedDuplicate[]> = {};
+    for (const d of duplicates) {
+      const key = d.rent_month || "__none__";
+      if (!byMonth[key]) byMonth[key] = [];
+      byMonth[key].push(d);
+    }
+    const sortedKeys = Object.keys(byMonth).sort((a, b) => {
+      if (a === "__none__") return 1;
+      if (b === "__none__") return -1;
+      return b.localeCompare(a);
+    });
+    return sortedKeys.map(key => ({
+      key,
+      label: key === "__none__" ? "No Month Assigned" : (() => {
+        const [y, m] = key.split("-");
+        const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+        return `${months[parseInt(m, 10) - 1]} ${y}`;
+      })(),
+      items: byMonth[key],
+    }));
+  }, [duplicates]);
 
   // Preview state
   const [previewFileName, setPreviewFileName] = useState<string>("");
