@@ -4,7 +4,7 @@ import { useSearchParams } from "react-router-dom";
 import { fetchReceipts, updateReceipt, getFilePreviewUrl } from "@/lib/api";
 import { supabase } from "@/integrations/supabase/client";
 import { motion } from "framer-motion";
-import { CheckCircle2, AlertTriangle, ChevronLeft, ChevronRight, Eye, Edit3, Save, FileText, Image as ImageIcon, Loader2, ZoomIn, ZoomOut, RotateCcw, Trash2, CheckCheck, ArrowLeft, Shield } from "lucide-react";
+import { CheckCircle2, AlertTriangle, ChevronLeft, ChevronRight, ChevronDown, Eye, Edit3, Save, FileText, Image as ImageIcon, Loader2, ZoomIn, ZoomOut, RotateCcw, Trash2, CheckCheck, ArrowLeft, Shield } from "lucide-react";
 import TenantSuggestion from "@/components/TenantSuggestion";
 import PdfViewer from "@/components/PdfViewer";
 import { Button } from "@/components/ui/button";
