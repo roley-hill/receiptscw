@@ -63,6 +63,24 @@ function useSubsidyProviders() {
   return providers;
 }
 
+// Normalize name: "Last, First" → "first last", "First Last" stays "first last"
+function normalizeName(name: string): string {
+  const n = name.trim().toLowerCase();
+  if (n.includes(",")) {
+    const [last, first] = n.split(",", 2);
+    return `${(first || "").trim()} ${(last || "").trim()}`;
+  }
+  return n;
+}
+
+// Extract just the unit suffix: "14626-11" → "11", "8503-18" → "18", "312" → "312"
+function normalizeUnit(unit: string): string {
+  const u = unit.replace(/^#/, "").trim().toLowerCase();
+  const dashIdx = u.lastIndexOf("-");
+  if (dashIdx >= 0) return u.substring(dashIdx + 1).replace(/^0+/, "") || "0";
+  return u.replace(/^0+/, "") || "0";
+}
+
 // Hook to batch-lookup which receipts are already paid in AppFolio charge_details
 function useAppfolioPaidLookup(receipts: any[]) {
   const { data: paidSet } = useQuery({
@@ -79,16 +97,16 @@ function useAppfolioPaidLookup(receipts: any[]) {
       // Build a lookup set of "normalizedName|normalizedUnit" from paid charges
       const paidKeys = new Set<string>();
       for (const c of charges) {
-        const name = (c.charged_to || "").trim().toLowerCase();
-        const unit = (c.unit || "").replace(/^#/, "").trim().toLowerCase();
+        const name = normalizeName(c.charged_to || "");
+        const unit = normalizeUnit(c.unit || "");
         if (name && unit) paidKeys.add(`${name}|${unit}`);
       }
 
       // Match receipts against paid charges
       const matched = new Set<string>();
       for (const r of receipts) {
-        const tenant = (r.tenant || "").trim().toLowerCase();
-        const unit = (r.unit || "").replace(/^#/, "").trim().toLowerCase();
+        const tenant = normalizeName(r.tenant || "");
+        const unit = normalizeUnit(r.unit || "");
         if (tenant && unit && paidKeys.has(`${tenant}|${unit}`)) {
           matched.add(r.id);
         }
