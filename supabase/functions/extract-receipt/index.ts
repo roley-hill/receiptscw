@@ -1255,6 +1255,32 @@ ${knownTenantsList}` : ""}`;
         else if (ref.startsWith("CASH")) item.payment_type = "Cash";
       }
 
+      // ---- RENT MONTH INFERENCE FALLBACK ----
+      // If rent_month is missing or doesn't match the receipt_date month, default to receipt_date's month.
+      // This prevents negative amounts or adjustments from being mis-assigned to the wrong month.
+      if (item.receipt_date) {
+        const rdMatch = String(item.receipt_date).match(/^(\d{4})-(\d{2})/);
+        if (rdMatch) {
+          const receiptYM = `${rdMatch[1]}-${rdMatch[2]}`;
+          if (!item.rent_month) {
+            item.rent_month = receiptYM;
+            console.log(`Inferred rent_month from receipt_date: ${receiptYM} for "${item.tenant}"`);
+          } else {
+            // Validate: rent_month should be within 1 month of receipt_date
+            const rmMatch = String(item.rent_month).match(/^(\d{4})-(\d{2})/);
+            if (rmMatch) {
+              const rmDate = new Date(+rmMatch[1], +rmMatch[2] - 1);
+              const rdDate = new Date(+rdMatch[1], +rdMatch[2] - 1);
+              const diffMonths = (rdDate.getFullYear() - rmDate.getFullYear()) * 12 + (rdDate.getMonth() - rmDate.getMonth());
+              if (Math.abs(diffMonths) > 1) {
+                console.log(`Correcting rent_month ${item.rent_month} -> ${receiptYM} (too far from receipt_date) for "${item.tenant}"`);
+                item.rent_month = receiptYM;
+              }
+            }
+          }
+        }
+      }
+
       // ---- SUBSIDY PROVIDER MATCHING ----
       let subsidyProvider: string | null = null;
       if (chargeDetails.length > 0 && item.tenant) {
