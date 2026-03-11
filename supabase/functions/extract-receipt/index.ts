@@ -133,18 +133,41 @@ serve(async (req) => {
     const hashArray = Array.from(new Uint8Array(hashBuffer));
     const fileContentHash = hashArray.map(b => b.toString(16).padStart(2, "0")).join("");
 
-    // ---- FILE-LEVEL DUPLICATE CHECK (by name) ----
+    // ---- TRIGGER FRESH CHARGE SYNC (Option 1: ensures charge_details is current) ----
+    try {
+      console.log("Triggering fresh charge sync before processing...");
+      const syncResp = await fetch(`${supabaseUrl}/functions/v1/sync-charges`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${supabaseKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({}),
+      });
+      if (syncResp.ok) {
+        const syncResult = await syncResp.json();
+        console.log(`Charge sync completed: ${syncResult.charges_synced ?? 0} charges synced`);
+      } else {
+        console.warn(`Charge sync returned ${syncResp.status}, proceeding with existing data`);
+      }
+    } catch (syncErr) {
+      console.warn("Charge sync failed, proceeding with existing data:", syncErr);
+    }
+
+    // ---- FILE-LEVEL DUPLICATE CHECK (by name, excluding soft-deleted) ----
     const { data: existingFileReceipts, error: fileCheckError } = await supabase
       .from("receipts")
       .select("id, receipt_id, status")
       .eq("file_name", file.name)
+      .is("deleted_at", null)
       .limit(1);
 
     if (!fileCheckError && existingFileReceipts && existingFileReceipts.length > 0) {
       const { count: totalExisting } = await supabase
         .from("receipts")
         .select("id", { count: "exact", head: true })
-        .eq("file_name", file.name);
+        .eq("file_name", file.name)
+        .is("deleted_at", null);
 
       return new Response(JSON.stringify({
         error: `File "${file.name}" has already been processed (${totalExisting ?? 1} receipt(s) exist). Delete existing records first if you want to re-extract.`,
