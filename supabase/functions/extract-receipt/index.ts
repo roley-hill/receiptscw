@@ -1358,6 +1358,66 @@ ${knownTenantsList}` : ""}`;
 
       if (insertError) {
         console.error("Insert error for item:", item.tenant, insertError.message);
+        // Retry once after a brief pause
+        const { data: retryReceipt, error: retryError } = await supabase
+          .from("receipts")
+          .insert({
+            user_id: userId,
+            property: item.property || "",
+            unit: item.unit || "",
+            tenant: item.tenant || "",
+            receipt_date: item.receipt_date || null,
+            rent_month: item.rent_month || null,
+            amount: item.amount || 0,
+            payment_type: item.payment_type || "",
+            reference: item.reference || "",
+            memo: item.memo || "",
+            confidence_scores: {
+              property: item.property_confidence || 0,
+              unit: item.unit_confidence || 0,
+              tenant: item.tenant_confidence || 0,
+              amount: item.amount_confidence || 0,
+              receiptDate: item.receipt_date_confidence || 0,
+              paymentType: item.payment_type_confidence || 0,
+              tenantStatus: item.tenant_status || null,
+              chargeType: item.charge_type || null,
+              tenantVerified: item.tenant_verified ?? null,
+              propertyVerified: item.property_verified ?? null,
+              amountVerified: item.amount_verified ?? null,
+            },
+            status,
+            subsidy_provider: subsidyProvider,
+            file_path: extractedText.startsWith("PDF_ATTACHMENT:") ? extractedText.replace("PDF_ATTACHMENT:", "") : filePath,
+            file_name: file.name,
+            file_content_hash: fileContentHash,
+            original_text: extractedText,
+          })
+          .select()
+          .single();
+
+        if (retryError) {
+          console.error("Retry insert also failed for:", item.tenant, retryError.message);
+          // Track as a failed item so counts stay accurate
+          duplicates.push({
+            tenant: item.tenant,
+            amount: item.amount,
+            receipt_date: item.receipt_date,
+            existing_receipt_id: "INSERT_FAILED",
+            reason: `insert_error: ${retryError.message}`,
+          });
+          continue;
+        }
+        // Retry succeeded
+        console.log("Retry insert succeeded for:", item.tenant);
+        insertedReceipts.push(retryReceipt);
+
+        await supabase.from("audit_logs").insert({
+          user_id: userId,
+          action: "receipt_uploaded",
+          entity_type: "receipt",
+          entity_id: retryReceipt.receipt_id,
+          details: { file_name: file.name, status, confidence: avgCriticalConfidence, line_item: true, subsidy_provider: subsidyProvider, retried: true },
+        });
         continue;
       }
 
