@@ -56,6 +56,11 @@ interface ExistingReceipt {
   file_name: string | null;
   file_path: string | null;
   original_text: string | null;
+  source?: "receipt" | "appfolio";
+  charge_date?: string | null;
+  paid_amount?: number;
+  account_name?: string;
+  charged_to?: string;
 }
 
 async function fetchPendingDuplicates() {
@@ -135,22 +140,78 @@ export default function Duplicates() {
     }
     setExpandedId(dup.id);
 
-    if (dup.existing_receipt_uuid && !existingReceipts[dup.existing_receipt_uuid]) {
-      setLoadingExisting((prev) => new Set(prev).add(dup.id));
-      const { data } = await supabase
-        .from("receipts")
-        .select("id, receipt_id, tenant, property, unit, amount, receipt_date, rent_month, payment_type, reference, memo, status, file_name, file_path, original_text")
-        .eq("id", dup.existing_receipt_uuid)
-        .single();
-      if (data) {
-        setExistingReceipts((prev) => ({ ...prev, [dup.existing_receipt_uuid!]: data as ExistingReceipt }));
+    const cacheKey = dup.existing_receipt_uuid || `appfolio-${dup.id}`;
+    if (existingReceipts[cacheKey]) return;
+
+    setLoadingExisting((prev) => new Set(prev).add(dup.id));
+
+    try {
+      if (dup.existing_receipt_uuid) {
+        // Normal receipt duplicate
+        const { data } = await supabase
+          .from("receipts")
+          .select("id, receipt_id, tenant, property, unit, amount, receipt_date, rent_month, payment_type, reference, memo, status, file_name, file_path, original_text")
+          .eq("id", dup.existing_receipt_uuid)
+          .single();
+        if (data) {
+          setExistingReceipts((prev) => ({ ...prev, [cacheKey]: { ...data, source: "receipt" } as ExistingReceipt }));
+        }
+      } else if (dup.existing_receipt_id === "APPFOLIO_ALREADY_RECORDED") {
+        // AppFolio charge match — query charge_details by unit + amount
+        const cleanUnit = (u: string) => u.replace(/^[^-]*-/, "").replace(/^0+/, "").trim();
+        const normalizedUnit = cleanUnit(dup.unit || "");
+        
+        const { data: charges } = await supabase
+          .from("charge_details")
+          .select("*")
+          .gt("paid_amount", 0);
+
+        if (charges && charges.length > 0) {
+          const match = charges.find((c) => {
+            const cUnit = cleanUnit(c.unit || "");
+            const unitMatch = cUnit === normalizedUnit || cUnit.endsWith(normalizedUnit) || normalizedUnit.endsWith(cUnit);
+            const amountMatch = Math.abs(Math.abs(c.paid_amount) - Math.abs(dup.amount)) < 0.01;
+            return unitMatch && amountMatch;
+          });
+
+          if (match) {
+            setExistingReceipts((prev) => ({
+              ...prev,
+              [cacheKey]: {
+                id: match.id,
+                receipt_id: "AppFolio Charge",
+                tenant: match.charged_to,
+                property: match.property_address,
+                unit: match.unit || "",
+                amount: match.paid_amount,
+                receipt_date: match.receipt_date,
+                rent_month: null,
+                payment_type: null,
+                reference: match.reference,
+                memo: null,
+                status: "recorded",
+                file_name: null,
+                file_path: null,
+                original_text: null,
+                source: "appfolio",
+                charge_date: match.charge_date,
+                paid_amount: match.paid_amount,
+                account_name: match.account_name,
+                charged_to: match.charged_to,
+              },
+            }));
+          }
+        }
       }
-      setLoadingExisting((prev) => {
-        const next = new Set(prev);
-        next.delete(dup.id);
-        return next;
-      });
+    } catch (err) {
+      console.error("Failed to load existing record", err);
     }
+
+    setLoadingExisting((prev) => {
+      const next = new Set(prev);
+      next.delete(dup.id);
+      return next;
+    });
   };
 
   const advanceToNext = (currentId: string) => {
@@ -309,7 +370,8 @@ export default function Duplicates() {
       <div className="space-y-3">
         {duplicates.map((dup, i) => {
           const isExpanded = expandedId === dup.id;
-          const existing = dup.existing_receipt_uuid ? existingReceipts[dup.existing_receipt_uuid] : null;
+          const cacheKey = dup.existing_receipt_uuid || `appfolio-${dup.id}`;
+          const existing = existingReceipts[cacheKey] || null;
           const isLoadingThis = loadingExisting.has(dup.id);
           const isProcessing = processing.has(dup.id);
 
@@ -372,28 +434,46 @@ export default function Duplicates() {
 
                         {/* Existing record */}
                         <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-2">
-                          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Existing Record ({dup.existing_receipt_id})</p>
+                          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                            {existing?.source === "appfolio" ? "AppFolio Charge Record" : `Existing Record (${dup.existing_receipt_id})`}
+                          </p>
                           {isLoadingThis ? (
                             <div className="flex items-center justify-center py-6">
                               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
                             </div>
                           ) : existing ? (
-                            <>
-                              <CompareField label="Tenant" value={existing.tenant} />
-                              <CompareField label="Property" value={existing.property} />
-                              <CompareField label="Unit" value={existing.unit} />
-                              <CompareField label="Amount" value={`$${Number(existing.amount).toFixed(2)}`} />
-                              <CompareField label="Date" value={existing.receipt_date || "—"} />
-                              <CompareField label="Rent Month" value={existing.rent_month || "—"} />
-                              <CompareField label="Payment" value={existing.payment_type || "—"} />
-                              <CompareField label="Reference" value={existing.reference || "—"} />
-                              <FileField
-                                label="File"
-                                value={existing.file_name || "—"}
-                                hasFile={!!existing.file_path}
-                                onView={() => openPreview(existing.file_path, existing.file_name, existing.original_text)}
-                              />
-                            </>
+                            existing.source === "appfolio" ? (
+                              <>
+                                <CompareField label="Charged To" value={existing.charged_to || existing.tenant} />
+                                <CompareField label="Property" value={existing.property} />
+                                <CompareField label="Unit" value={existing.unit} />
+                                <CompareField label="Paid Amount" value={`$${Number(existing.paid_amount ?? existing.amount).toFixed(2)}`} />
+                                <CompareField label="Charge Date" value={existing.charge_date || "—"} />
+                                <CompareField label="Receipt Date" value={existing.receipt_date || "—"} />
+                                <CompareField label="Account" value={existing.account_name || "—"} />
+                                <CompareField label="Reference" value={existing.reference || "—"} />
+                                <div className="pt-1 mt-1 border-t border-border">
+                                  <span className="text-[10px] text-accent font-medium">✓ Already paid in AppFolio</span>
+                                </div>
+                              </>
+                            ) : (
+                              <>
+                                <CompareField label="Tenant" value={existing.tenant} />
+                                <CompareField label="Property" value={existing.property} />
+                                <CompareField label="Unit" value={existing.unit} />
+                                <CompareField label="Amount" value={`$${Number(existing.amount).toFixed(2)}`} />
+                                <CompareField label="Date" value={existing.receipt_date || "—"} />
+                                <CompareField label="Rent Month" value={existing.rent_month || "—"} />
+                                <CompareField label="Payment" value={existing.payment_type || "—"} />
+                                <CompareField label="Reference" value={existing.reference || "—"} />
+                                <FileField
+                                  label="File"
+                                  value={existing.file_name || "—"}
+                                  hasFile={!!existing.file_path}
+                                  onView={() => openPreview(existing.file_path, existing.file_name, existing.original_text)}
+                                />
+                              </>
+                            )
                           ) : (
                             <p className="text-xs text-muted-foreground py-4">Could not load existing record.</p>
                           )}
