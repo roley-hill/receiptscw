@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { fetchReceipts, markAppfolioRecorded, getFilePreviewUrl, createDepositBatch, updateReceipt } from "@/lib/api";
 import { motion } from "framer-motion";
 import { Copy, Check, FileText, Layers, Loader2, ChevronRight, ChevronDown, Building2, Search, User, AlertTriangle, Trash2, CheckSquare, Square, Calendar, Filter, X, SlidersHorizontal } from "lucide-react";
+import ColumnFilterPanel, { applyColumnFilters, type ColumnFilterGroup, type FilterableColumn } from "@/components/ColumnFilterPanel";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { DbReceipt } from "@/lib/api";
