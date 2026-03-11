@@ -1240,26 +1240,35 @@ ${knownTenantsList}` : ""}`;
 
       // ---- CHECK 2: Fuzzy match (amount + date + normalized unit, ignoring tenant name spelling) ----
       // This catches cases like "Morgan L. Mahowald" vs "Morgan Mahowald"
+      // But respects rent_month differences — same payment for a different month is NOT a duplicate
       if (item.amount && item.receipt_date && item.unit) {
         const normalizedItemUnit = cleanUnit(item.unit || "").toLowerCase();
         if (normalizedItemUnit) {
-          const { data: fuzzyMatches } = await supabase
+          let fuzzyQuery = supabase
             .from("receipts")
-            .select("id, receipt_id, tenant, unit")
+            .select("id, receipt_id, tenant, unit, rent_month")
             .eq("amount", item.amount)
             .eq("receipt_date", item.receipt_date)
             .is("deleted_at", null)
             .limit(50);
 
+          const { data: fuzzyMatches } = await fuzzyQuery;
+
           if (fuzzyMatches && fuzzyMatches.length > 0) {
             const fuzzyDup = fuzzyMatches.find(r => {
               const existingUnit = cleanUnit(r.unit || "").toLowerCase();
-              return existingUnit === normalizedItemUnit ||
+              const unitMatch = existingUnit === normalizedItemUnit ||
                 existingUnit.endsWith("-" + normalizedItemUnit) ||
                 normalizedItemUnit.endsWith("-" + existingUnit);
+              if (!unitMatch) return false;
+              // Rent month must match (or both be null) — different months are NOT duplicates
+              const itemMonth = item.rent_month || null;
+              const existingMonth = r.rent_month || null;
+              if (itemMonth && existingMonth && itemMonth !== existingMonth) return false;
+              return true;
             });
             if (fuzzyDup) {
-              console.log(`Fuzzy duplicate: "${item.tenant}" matches existing "${fuzzyDup.tenant}" (unit=${fuzzyDup.unit}, amount=$${item.amount}, date=${item.receipt_date})`);
+              console.log(`Fuzzy duplicate: "${item.tenant}" matches existing "${fuzzyDup.tenant}" (unit=${fuzzyDup.unit}, amount=$${item.amount}, date=${item.receipt_date}, rent_month=${item.rent_month})`);
               await recordSkippedDuplicate(item, fuzzyDup.receipt_id, fuzzyDup.id, "fuzzy_unit_amount_date");
               continue;
             }
