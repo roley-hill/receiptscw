@@ -133,18 +133,41 @@ serve(async (req) => {
     const hashArray = Array.from(new Uint8Array(hashBuffer));
     const fileContentHash = hashArray.map(b => b.toString(16).padStart(2, "0")).join("");
 
-    // ---- FILE-LEVEL DUPLICATE CHECK (by name) ----
+    // ---- TRIGGER FRESH CHARGE SYNC (Option 1: ensures charge_details is current) ----
+    try {
+      console.log("Triggering fresh charge sync before processing...");
+      const syncResp = await fetch(`${supabaseUrl}/functions/v1/sync-charges`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${supabaseKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({}),
+      });
+      if (syncResp.ok) {
+        const syncResult = await syncResp.json();
+        console.log(`Charge sync completed: ${syncResult.charges_synced ?? 0} charges synced`);
+      } else {
+        console.warn(`Charge sync returned ${syncResp.status}, proceeding with existing data`);
+      }
+    } catch (syncErr) {
+      console.warn("Charge sync failed, proceeding with existing data:", syncErr);
+    }
+
+    // ---- FILE-LEVEL DUPLICATE CHECK (by name, excluding soft-deleted) ----
     const { data: existingFileReceipts, error: fileCheckError } = await supabase
       .from("receipts")
       .select("id, receipt_id, status")
       .eq("file_name", file.name)
+      .is("deleted_at", null)
       .limit(1);
 
     if (!fileCheckError && existingFileReceipts && existingFileReceipts.length > 0) {
       const { count: totalExisting } = await supabase
         .from("receipts")
         .select("id", { count: "exact", head: true })
-        .eq("file_name", file.name);
+        .eq("file_name", file.name)
+        .is("deleted_at", null);
 
       return new Response(JSON.stringify({
         error: `File "${file.name}" has already been processed (${totalExisting ?? 1} receipt(s) exist). Delete existing records first if you want to re-extract.`,
@@ -156,13 +179,14 @@ serve(async (req) => {
       });
     }
 
-    // ---- DUPLICATE CONTENT CHECK (same content, different file name) ----
+    // ---- DUPLICATE CONTENT CHECK (same content, different file name, excluding soft-deleted) ----
     let duplicateContentFile: string | null = null;
     let duplicateContentCount = 0;
     const { data: existingHashReceipts } = await supabase
       .from("receipts")
       .select("file_name")
       .eq("file_content_hash", fileContentHash)
+      .is("deleted_at", null)
       .limit(1);
 
     if (existingHashReceipts && existingHashReceipts.length > 0) {
@@ -170,7 +194,8 @@ serve(async (req) => {
       const { count } = await supabase
         .from("receipts")
         .select("id", { count: "exact", head: true })
-        .eq("file_content_hash", fileContentHash);
+        .eq("file_content_hash", fileContentHash)
+        .is("deleted_at", null);
       duplicateContentCount = count ?? 0;
     }
 
@@ -1055,7 +1080,30 @@ ${knownTenantsList}` : ""}`;
       console.warn("Could not load charge details:", e);
     }
 
-    // Cross-reference each extracted item's amount against rent roll
+    // ---- FETCH ALL CHARGE DETAILS FOR PAID-AMOUNT CROSS-CHECK ----
+    // If a charge shows paid_amount > 0 for this tenant/unit/amount, the receipt is already recorded in AppFolio
+    let allChargeDetails: { charged_to: string; unit: string | null; property_address: string; charge_amount: number; paid_amount: number; receipt_date: string | null }[] = [];
+    try {
+      let from = 0;
+      const pageSize = 1000;
+      while (true) {
+        const { data: page } = await supabase
+          .from("charge_details")
+          .select("charged_to, unit, property_address, charge_amount, paid_amount, receipt_date")
+          .gt("paid_amount", 0)
+          .range(from, from + pageSize - 1);
+        if (!page || page.length === 0) break;
+        allChargeDetails = allChargeDetails.concat(page);
+        if (page.length < pageSize) break;
+        from += pageSize;
+      }
+      if (allChargeDetails.length > 0) {
+        console.log(`Loaded ${allChargeDetails.length} paid charge details for AppFolio cross-check`);
+      }
+    } catch (e) {
+      console.warn("Could not load paid charge details:", e);
+    }
+
     if (rentRollCharges.length > 0) {
       for (const item of extractedItems) {
         if (!item.amount || item.amount === 0) continue;
@@ -1137,7 +1185,8 @@ ${knownTenantsList}` : ""}`;
           .eq("amount", item.amount)
           .eq("receipt_date", item.receipt_date)
           .eq("property", item.property || "")
-          .eq("unit", item.unit || "");
+          .eq("unit", item.unit || "")
+          .is("deleted_at", null);
 
         // Only match rent_month: if both have a value they must be equal, 
         // if the new item has a rent_month we filter by it
@@ -1195,7 +1244,8 @@ ${knownTenantsList}` : ""}`;
           .eq("amount", item.amount)
           .eq("receipt_date", item.receipt_date)
           .eq("property", item.property || "")
-          .eq("unit", item.unit || "");
+          .eq("unit", item.unit || "")
+          .is("deleted_at", null);
 
         if (item.rent_month) {
           reuploadQuery = reuploadQuery.eq("rent_month", item.rent_month);
@@ -1238,6 +1288,68 @@ ${knownTenantsList}` : ""}`;
               amount: item.amount_confidence || 0,
               receiptDate: item.receipt_date_confidence || 0,
               paymentType: item.payment_type_confidence || 0,
+            },
+          });
+          continue;
+        }
+      }
+
+      // ---- APPFOLIO PAID-AMOUNT CROSS-CHECK ----
+      // If charge_details shows this tenant/unit/amount already has a payment recorded, flag as duplicate
+      if (allChargeDetails.length > 0 && item.tenant && item.amount) {
+        const itemTenant = (item.tenant || "").toLowerCase().trim();
+        const itemUnit = (item.unit || "").replace(/^#/, "").trim().toLowerCase();
+        const itemAmount = Math.abs(item.amount);
+
+        const alreadyPaid = allChargeDetails.find(cd => {
+          const cdTenant = (cd.charged_to || "").toLowerCase().trim();
+          const cdUnit = (cd.unit || "").replace(/^#/, "").trim().toLowerCase();
+          const cdPaid = Math.abs(cd.paid_amount);
+
+          const tenantMatch = cdTenant && itemTenant && (
+            cdTenant === itemTenant || cdTenant.includes(itemTenant) || itemTenant.includes(cdTenant)
+          );
+          const unitMatch = cdUnit && itemUnit && (
+            cdUnit === itemUnit || cdUnit.endsWith("-" + itemUnit) || itemUnit.endsWith("-" + cdUnit)
+          );
+          const amountMatch = Math.abs(cdPaid - itemAmount) < 0.01;
+
+          return amountMatch && (tenantMatch || unitMatch);
+        });
+
+        if (alreadyPaid) {
+          console.log(`AppFolio cross-check: "${item.tenant}" $${itemAmount} already recorded (paid_amount=$${alreadyPaid.paid_amount} for ${alreadyPaid.charged_to} @ ${alreadyPaid.unit})`);
+          duplicates.push({
+            tenant: item.tenant,
+            amount: item.amount,
+            receipt_date: item.receipt_date,
+            existing_receipt_id: "APPFOLIO_ALREADY_RECORDED",
+            reason: "appfolio_paid",
+          });
+          // Store in skipped_duplicates for operator review
+          await supabase.from("skipped_duplicates").insert({
+            user_id: userId,
+            tenant: item.tenant || "",
+            property: item.property || "",
+            unit: item.unit || "",
+            amount: item.amount || 0,
+            receipt_date: item.receipt_date || null,
+            rent_month: item.rent_month || null,
+            payment_type: item.payment_type || "",
+            reference: item.reference || "",
+            memo: item.memo || "",
+            file_name: file.name,
+            file_path: filePath,
+            existing_receipt_id: "APPFOLIO_ALREADY_RECORDED",
+            status: "pending",
+            confidence_scores: {
+              property: item.property_confidence || 0,
+              unit: item.unit_confidence || 0,
+              tenant: item.tenant_confidence || 0,
+              amount: item.amount_confidence || 0,
+              receiptDate: item.receipt_date_confidence || 0,
+              paymentType: item.payment_type_confidence || 0,
+              appfolioPaidMatch: true,
             },
           });
           continue;
