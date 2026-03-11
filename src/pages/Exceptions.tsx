@@ -114,11 +114,8 @@ export default function Exceptions() {
       const idsToDelete = exceptions
         .filter((r) => (r.file_name || "No file") === fileName)
         .map((r) => r.id);
-      for (let i = 0; i < idsToDelete.length; i += 100) {
-        const chunk = idsToDelete.slice(i, i + 100);
-        const { error } = await supabase.from("receipts").delete().in("id", chunk);
-        if (error) throw error;
-      }
+      const { softDeleteReceipts } = await import("@/hooks/useAdminDelete");
+      await softDeleteReceipts(idsToDelete);
       toast.success(`Deleted ${idsToDelete.length} receipt(s) from "${fileName}"`);
       setSelected(new Set());
       if (fileFilter === fileName) setFileFilter("all");

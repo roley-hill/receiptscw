@@ -260,11 +260,8 @@ export default function UploadPage() {
       }
 
       const ids = toDelete.map(r => r.id);
-      for (let i = 0; i < ids.length; i += 100) {
-        const chunk = ids.slice(i, i + 100);
-        const { error } = await supabase.from("receipts").delete().in("id", chunk);
-        if (error) throw error;
-      }
+      const { softDeleteReceipts } = await import("@/hooks/useAdminDelete");
+      await softDeleteReceipts(ids);
 
       toast.success(`Deleted ${ids.length} duplicate receipt(s) from "${originalFileName.replace(/^Receipts\//, "")}"`);
       queryClient.invalidateQueries({ queryKey: ["receipts"] });

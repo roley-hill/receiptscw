@@ -519,8 +519,8 @@ function ReviewDetail({
 
   const handleDelete = async () => {
     try {
-      const { error } = await supabase.from("receipts").delete().eq("id", receipt.id);
-      if (error) throw error;
+      const { softDeleteReceipts } = await import("@/hooks/useAdminDelete");
+      await softDeleteReceipts([receipt.id]);
       toast.success("Receipt deleted");
       queryClient.invalidateQueries({ queryKey: ["receipts"] });
       onBack();
