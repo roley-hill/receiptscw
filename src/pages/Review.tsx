@@ -80,6 +80,7 @@ export default function ReviewPage() {
   const [deleting, setDeleting] = useState(false);
   const [finalizing, setFinalizing] = useState(false);
   const [fileFilter, setFileFilter] = useState<string>("all");
+  const [collapsedMonths, setCollapsedMonths] = useState<Set<string>>(new Set());
 
   // Navigate to specific receipt if receiptId is in URL
   useEffect(() => {
