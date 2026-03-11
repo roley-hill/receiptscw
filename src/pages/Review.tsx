@@ -89,11 +89,37 @@ function useAppfolioPaidLookup(receipts: any[]) {
     queryKey: ["appfolio_paid_lookup", receipts.map(r => r.id).join(",")],
     queryFn: async () => {
       if (receipts.length === 0) return new Map<string, string>();
-      const { data: charges } = await supabase
-        .from("charge_details")
-        .select("charged_to, unit, paid_amount, charge_date, receipt_date, charge_amount")
-        .gt("paid_amount", 0);
-      if (!charges || charges.length === 0) return new Map<string, string>();
+
+      // Determine earliest rent_month from receipts to scope the charge_details query
+      const rentMonths = receipts.map(r => r.rent_month).filter(Boolean) as string[];
+      const earliestMonth = rentMonths.length > 0 ? rentMonths.sort()[0] : null;
+      const chargeStartDate = earliestMonth ? `${earliestMonth}-01` : null;
+
+      // Paginate through all charge_details with paid_amount > 0
+      const allCharges: any[] = [];
+      const PAGE_SIZE = 1000;
+      let offset = 0;
+      let hasMore = true;
+      while (hasMore) {
+        let query = supabase
+          .from("charge_details")
+          .select("charged_to, unit, paid_amount, charge_date, receipt_date, charge_amount")
+          .gt("paid_amount", 0);
+        if (chargeStartDate) {
+          query = query.gte("charge_date", chargeStartDate);
+        }
+        const { data: page } = await query
+          .range(offset, offset + PAGE_SIZE - 1);
+        if (!page || page.length === 0) {
+          hasMore = false;
+        } else {
+          allCharges.push(...page);
+          offset += PAGE_SIZE;
+          if (page.length < PAGE_SIZE) hasMore = false;
+        }
+      }
+      if (allCharges.length === 0) return new Map<string, string>();
+      const charges = allCharges;
 
       // Index charges by "name|unit|chargeMonth" → latest receipt_date (payment date)
       const chargeIndex = new Map<string, string>();
