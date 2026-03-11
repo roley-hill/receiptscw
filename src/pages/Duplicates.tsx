@@ -486,7 +486,13 @@ export default function Duplicates() {
                               </>
                             )
                           ) : (
-                            <p className="text-xs text-muted-foreground py-4">Could not load existing record.</p>
+                            <div className="py-4 space-y-1">
+                              <p className="text-xs text-muted-foreground">
+                                {dup.existing_receipt_id === "APPFOLIO_ALREADY_RECORDED"
+                                  ? "No matching AppFolio charge found in synced data. The charge data for this period may not be synced yet — try re-syncing charges."
+                                  : "Could not load existing record."}
+                              </p>
+                            </div>
                           )}
                         </div>
                       </div>
