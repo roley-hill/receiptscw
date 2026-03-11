@@ -243,6 +243,52 @@ export default function ReviewPage() {
     );
   }
 
+  // Group filtered receipts by rent_month (newest first)
+  const monthGroups = useMemo(() => {
+    const byMonth: Record<string, typeof filteredReviewable> = {};
+    for (const r of filteredReviewable) {
+      const key = r.rent_month || "__none__";
+      if (!byMonth[key]) byMonth[key] = [];
+      byMonth[key].push(r);
+    }
+    const sortedKeys = Object.keys(byMonth).sort((a, b) => {
+      if (a === "__none__") return 1;
+      if (b === "__none__") return -1;
+      return b.localeCompare(a);
+    });
+    return sortedKeys.map(key => ({
+      key,
+      label: key === "__none__" ? "No Month Assigned" : (() => {
+        const [y, m] = key.split("-");
+        const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+        return `${months[parseInt(m, 10) - 1]} ${y}`;
+      })(),
+      receipts: byMonth[key],
+    }));
+  }, [filteredReviewable]);
+
+  const isMonthAllSelected = (receipts: typeof filteredReviewable) =>
+    receipts.length > 0 && receipts.every(r => selected.has(r.id));
+
+  const toggleMonthAll = (receipts: typeof filteredReviewable) => {
+    if (isMonthAllSelected(receipts)) {
+      setSelected(prev => {
+        const next = new Set(prev);
+        receipts.forEach(r => next.delete(r.id));
+        return next;
+      });
+    } else {
+      setSelected(prev => {
+        const next = new Set(prev);
+        receipts.forEach(r => next.add(r.id));
+        return next;
+      });
+    }
+  };
+
+  const selectedInMonth = (receipts: typeof filteredReviewable) =>
+    receipts.filter(r => selected.has(r.id)).length;
+
   // List view
   return (
     <div className="space-y-6 max-w-5xl">
@@ -252,58 +298,50 @@ export default function ReviewPage() {
           <p className="text-sm text-muted-foreground mt-1">{reviewable.length} receipt(s) pending review</p>
         </div>
         <div className="flex items-center gap-3">
-          {isAdmin && (
+          {isAdmin && selected.size > 0 && (
             <>
-              <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
-                <Checkbox checked={allSelected} onCheckedChange={toggleAll} />
-                Select all
-              </label>
-              {selected.size > 0 && (
-                <>
-                  <AlertDialog>
-                    <AlertDialogTrigger asChild>
-                      <Button variant="outline" size="sm" disabled={finalizing}>
-                        <CheckCheck className="h-4 w-4 mr-1" />
-                        Finalize {selected.size}
-                      </Button>
-                    </AlertDialogTrigger>
-                    <AlertDialogContent>
-                      <AlertDialogHeader>
-                        <AlertDialogTitle>Finalize {selected.size} receipt(s)?</AlertDialogTitle>
-                        <AlertDialogDescription>
-                          This will mark the selected receipts as finalized and move them into entry & recording.
-                        </AlertDialogDescription>
-                      </AlertDialogHeader>
-                      <AlertDialogFooter>
-                        <AlertDialogCancel>Cancel</AlertDialogCancel>
-                        <AlertDialogAction onClick={handleBulkFinalize}>Finalize</AlertDialogAction>
-                      </AlertDialogFooter>
-                    </AlertDialogContent>
-                  </AlertDialog>
-                  <AlertDialog>
-                    <AlertDialogTrigger asChild>
-                      <Button variant="destructive" size="sm" disabled={deleting}>
-                        <Trash2 className="h-4 w-4 mr-1" />
-                        Delete {selected.size}
-                      </Button>
-                    </AlertDialogTrigger>
-                    <AlertDialogContent>
-                      <AlertDialogHeader>
-                        <AlertDialogTitle>Delete {selected.size} receipt(s)?</AlertDialogTitle>
-                        <AlertDialogDescription>
-                          This will permanently remove the selected receipts. This action cannot be undone.
-                        </AlertDialogDescription>
-                      </AlertDialogHeader>
-                      <AlertDialogFooter>
-                        <AlertDialogCancel>Cancel</AlertDialogCancel>
-                        <AlertDialogAction onClick={handleBulkDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-                          Delete
-                        </AlertDialogAction>
-                      </AlertDialogFooter>
-                    </AlertDialogContent>
-                  </AlertDialog>
-                </>
-              )}
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="outline" size="sm" disabled={finalizing}>
+                    <CheckCheck className="h-4 w-4 mr-1" />
+                    Finalize {selected.size}
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Finalize {selected.size} receipt(s)?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This will mark the selected receipts as finalized and move them into entry & recording.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction onClick={handleBulkFinalize}>Finalize</AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="destructive" size="sm" disabled={deleting}>
+                    <Trash2 className="h-4 w-4 mr-1" />
+                    Delete {selected.size}
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Delete {selected.size} receipt(s)?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This will permanently remove the selected receipts. This action cannot be undone.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction onClick={handleBulkDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                      Delete
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             </>
           )}
         </div>
@@ -375,45 +413,126 @@ export default function ReviewPage() {
         )}
       </div>
 
-      {/* Scrollable receipt list */}
-      <div className="space-y-3">
-        {filteredReviewable.map((r, i) => {
-          const conf = (r.confidence_scores as any) || {};
+      {/* Month-grouped receipt list */}
+      <div className="space-y-6">
+        {monthGroups.map(({ key: monthKey, label, receipts: monthReceipts }) => {
+          const monthSelectedCount = selectedInMonth(monthReceipts);
+          const monthAllSel = isMonthAllSelected(monthReceipts);
+          const monthTotal = monthReceipts.reduce((s, r) => s + Number(r.amount), 0);
+
           return (
-            <motion.div key={r.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }} className="vault-card p-4">
-              <div className="flex items-start justify-between">
-                <div className="flex items-start gap-3">
+            <div key={monthKey} className="space-y-3">
+              {/* Month header */}
+              <div className="flex items-center justify-between py-2 px-1 border-b border-border">
+                <div className="flex items-center gap-3">
                   {isAdmin && (
                     <Checkbox
-                      checked={selected.has(r.id)}
-                      onCheckedChange={() => toggle(r.id)}
-                      className="mt-1"
+                      checked={monthAllSel}
+                      onCheckedChange={() => toggleMonthAll(monthReceipts)}
                     />
                   )}
-                  <div className={`h-9 w-9 rounded-lg flex items-center justify-center mt-0.5 ${r.status === "exception" ? "bg-vault-red-light" : "bg-vault-amber-light"}`}>
-                    {r.status === "exception"
-                      ? <AlertTriangle className="h-4 w-4 text-vault-red" />
-                      : <Eye className="h-4 w-4 text-vault-amber" />}
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h3 className="text-sm font-bold text-foreground">{r.tenant || "Unknown Tenant"}</h3>
-                      <span className="vault-mono text-xs text-muted-foreground">{r.receipt_id}</span>
-                      {r.status === "exception" && <span className="vault-badge-error text-[10px]">Exception</span>}
-                      {r.status === "needs_review" && <span className="vault-badge-warning text-[10px]">Needs Review</span>}
-                      {conf.tenantStatus && <TenantStatusBadge status={conf.tenantStatus} />}
-                      {conf.chargeType && <ChargeTypeBadge chargeType={conf.chargeType} />}
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      {r.property || "Unknown Property"} · Unit {r.unit || "?"} · ${Number(r.amount).toLocaleString("en-US", { minimumFractionDigits: 2 })} · {r.file_name || "No file"}
-                    </p>
-                  </div>
+                  <h2 className="text-base font-bold text-foreground">{label}</h2>
+                  <span className="text-xs text-muted-foreground vault-mono">
+                    {monthReceipts.length} receipt{monthReceipts.length !== 1 ? "s" : ""} · ${monthTotal.toLocaleString("en-US", { minimumFractionDigits: 2 })}
+                  </span>
                 </div>
-                <Button variant="outline" size="sm" onClick={() => setActiveReceiptId(r.id)}>
-                  Review & Fix
-                </Button>
+                {isAdmin && monthSelectedCount > 0 && (
+                  <div className="flex items-center gap-2">
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button variant="outline" size="sm" className="h-7 text-xs" disabled={finalizing}>
+                          <CheckCheck className="h-3.5 w-3.5 mr-1" />
+                          Finalize {monthSelectedCount}
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Finalize {monthSelectedCount} receipt(s) from {label}?</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            This will mark the selected receipts as finalized and move them into entry & recording.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Cancel</AlertDialogCancel>
+                          <AlertDialogAction onClick={() => {
+                            const ids = monthReceipts.filter(r => selected.has(r.id)).map(r => r.id);
+                            setSelected(prev => {
+                              const next = new Set(prev);
+                              ids.forEach(id => next.delete(id));
+                              return next;
+                            });
+                            handleBulkFinalize();
+                          }}>Finalize</AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button variant="destructive" size="sm" className="h-7 text-xs" disabled={deleting}>
+                          <Trash2 className="h-3.5 w-3.5 mr-1" />
+                          Delete {monthSelectedCount}
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Delete {monthSelectedCount} receipt(s) from {label}?</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            This will permanently remove the selected receipts. This action cannot be undone.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Cancel</AlertDialogCancel>
+                          <AlertDialogAction onClick={handleBulkDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                            Delete
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  </div>
+                )}
               </div>
-            </motion.div>
+
+              {/* Receipts in this month */}
+              {monthReceipts.map((r, i) => {
+                const conf = (r.confidence_scores as any) || {};
+                return (
+                  <motion.div key={r.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }} className="vault-card p-4">
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-start gap-3">
+                        {isAdmin && (
+                          <Checkbox
+                            checked={selected.has(r.id)}
+                            onCheckedChange={() => toggle(r.id)}
+                            className="mt-1"
+                          />
+                        )}
+                        <div className={`h-9 w-9 rounded-lg flex items-center justify-center mt-0.5 ${r.status === "exception" ? "bg-vault-red-light" : "bg-vault-amber-light"}`}>
+                          {r.status === "exception"
+                            ? <AlertTriangle className="h-4 w-4 text-vault-red" />
+                            : <Eye className="h-4 w-4 text-vault-amber" />}
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h3 className="text-sm font-bold text-foreground">{r.tenant || "Unknown Tenant"}</h3>
+                            <span className="vault-mono text-xs text-muted-foreground">{r.receipt_id}</span>
+                            {r.status === "exception" && <span className="vault-badge-error text-[10px]">Exception</span>}
+                            {r.status === "needs_review" && <span className="vault-badge-warning text-[10px]">Needs Review</span>}
+                            {conf.tenantStatus && <TenantStatusBadge status={conf.tenantStatus} />}
+                            {conf.chargeType && <ChargeTypeBadge chargeType={conf.chargeType} />}
+                          </div>
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            {r.property || "Unknown Property"} · Unit {r.unit || "?"} · ${Number(r.amount).toLocaleString("en-US", { minimumFractionDigits: 2 })} · {r.file_name || "No file"}
+                          </p>
+                        </div>
+                      </div>
+                      <Button variant="outline" size="sm" onClick={() => setActiveReceiptId(r.id)}>
+                        Review & Fix
+                      </Button>
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </div>
           );
         })}
       </div>
