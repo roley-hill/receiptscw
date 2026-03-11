@@ -409,7 +409,7 @@ export default function Duplicates() {
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction onClick={handleBulkDelete}>Delete All</AlertDialogAction>
+              <AlertDialogAction onClick={() => handleBulkDelete()}>Delete All</AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
