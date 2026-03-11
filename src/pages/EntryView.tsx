@@ -750,7 +750,30 @@ export default function EntryView() {
       <td className={`px-3 py-2.5 ${isDupMonth ? "font-semibold" : ""}`}><CopyCell value={r.rent_month || "—"} mono id={`month-${r.id}`} /></td>
       <td className="px-3 py-2.5"><CopyCell value={r.payment_type || "—"} id={`ptype-${r.id}`} /></td>
       <td className="px-3 py-2.5"><CopyCell value={r.reference || "—"} mono id={`ref-${r.id}`} /></td>
-      <td className="px-3 py-2.5"><CopyCell value={r.subsidy_provider || "—"} id={`sub-${r.id}`} /></td>
+      <td className="px-3 py-2.5">
+        <Select
+          value={r.subsidy_provider || "__none__"}
+          onValueChange={async (v) => {
+            const newVal = v === "__none__" ? null : v;
+            try {
+              await updateReceipt(r.id, { subsidy_provider: newVal });
+              queryClient.invalidateQueries({ queryKey: ["receipts"] });
+            } catch (err: any) {
+              toast({ title: "Error", description: err.message, variant: "destructive" });
+            }
+          }}
+        >
+          <SelectTrigger className="h-7 text-xs w-[130px] border-transparent hover:border-input transition-colors">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent className="z-[200]">
+            <SelectItem value="__none__"><span className="text-muted-foreground">None</span></SelectItem>
+            {uniqueSubsidies.map(s => (
+              <SelectItem key={s} value={s}>{s}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </td>
       <td className="px-3 py-2.5"><CopyCell value={r.memo || "—"} id={`memo-${r.id}`} /></td>
       <td className="px-3 py-2.5 text-xs vault-mono text-vault-blue">{r.receipt_id}</td>
       <td className="px-3 py-2.5">{r.transfer_status === "transferred" ? <span className="vault-badge-success">Transferred</span> : <span className="vault-badge-neutral">Pending</span>}</td>
