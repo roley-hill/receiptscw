@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
-import { TenantStatusBadge, ChargeTypeBadge, UnverifiedBadge } from "@/components/StatusBadges";
+import { TenantStatusBadge, ChargeTypeBadge, UnverifiedBadge, AppfolioPaidBadge } from "@/components/StatusBadges";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
@@ -63,6 +63,44 @@ function useSubsidyProviders() {
   return providers;
 }
 
+// Hook to batch-lookup which receipts are already paid in AppFolio charge_details
+function useAppfolioPaidLookup(receipts: any[]) {
+  const { data: paidSet } = useQuery({
+    queryKey: ["appfolio_paid_lookup", receipts.map(r => r.id).join(",")],
+    queryFn: async () => {
+      if (receipts.length === 0) return new Set<string>();
+      // Fetch all charge_details with paid_amount > 0
+      const { data: charges } = await supabase
+        .from("charge_details")
+        .select("charged_to, unit, paid_amount, property_address")
+        .gt("paid_amount", 0);
+      if (!charges || charges.length === 0) return new Set<string>();
+
+      // Build a lookup set of "normalizedName|normalizedUnit" from paid charges
+      const paidKeys = new Set<string>();
+      for (const c of charges) {
+        const name = (c.charged_to || "").trim().toLowerCase();
+        const unit = (c.unit || "").replace(/^#/, "").trim().toLowerCase();
+        if (name && unit) paidKeys.add(`${name}|${unit}`);
+      }
+
+      // Match receipts against paid charges
+      const matched = new Set<string>();
+      for (const r of receipts) {
+        const tenant = (r.tenant || "").trim().toLowerCase();
+        const unit = (r.unit || "").replace(/^#/, "").trim().toLowerCase();
+        if (tenant && unit && paidKeys.has(`${tenant}|${unit}`)) {
+          matched.add(r.id);
+        }
+      }
+      return matched;
+    },
+    staleTime: 60000,
+    enabled: receipts.length > 0,
+  });
+  return paidSet || new Set<string>();
+}
+
 export default function ReviewPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const targetReceiptId = searchParams.get("receiptId");
@@ -74,6 +112,7 @@ export default function ReviewPage() {
   const { role } = useAuth();
   const isAdmin = role === "admin";
   const reviewable = allReceipts.filter((r) => r.status === "needs_review" || r.status === "exception");
+  const appfolioPaidIds = useAppfolioPaidLookup(reviewable);
 
   const [activeReceiptId, setActiveReceiptId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -532,6 +571,7 @@ export default function ReviewPage() {
                             {r.status === "needs_review" && <span className="vault-badge-warning text-[10px]">Needs Review</span>}
                             {conf.tenantStatus && <TenantStatusBadge status={conf.tenantStatus} />}
                             {conf.chargeType && <ChargeTypeBadge chargeType={conf.chargeType} />}
+                            {appfolioPaidIds.has(r.id) && <AppfolioPaidBadge />}
                           </div>
                           <p className="text-xs text-muted-foreground mt-0.5">
                             {r.property || "Unknown Property"} · Unit {r.unit || "?"} · ${Number(r.amount).toLocaleString("en-US", { minimumFractionDigits: 2 })} · {r.file_name || "No file"}
