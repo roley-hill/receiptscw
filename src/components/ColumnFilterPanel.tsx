@@ -189,7 +189,7 @@ function ColumnSection({
                     </SelectTrigger>
                     <SelectContent className="z-[300] max-h-[200px]">
                       <SelectItem value="__pick__" className="text-xs text-muted-foreground">Select value...</SelectItem>
-                      <SelectItem value="" className="text-xs italic text-muted-foreground">(empty)</SelectItem>
+                      <SelectItem value="__empty__" className="text-xs italic text-muted-foreground">(empty)</SelectItem>
                       {distinctValues.map(v => (
                         <SelectItem key={v} value={v} className="text-xs">{v}</SelectItem>
                       ))}
