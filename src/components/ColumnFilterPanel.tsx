@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback } from "react";
-import { ChevronRight, ChevronDown, X, Search, Plus } from "lucide-react";
+import { ChevronRight, ChevronDown, X, Search, Plus, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
