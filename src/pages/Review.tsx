@@ -4,7 +4,7 @@ import { useSearchParams } from "react-router-dom";
 import { fetchReceipts, updateReceipt, getFilePreviewUrl } from "@/lib/api";
 import { supabase } from "@/integrations/supabase/client";
 import { motion } from "framer-motion";
-import { CheckCircle2, AlertTriangle, ChevronLeft, ChevronRight, Eye, Edit3, Save, FileText, Image as ImageIcon, Loader2, ZoomIn, ZoomOut, RotateCcw, Trash2, CheckCheck, ArrowLeft, Shield } from "lucide-react";
+import { CheckCircle2, AlertTriangle, ChevronLeft, ChevronRight, ChevronDown, Eye, Edit3, Save, FileText, Image as ImageIcon, Loader2, ZoomIn, ZoomOut, RotateCcw, Trash2, CheckCheck, ArrowLeft, Shield } from "lucide-react";
 import TenantSuggestion from "@/components/TenantSuggestion";
 import PdfViewer from "@/components/PdfViewer";
 import { Button } from "@/components/ui/button";
@@ -80,6 +80,7 @@ export default function ReviewPage() {
   const [deleting, setDeleting] = useState(false);
   const [finalizing, setFinalizing] = useState(false);
   const [fileFilter, setFileFilter] = useState<string>("all");
+  const [collapsedMonths, setCollapsedMonths] = useState<Set<string>>(new Set());
 
   // Navigate to specific receipt if receiptId is in URL
   useEffect(() => {
@@ -431,7 +432,19 @@ export default function ReviewPage() {
                       onCheckedChange={() => toggleMonthAll(monthReceipts)}
                     />
                   )}
-                  <h2 className="text-base font-bold text-foreground">{label}</h2>
+                  <button
+                    onClick={() => setCollapsedMonths(prev => {
+                      const next = new Set(prev);
+                      if (next.has(monthKey)) next.delete(monthKey); else next.add(monthKey);
+                      return next;
+                    })}
+                    className="flex items-center gap-2 hover:text-accent transition-colors"
+                  >
+                    {collapsedMonths.has(monthKey)
+                      ? <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                      : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+                    <h2 className="text-base font-bold text-foreground">{label}</h2>
+                  </button>
                   <span className="text-xs text-muted-foreground vault-mono">
                     {monthReceipts.length} receipt{monthReceipts.length !== 1 ? "s" : ""} · ${monthTotal.toLocaleString("en-US", { minimumFractionDigits: 2 })}
                   </span>
@@ -492,8 +505,8 @@ export default function ReviewPage() {
                 )}
               </div>
 
-              {/* Receipts in this month */}
-              {monthReceipts.map((r, i) => {
+              {/* Receipts in this month (collapsible) */}
+              {!collapsedMonths.has(monthKey) && monthReceipts.map((r, i) => {
                 const conf = (r.confidence_scores as any) || {};
                 return (
                   <motion.div key={r.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }} className="vault-card p-4">
