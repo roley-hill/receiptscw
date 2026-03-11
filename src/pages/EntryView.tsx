@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { fetchReceipts, markAppfolioRecorded, getFilePreviewUrl, createDepositBatch, updateReceipt } from "@/lib/api";
 import { motion } from "framer-motion";
 import { Copy, Check, FileText, Layers, Loader2, ChevronRight, ChevronDown, Building2, Search, User, AlertTriangle, Trash2, CheckSquare, Square, Calendar, Filter, X, SlidersHorizontal } from "lucide-react";
+import ColumnFilterPanel, { applyColumnFilters, type ColumnFilterGroup, type FilterableColumn } from "@/components/ColumnFilterPanel";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { DbReceipt } from "@/lib/api";
@@ -172,12 +173,27 @@ export default function EntryView() {
   const [isBatchCreating, setIsBatchCreating] = useState(false);
   const [collapsedMonths, setCollapsedMonths] = useState<Set<string>>(new Set());
   const [filterPanelOpen, setFilterPanelOpen] = useState(false);
-  const [selectedSubsidies, setSelectedSubsidies] = useState<Set<string>>(new Set());
-  const [selectedPayTypes, setSelectedPayTypes] = useState<Set<string>>(new Set());
-  const [filterSearch, setFilterSearch] = useState("");
-  const [includeNoSubsidy, setIncludeNoSubsidy] = useState(false);
+  const [columnFilterGroups, setColumnFilterGroups] = useState<ColumnFilterGroup[]>([]);
 
-  // Collect unique subsidy providers and payment types from finalized receipts
+  // Define filterable columns
+  const filterableColumns: FilterableColumn[] = useMemo(() => [
+    { key: "unit", label: "Unit", accessor: (r: DbReceipt) => r.unit || "" },
+    { key: "tenant", label: "Tenant", accessor: (r: DbReceipt) => r.tenant || "" },
+    { key: "amount", label: "Amount", accessor: (r: DbReceipt) => String(r.amount) },
+    { key: "receipt_date", label: "Receipt Date", accessor: (r: DbReceipt) => r.receipt_date || "" },
+    { key: "rent_month", label: "Rent Month", accessor: (r: DbReceipt) => r.rent_month || "" },
+    { key: "payment_type", label: "Payment Type", accessor: (r: DbReceipt) => r.payment_type || "" },
+    { key: "reference", label: "Reference", accessor: (r: DbReceipt) => r.reference || "" },
+    { key: "subsidy_provider", label: "Subsidy Provider", accessor: (r: DbReceipt) => r.subsidy_provider || "" },
+    { key: "memo", label: "Memo", accessor: (r: DbReceipt) => r.memo || "" },
+    { key: "property", label: "Property", accessor: (r: DbReceipt) => r.property || "" },
+    { key: "transfer_status", label: "Transfer Status", accessor: (r: DbReceipt) => r.transfer_status || "" },
+    { key: "appfolio_recorded", label: "Recorded", accessor: (r: DbReceipt) => (r as any).appfolio_recorded ? "yes" : "no" },
+  ], []);
+
+  const hasActiveFilters = columnFilterGroups.length > 0;
+
+  // Collect unique subsidy providers for the inline dropdown
   const uniqueSubsidies = useMemo(() => {
     const set = new Set<string>();
     for (const r of finalized) {
@@ -185,39 +201,6 @@ export default function EntryView() {
     }
     return Array.from(set).sort();
   }, [finalized]);
-
-  const uniquePayTypes = useMemo(() => {
-    const set = new Set<string>();
-    for (const r of finalized) {
-      if (r.payment_type) set.add(r.payment_type);
-    }
-    return Array.from(set).sort();
-  }, [finalized]);
-
-  const hasActiveFilters = selectedSubsidies.size > 0 || selectedPayTypes.size > 0 || includeNoSubsidy;
-
-  const toggleSubsidy = (s: string) => {
-    setSelectedSubsidies(prev => {
-      const next = new Set(prev);
-      next.has(s) ? next.delete(s) : next.add(s);
-      return next;
-    });
-  };
-
-  const togglePayType = (p: string) => {
-    setSelectedPayTypes(prev => {
-      const next = new Set(prev);
-      next.has(p) ? next.delete(p) : next.add(p);
-      return next;
-    });
-  };
-
-  const clearAllFilters = () => {
-    setSelectedSubsidies(new Set());
-    setSelectedPayTypes(new Set());
-    setIncludeNoSubsidy(false);
-    setFilterSearch("");
-  };
 
   const filteredProperties = [...new Set(finalized.map((r) => canonical(r.property)).filter(Boolean))];
 
@@ -231,22 +214,11 @@ export default function EntryView() {
     return acc;
   }, {} as Record<string, Record<string, DbReceipt[]>>);
 
-  // Apply sidebar filters first
+  // Apply column filters
   const sidebarFiltered = useMemo(() => {
-    let result = finalized;
-    if (selectedSubsidies.size > 0 || includeNoSubsidy) {
-      result = result.filter(r => {
-        if (includeNoSubsidy && !r.subsidy_provider) return true;
-        if (selectedSubsidies.size > 0 && r.subsidy_provider && selectedSubsidies.has(r.subsidy_provider)) return true;
-        if (selectedSubsidies.size === 0 && includeNoSubsidy) return !r.subsidy_provider;
-        return false;
-      });
-    }
-    if (selectedPayTypes.size > 0) {
-      result = result.filter(r => r.payment_type && selectedPayTypes.has(r.payment_type));
-    }
-    return result;
-  }, [finalized, selectedSubsidies, selectedPayTypes, includeNoSubsidy]);
+    return applyColumnFilters(finalized, columnFilterGroups, filterableColumns);
+  }, [finalized, columnFilterGroups, filterableColumns]);
+
 
   const filtered = selectedProperty === "all"
     ? (selectedTenant ? sidebarFiltered.filter(r => (r.tenant || "(No Tenant)") === selectedTenant) : sidebarFiltered)
@@ -969,7 +941,7 @@ export default function EntryView() {
             Filters
             {hasActiveFilters && (
               <span className="absolute -top-1.5 -right-1.5 h-4 w-4 rounded-full bg-accent text-[10px] font-bold text-accent-foreground flex items-center justify-center">
-                {selectedSubsidies.size + selectedPayTypes.size + (includeNoSubsidy ? 1 : 0)}
+                {columnFilterGroups.reduce((sum, g) => sum + g.filters.length, 0)}
               </span>
             )}
           </Button>
@@ -1331,173 +1303,12 @@ export default function EntryView() {
 
         {/* ─── Right Filter Sidebar ─── */}
         {filterPanelOpen && (
-          <div className="vault-card p-0 overflow-hidden w-[220px] shrink-0 self-start sticky top-4">
-            <div className="px-3 py-3 border-b border-border bg-muted/30 flex items-center justify-between">
-              <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Filters</h3>
-              <div className="flex items-center gap-1">
-                {hasActiveFilters && (
-                  <Button variant="ghost" size="sm" className="h-6 text-[10px] px-1.5 text-muted-foreground" onClick={clearAllFilters}>
-                    Clear all
-                  </Button>
-                )}
-                <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => setFilterPanelOpen(false)}>
-                  <X className="h-3.5 w-3.5 text-muted-foreground" />
-                </Button>
-              </div>
-            </div>
-
-            <div className="max-h-[calc(100vh-260px)] overflow-auto">
-              {/* Search within filters */}
-              <div className="px-3 py-2 border-b border-border">
-                <div className="relative">
-                  <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
-                  <input
-                    type="text"
-                    placeholder="Search filters..."
-                    value={filterSearch}
-                    onChange={(e) => setFilterSearch(e.target.value)}
-                    className="h-7 w-full rounded-md border border-input bg-background pl-7 pr-3 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                  />
-                </div>
-              </div>
-
-              {/* Subsidy Provider filter */}
-              {uniqueSubsidies.length > 0 && (
-                <div className="border-b border-border">
-                  <div className="px-3 py-2 bg-muted/10">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Subsidy Provider</span>
-                      {selectedSubsidies.size > 0 && (
-                        <button onClick={() => setSelectedSubsidies(new Set())} className="text-[10px] text-accent hover:underline">
-                          Clear
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                  <div className="px-3 py-1.5 space-y-0.5">
-                    {uniqueSubsidies
-                      .filter(s => !filterSearch || s.toLowerCase().includes(filterSearch.toLowerCase()))
-                      .map(subsidy => {
-                        const count = finalized.filter(r => r.subsidy_provider === subsidy).length;
-                        return (
-                          <label
-                            key={subsidy}
-                            className={`flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer text-xs transition-colors ${
-                              selectedSubsidies.has(subsidy)
-                                ? "bg-accent/10 text-accent font-medium"
-                                : "text-foreground hover:bg-muted/50"
-                            }`}
-                          >
-                            <Checkbox
-                              checked={selectedSubsidies.has(subsidy)}
-                              onCheckedChange={() => toggleSubsidy(subsidy)}
-                              className="h-3.5 w-3.5"
-                            />
-                            <span className="flex-1 truncate">{subsidy}</span>
-                            <span className="text-[10px] vault-mono text-muted-foreground shrink-0">{count}</span>
-                          </label>
-                        );
-                      })}
-                    {/* No subsidy option */}
-                    {(!filterSearch || "no subsidy".includes(filterSearch.toLowerCase())) && (
-                      <label
-                        className={`flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer text-xs transition-colors ${
-                          includeNoSubsidy
-                            ? "bg-accent/10 text-accent font-medium"
-                            : "text-muted-foreground hover:bg-muted/50"
-                        }`}
-                      >
-                        <Checkbox
-                          checked={includeNoSubsidy}
-                          onCheckedChange={() => setIncludeNoSubsidy(prev => !prev)}
-                          className="h-3.5 w-3.5"
-                        />
-                        <span className="flex-1 truncate italic">No subsidy</span>
-                        <span className="text-[10px] vault-mono text-muted-foreground shrink-0">{finalized.filter(r => !r.subsidy_provider).length}</span>
-                      </label>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* Payment Type filter */}
-              {uniquePayTypes.length > 0 && (
-                <div className="border-b border-border">
-                  <div className="px-3 py-2 bg-muted/10">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Payment Type</span>
-                      {selectedPayTypes.size > 0 && (
-                        <button onClick={() => setSelectedPayTypes(new Set())} className="text-[10px] text-accent hover:underline">
-                          Clear
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                  <div className="px-3 py-1.5 space-y-0.5">
-                    {uniquePayTypes
-                      .filter(p => !filterSearch || p.toLowerCase().includes(filterSearch.toLowerCase()))
-                      .map(payType => {
-                        const count = finalized.filter(r => r.payment_type === payType).length;
-                        return (
-                          <label
-                            key={payType}
-                            className={`flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer text-xs transition-colors ${
-                              selectedPayTypes.has(payType)
-                                ? "bg-accent/10 text-accent font-medium"
-                                : "text-foreground hover:bg-muted/50"
-                            }`}
-                          >
-                            <Checkbox
-                              checked={selectedPayTypes.has(payType)}
-                              onCheckedChange={() => togglePayType(payType)}
-                              className="h-3.5 w-3.5"
-                            />
-                            <span className="flex-1 truncate">{payType}</span>
-                            <span className="text-[10px] vault-mono text-muted-foreground shrink-0">{count}</span>
-                          </label>
-                        );
-                      })}
-                  </div>
-                </div>
-              )}
-
-              {/* Active filter summary */}
-              {hasActiveFilters && (
-                <div className="px-3 py-3">
-                  <div className="text-[10px] text-muted-foreground mb-2">Active filters:</div>
-                  <div className="flex flex-wrap gap-1">
-                    {Array.from(selectedSubsidies).map(s => (
-                      <span key={s} className="inline-flex items-center gap-1 bg-accent/10 text-accent text-[10px] font-medium rounded-full px-2 py-0.5">
-                        {s}
-                        <button onClick={() => toggleSubsidy(s)} className="hover:text-accent-foreground">
-                          <X className="h-2.5 w-2.5" />
-                        </button>
-                      </span>
-                    ))}
-                    {includeNoSubsidy && (
-                      <span className="inline-flex items-center gap-1 bg-accent/10 text-accent text-[10px] font-medium rounded-full px-2 py-0.5">
-                        No subsidy
-                        <button onClick={() => setIncludeNoSubsidy(false)} className="hover:text-accent-foreground">
-                          <X className="h-2.5 w-2.5" />
-                        </button>
-                      </span>
-                    )}
-                    {Array.from(selectedPayTypes).map(p => (
-                      <span key={p} className="inline-flex items-center gap-1 bg-primary/10 text-primary text-[10px] font-medium rounded-full px-2 py-0.5">
-                        {p}
-                        <button onClick={() => togglePayType(p)} className="hover:text-primary-foreground">
-                          <X className="h-2.5 w-2.5" />
-                        </button>
-                      </span>
-                    ))}
-                  </div>
-                  <div className="mt-2 text-[10px] vault-mono text-foreground">
-                    Showing {filtered.length} of {finalized.length} receipts
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
+          <ColumnFilterPanel
+            columns={filterableColumns}
+            filterGroups={columnFilterGroups}
+            onFilterGroupsChange={setColumnFilterGroups}
+            onClose={() => setFilterPanelOpen(false)}
+          />
         )}
       </div>
 
