@@ -191,7 +191,7 @@ export default function EntryView() {
     return Array.from(set).sort();
   }, [finalized]);
 
-  const hasActiveFilters = selectedSubsidies.size > 0 || selectedPayTypes.size > 0;
+  const hasActiveFilters = selectedSubsidies.size > 0 || selectedPayTypes.size > 0 || includeNoSubsidy;
 
   const toggleSubsidy = (s: string) => {
     setSelectedSubsidies(prev => {
