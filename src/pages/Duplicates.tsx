@@ -56,6 +56,11 @@ interface ExistingReceipt {
   file_name: string | null;
   file_path: string | null;
   original_text: string | null;
+  source?: "receipt" | "appfolio";
+  charge_date?: string | null;
+  paid_amount?: number;
+  account_name?: string;
+  charged_to?: string;
 }
 
 async function fetchPendingDuplicates() {
