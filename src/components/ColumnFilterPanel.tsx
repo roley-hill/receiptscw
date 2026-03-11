@@ -87,42 +87,61 @@ function ColumnSection({
   distinctValues: string[];
 }) {
   const [open, setOpen] = useState(!!group);
-  const hasFilters = group && group.filters.length > 0;
+  
+  // Draft state: local edits before applying
+  const [draftFilters, setDraftFilters] = useState<ColumnFilter[]>(group?.filters || []);
+  const [draftLogic, setDraftLogic] = useState<"AND" | "OR">(group?.logic || "AND");
+  const [isDirty, setIsDirty] = useState(false);
+
+  // Sync draft when applied group changes externally (e.g. clear all)
+  const appliedKey = JSON.stringify(group?.filters || []) + (group?.logic || "AND");
+  const [lastAppliedKey, setLastAppliedKey] = useState(appliedKey);
+  if (appliedKey !== lastAppliedKey) {
+    setDraftFilters(group?.filters || []);
+    setDraftLogic(group?.logic || "AND");
+    setIsDirty(false);
+    setLastAppliedKey(appliedKey);
+  }
+
+  const hasAppliedFilters = group && group.filters.length > 0;
+  const hasDraftFilters = draftFilters.length > 0;
 
   const addFilter = () => {
     const newFilter: ColumnFilter = { id: nextId(), operator: "contains", value: "" };
-    if (group) {
-      onUpdate({ ...group, filters: [...group.filters, newFilter] });
-    } else {
-      onUpdate({ columnKey: column.key, logic: "AND", filters: [newFilter] });
-    }
+    setDraftFilters(prev => [...prev, newFilter]);
+    setIsDirty(true);
     setOpen(true);
   };
 
-  const updateFilter = (filterId: string, updates: Partial<ColumnFilter>) => {
-    if (!group) return;
-    onUpdate({
-      ...group,
-      filters: group.filters.map(f => f.id === filterId ? { ...f, ...updates } : f),
-    });
+  const updateDraftFilter = (filterId: string, updates: Partial<ColumnFilter>) => {
+    setDraftFilters(prev => prev.map(f => f.id === filterId ? { ...f, ...updates } : f));
+    setIsDirty(true);
   };
 
-  const removeFilter = (filterId: string) => {
-    if (!group) return;
-    const remaining = group.filters.filter(f => f.id !== filterId);
-    if (remaining.length === 0) {
+  const removeDraftFilter = (filterId: string) => {
+    const remaining = draftFilters.filter(f => f.id !== filterId);
+    setDraftFilters(remaining);
+    setIsDirty(true);
+  };
+
+  const toggleDraftLogic = () => {
+    setDraftLogic(prev => prev === "AND" ? "OR" : "AND");
+    setIsDirty(true);
+  };
+
+  const applyFilters = () => {
+    if (draftFilters.length === 0) {
       onRemoveGroup();
     } else {
-      onUpdate({ ...group, filters: remaining });
+      onUpdate({ columnKey: column.key, logic: draftLogic, filters: draftFilters });
     }
-  };
-
-  const toggleLogic = () => {
-    if (!group) return;
-    onUpdate({ ...group, logic: group.logic === "AND" ? "OR" : "AND" });
+    setIsDirty(false);
   };
 
   const clearColumn = () => {
+    setDraftFilters([]);
+    setDraftLogic("AND");
+    setIsDirty(false);
     onRemoveGroup();
   };
 
@@ -130,39 +149,42 @@ function ColumnSection({
     <div className="border-b border-border">
       <button
         onClick={() => setOpen(!open)}
-        className={`w-full flex items-center gap-2 px-3 py-2 text-xs transition-colors hover:bg-muted/50 ${hasFilters ? "bg-accent/5" : ""}`}
+        className={`w-full flex items-center gap-2 px-3 py-2 text-xs transition-colors hover:bg-muted/50 ${hasAppliedFilters ? "bg-accent/5" : ""}`}
       >
         {open ? <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" /> : <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />}
-        <span className={`flex-1 text-left ${hasFilters ? "font-semibold text-accent" : "text-foreground"}`}>{column.label}</span>
-        {hasFilters && (
+        <span className={`flex-1 text-left ${hasAppliedFilters ? "font-semibold text-accent" : "text-foreground"}`}>{column.label}</span>
+        {hasAppliedFilters && (
           <span className="text-[10px] vault-mono bg-accent/10 text-accent rounded-full px-1.5 py-0.5">{group!.filters.length}</span>
+        )}
+        {isDirty && (
+          <span className="h-1.5 w-1.5 rounded-full bg-primary shrink-0" />
         )}
       </button>
 
       {open && (
         <div className="px-3 pb-3 space-y-2">
-          {group?.filters.map((filter, i) => {
+          {draftFilters.map((filter, i) => {
             const opConfig = OPERATORS.find(o => o.value === filter.operator);
             return (
               <div key={filter.id} className="space-y-1.5">
-                {i > 0 && group.filters.length > 1 && (
+                {i > 0 && draftFilters.length > 1 && (
                   <div className="flex items-center gap-1 py-0.5">
                     <button
-                      onClick={toggleLogic}
-                      className={`text-[10px] font-bold px-2 py-0.5 rounded ${group.logic === "AND" ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"}`}
+                      onClick={toggleDraftLogic}
+                      className={`text-[10px] font-bold px-2 py-0.5 rounded ${draftLogic === "AND" ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"}`}
                     >
                       AND
                     </button>
                     <button
-                      onClick={toggleLogic}
-                      className={`text-[10px] font-bold px-2 py-0.5 rounded ${group.logic === "OR" ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"}`}
+                      onClick={toggleDraftLogic}
+                      className={`text-[10px] font-bold px-2 py-0.5 rounded ${draftLogic === "OR" ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"}`}
                     >
                       OR
                     </button>
                   </div>
                 )}
                 <div className="flex items-center gap-1">
-                  <Select value={filter.operator} onValueChange={(v) => updateFilter(filter.id, { operator: v as FilterOperator })}>
+                  <Select value={filter.operator} onValueChange={(v) => updateDraftFilter(filter.id, { operator: v as FilterOperator })}>
                     <SelectTrigger className="h-7 text-[11px] flex-1 min-w-0">
                       <SelectValue />
                     </SelectTrigger>
@@ -173,7 +195,7 @@ function ColumnSection({
                     </SelectContent>
                   </Select>
                   <button
-                    onClick={() => removeFilter(filter.id)}
+                    onClick={() => removeDraftFilter(filter.id)}
                     className="h-7 w-7 shrink-0 flex items-center justify-center rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
                   >
                     <X className="h-3 w-3" />
@@ -182,7 +204,7 @@ function ColumnSection({
                 {opConfig?.needsValue && (filter.operator === "is" || filter.operator === "is_not") ? (
                   <Select
                     value={filter.value || "__pick__"}
-                    onValueChange={(v) => updateFilter(filter.id, { value: v === "__pick__" ? "" : v === "__empty__" ? "" : v })}
+                    onValueChange={(v) => updateDraftFilter(filter.id, { value: v === "__pick__" ? "" : v === "__empty__" ? "" : v })}
                   >
                     <SelectTrigger className="h-7 text-[11px] w-full">
                       <SelectValue placeholder="Select value" />
@@ -198,7 +220,7 @@ function ColumnSection({
                 ) : opConfig?.needsValue ? (
                   <Input
                     value={filter.value}
-                    onChange={(e) => updateFilter(filter.id, { value: e.target.value })}
+                    onChange={(e) => updateDraftFilter(filter.id, { value: e.target.value })}
                     placeholder="Value"
                     className="h-7 text-xs"
                   />
@@ -215,15 +237,40 @@ function ColumnSection({
               <Plus className="h-3 w-3" />
               Add filter
             </button>
-            {hasFilters && (
+            {(hasAppliedFilters || hasDraftFilters) && (
               <button
                 onClick={clearColumn}
                 className="text-[11px] text-muted-foreground hover:text-destructive transition-colors ml-auto"
               >
-                Clear filter
+                Clear
               </button>
             )}
           </div>
+
+          {/* Apply / Cancel buttons */}
+          {isDirty && (
+            <div className="flex items-center gap-1.5 pt-1 border-t border-border mt-1">
+              <Button
+                size="sm"
+                className="h-6 text-[10px] px-3 flex-1"
+                onClick={applyFilters}
+              >
+                Apply
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 text-[10px] px-2"
+                onClick={() => {
+                  setDraftFilters(group?.filters || []);
+                  setDraftLogic(group?.logic || "AND");
+                  setIsDirty(false);
+                }}
+              >
+                Cancel
+              </Button>
+            </div>
+          )}
         </div>
       )}
     </div>
