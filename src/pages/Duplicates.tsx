@@ -250,9 +250,6 @@ export default function Duplicates() {
   const toggleExpand = (dup: SkippedDuplicate) => {
     setExpandedId(prev => prev === dup.id ? null : dup.id);
   };
-      return next;
-    });
-  };
 
   const advanceToNext = (currentId: string) => {
     const currentIndex = duplicates.findIndex((d) => d.id === currentId);
