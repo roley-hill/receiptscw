@@ -466,9 +466,12 @@ export default function ColumnFilterPanel({
               const col = columns.find(c => c.key === g.columnKey);
               return g.filters.map(f => {
                 const opLabel = OPERATORS.find(o => o.value === f.operator)?.label || f.operator;
+                const isMulti = f.operator === "is" || f.operator === "is_not";
                 const display = f.operator === "is_empty" || f.operator === "is_not_empty"
                   ? `${col?.label} ${opLabel}`
-                  : `${col?.label} ${opLabel} "${f.value}"`;
+                  : isMulti
+                    ? `${col?.label} ${opLabel} ${parseMultiValue(f.value).map(v => v === "__empty__" ? "(empty)" : v).join(", ")}`
+                    : `${col?.label} ${opLabel} "${f.value}"`;
                 return (
                   <span key={f.id} className="inline-flex items-center gap-1 bg-accent/10 text-accent text-[10px] font-medium rounded-full px-2 py-0.5 max-w-full">
                     <span className="truncate">{display}</span>
