@@ -81,8 +81,9 @@ function normalizeUnit(unit: string): string {
   return u.replace(/^0+/, "") || "0";
 }
 
-// Hook to batch-lookup which receipts are already paid in AppFolio charge_details
-// Returns Map<receiptId, latestReceiptDate>
+// Hook to batch-lookup which receipts are already paid in AppFolio charge_details.
+// Matches by tenant + unit + charge_date month = rent_month, then returns the receipt_date (payment date).
+// Returns Map<receiptId, paymentDate>
 function useAppfolioPaidLookup(receipts: any[]) {
   const { data: paidMap } = useQuery({
     queryKey: ["appfolio_paid_lookup", receipts.map(r => r.id).join(",")],
@@ -90,31 +91,36 @@ function useAppfolioPaidLookup(receipts: any[]) {
       if (receipts.length === 0) return new Map<string, string>();
       const { data: charges } = await supabase
         .from("charge_details")
-        .select("charged_to, unit, paid_amount, property_address, receipt_date")
+        .select("charged_to, unit, paid_amount, charge_date, receipt_date, charge_amount")
         .gt("paid_amount", 0);
       if (!charges || charges.length === 0) return new Map<string, string>();
 
-      // Build lookup: "normalizedName|normalizedUnit" → latest receipt_date
-      const paidKeys = new Map<string, string>();
+      // Index charges by "name|unit|chargeMonth" → latest receipt_date (payment date)
+      const chargeIndex = new Map<string, string>();
       for (const c of charges) {
         const name = normalizeName(c.charged_to || "");
         const unit = normalizeUnit(c.unit || "");
-        if (!name || !unit) continue;
-        const key = `${name}|${unit}`;
-        const date = c.receipt_date || "";
-        if (!paidKeys.has(key) || date > (paidKeys.get(key) || "")) {
-          paidKeys.set(key, date);
+        if (!name || !unit || !c.charge_date) continue;
+        // charge_date "2026-01-01" → "2026-01"
+        const chargeMonth = (c.charge_date as string).substring(0, 7);
+        const key = `${name}|${unit}|${chargeMonth}`;
+        const paymentDate = c.receipt_date || "";
+        // Keep the latest payment date for this charge period
+        if (!chargeIndex.has(key) || paymentDate > (chargeIndex.get(key) || "")) {
+          chargeIndex.set(key, paymentDate);
         }
       }
 
-      // Match receipts
+      // Match receipts: use rent_month (YYYY-MM) to find matching charge period
       const matched = new Map<string, string>();
       for (const r of receipts) {
         const tenant = normalizeName(r.tenant || "");
         const unit = normalizeUnit(r.unit || "");
-        const key = `${tenant}|${unit}`;
-        if (tenant && unit && paidKeys.has(key)) {
-          matched.set(r.id, paidKeys.get(key)!);
+        const rentMonth = r.rent_month || "";
+        if (!tenant || !unit || !rentMonth) continue;
+        const key = `${tenant}|${unit}|${rentMonth}`;
+        if (chargeIndex.has(key)) {
+          matched.set(r.id, chargeIndex.get(key)!);
         }
       }
       return matched;
