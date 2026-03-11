@@ -432,7 +432,19 @@ export default function ReviewPage() {
                       onCheckedChange={() => toggleMonthAll(monthReceipts)}
                     />
                   )}
-                  <h2 className="text-base font-bold text-foreground">{label}</h2>
+                  <button
+                    onClick={() => setCollapsedMonths(prev => {
+                      const next = new Set(prev);
+                      if (next.has(monthKey)) next.delete(monthKey); else next.add(monthKey);
+                      return next;
+                    })}
+                    className="flex items-center gap-2 hover:text-accent transition-colors"
+                  >
+                    {collapsedMonths.has(monthKey)
+                      ? <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                      : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+                    <h2 className="text-base font-bold text-foreground">{label}</h2>
+                  </button>
                   <span className="text-xs text-muted-foreground vault-mono">
                     {monthReceipts.length} receipt{monthReceipts.length !== 1 ? "s" : ""} · ${monthTotal.toLocaleString("en-US", { minimumFractionDigits: 2 })}
                   </span>
@@ -493,8 +505,8 @@ export default function ReviewPage() {
                 )}
               </div>
 
-              {/* Receipts in this month */}
-              {monthReceipts.map((r, i) => {
+              {/* Receipts in this month (collapsible) */}
+              {!collapsedMonths.has(monthKey) && monthReceipts.map((r, i) => {
                 const conf = (r.confidence_scores as any) || {};
                 return (
                   <motion.div key={r.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }} className="vault-card p-4">
