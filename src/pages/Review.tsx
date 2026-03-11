@@ -768,6 +768,7 @@ function ReviewDetail({
             {receipt.status === "needs_review" && <span className="vault-badge-warning">Needs Review</span>}
             {receipt.status === "exception" && <span className="vault-badge-error flex items-center gap-1"><AlertTriangle className="h-3 w-3" /> Exception</span>}
             {Number(receipt.amount) < 0 && <span className="vault-badge-deduction">Deduction</span>}
+            {isPaidInAppfolio && <AppfolioPaidBadge />}
           </div>
           <div className="space-y-3">
             <FieldRow label="Receipt ID" value={receipt.receipt_id} confidence={1} readOnly />
