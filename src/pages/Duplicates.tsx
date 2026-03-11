@@ -434,28 +434,46 @@ export default function Duplicates() {
 
                         {/* Existing record */}
                         <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-2">
-                          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Existing Record ({dup.existing_receipt_id})</p>
+                          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                            {existing?.source === "appfolio" ? "AppFolio Charge Record" : `Existing Record (${dup.existing_receipt_id})`}
+                          </p>
                           {isLoadingThis ? (
                             <div className="flex items-center justify-center py-6">
                               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
                             </div>
                           ) : existing ? (
-                            <>
-                              <CompareField label="Tenant" value={existing.tenant} />
-                              <CompareField label="Property" value={existing.property} />
-                              <CompareField label="Unit" value={existing.unit} />
-                              <CompareField label="Amount" value={`$${Number(existing.amount).toFixed(2)}`} />
-                              <CompareField label="Date" value={existing.receipt_date || "—"} />
-                              <CompareField label="Rent Month" value={existing.rent_month || "—"} />
-                              <CompareField label="Payment" value={existing.payment_type || "—"} />
-                              <CompareField label="Reference" value={existing.reference || "—"} />
-                              <FileField
-                                label="File"
-                                value={existing.file_name || "—"}
-                                hasFile={!!existing.file_path}
-                                onView={() => openPreview(existing.file_path, existing.file_name, existing.original_text)}
-                              />
-                            </>
+                            existing.source === "appfolio" ? (
+                              <>
+                                <CompareField label="Charged To" value={existing.charged_to || existing.tenant} />
+                                <CompareField label="Property" value={existing.property} />
+                                <CompareField label="Unit" value={existing.unit} />
+                                <CompareField label="Paid Amount" value={`$${Number(existing.paid_amount ?? existing.amount).toFixed(2)}`} />
+                                <CompareField label="Charge Date" value={existing.charge_date || "—"} />
+                                <CompareField label="Receipt Date" value={existing.receipt_date || "—"} />
+                                <CompareField label="Account" value={existing.account_name || "—"} />
+                                <CompareField label="Reference" value={existing.reference || "—"} />
+                                <div className="pt-1 mt-1 border-t border-border">
+                                  <span className="text-[10px] text-accent font-medium">✓ Already paid in AppFolio</span>
+                                </div>
+                              </>
+                            ) : (
+                              <>
+                                <CompareField label="Tenant" value={existing.tenant} />
+                                <CompareField label="Property" value={existing.property} />
+                                <CompareField label="Unit" value={existing.unit} />
+                                <CompareField label="Amount" value={`$${Number(existing.amount).toFixed(2)}`} />
+                                <CompareField label="Date" value={existing.receipt_date || "—"} />
+                                <CompareField label="Rent Month" value={existing.rent_month || "—"} />
+                                <CompareField label="Payment" value={existing.payment_type || "—"} />
+                                <CompareField label="Reference" value={existing.reference || "—"} />
+                                <FileField
+                                  label="File"
+                                  value={existing.file_name || "—"}
+                                  hasFile={!!existing.file_path}
+                                  onView={() => openPreview(existing.file_path, existing.file_name, existing.original_text)}
+                                />
+                              </>
+                            )
                           ) : (
                             <p className="text-xs text-muted-foreground py-4">Could not load existing record.</p>
                           )}
