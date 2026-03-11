@@ -63,6 +63,44 @@ function useSubsidyProviders() {
   return providers;
 }
 
+// Hook to batch-lookup which receipts are already paid in AppFolio charge_details
+function useAppfolioPaidLookup(receipts: any[]) {
+  const { data: paidSet } = useQuery({
+    queryKey: ["appfolio_paid_lookup", receipts.map(r => r.id).join(",")],
+    queryFn: async () => {
+      if (receipts.length === 0) return new Set<string>();
+      // Fetch all charge_details with paid_amount > 0
+      const { data: charges } = await supabase
+        .from("charge_details")
+        .select("charged_to, unit, paid_amount, property_address")
+        .gt("paid_amount", 0);
+      if (!charges || charges.length === 0) return new Set<string>();
+
+      // Build a lookup set of "normalizedName|normalizedUnit" from paid charges
+      const paidKeys = new Set<string>();
+      for (const c of charges) {
+        const name = (c.charged_to || "").trim().toLowerCase();
+        const unit = (c.unit || "").replace(/^#/, "").trim().toLowerCase();
+        if (name && unit) paidKeys.add(`${name}|${unit}`);
+      }
+
+      // Match receipts against paid charges
+      const matched = new Set<string>();
+      for (const r of receipts) {
+        const tenant = (r.tenant || "").trim().toLowerCase();
+        const unit = (r.unit || "").replace(/^#/, "").trim().toLowerCase();
+        if (tenant && unit && paidKeys.has(`${tenant}|${unit}`)) {
+          matched.add(r.id);
+        }
+      }
+      return matched;
+    },
+    staleTime: 60000,
+    enabled: receipts.length > 0,
+  });
+  return paidSet || new Set<string>();
+}
+
 export default function ReviewPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const targetReceiptId = searchParams.get("receiptId");
