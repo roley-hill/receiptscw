@@ -226,11 +226,23 @@ export default function EntryView() {
     return acc;
   }, {} as Record<string, Record<string, DbReceipt[]>>);
 
+  // Apply sidebar filters first
+  const sidebarFiltered = useMemo(() => {
+    let result = finalized;
+    if (selectedSubsidies.size > 0) {
+      result = result.filter(r => r.subsidy_provider && selectedSubsidies.has(r.subsidy_provider));
+    }
+    if (selectedPayTypes.size > 0) {
+      result = result.filter(r => r.payment_type && selectedPayTypes.has(r.payment_type));
+    }
+    return result;
+  }, [finalized, selectedSubsidies, selectedPayTypes]);
+
   const filtered = selectedProperty === "all"
-    ? (selectedTenant ? finalized.filter(r => (r.tenant || "(No Tenant)") === selectedTenant) : finalized)
+    ? (selectedTenant ? sidebarFiltered.filter(r => (r.tenant || "(No Tenant)") === selectedTenant) : sidebarFiltered)
     : selectedTenant
-      ? finalized.filter(r => canonical(r.property) === selectedProperty && (r.tenant || "(No Tenant)") === selectedTenant)
-      : finalized.filter(r => canonical(r.property) === selectedProperty);
+      ? sidebarFiltered.filter(r => canonical(r.property) === selectedProperty && (r.tenant || "(No Tenant)") === selectedTenant)
+      : sidebarFiltered.filter(r => canonical(r.property) === selectedProperty);
 
   // Group properties by ownership entity
   const entityGroups = useMemo(() => {
