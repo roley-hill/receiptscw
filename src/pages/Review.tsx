@@ -595,7 +595,7 @@ export default function ReviewPage() {
                             {r.status === "needs_review" && <span className="vault-badge-warning text-[10px]">Needs Review</span>}
                             {conf.tenantStatus && <TenantStatusBadge status={conf.tenantStatus} />}
                             {conf.chargeType && <ChargeTypeBadge chargeType={conf.chargeType} />}
-                            {appfolioPaidIds.has(r.id) && <AppfolioPaidBadge />}
+                            {appfolioPaidIds.has(r.id) && <AppfolioPaidBadge recordedDate={appfolioPaidIds.get(r.id)} />}
                           </div>
                           <p className="text-xs text-muted-foreground mt-0.5">
                             {r.property || "Unknown Property"} · Unit {r.unit || "?"} · ${Number(r.amount).toLocaleString("en-US", { minimumFractionDigits: 2 })} · {r.file_name || "No file"}
