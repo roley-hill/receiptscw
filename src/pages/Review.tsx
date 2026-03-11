@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
-import { TenantStatusBadge, ChargeTypeBadge, UnverifiedBadge } from "@/components/StatusBadges";
+import { TenantStatusBadge, ChargeTypeBadge, UnverifiedBadge, AppfolioPaidBadge } from "@/components/StatusBadges";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
