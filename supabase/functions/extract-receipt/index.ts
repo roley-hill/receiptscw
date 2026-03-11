@@ -1294,6 +1294,68 @@ ${knownTenantsList}` : ""}`;
         }
       }
 
+      // ---- APPFOLIO PAID-AMOUNT CROSS-CHECK ----
+      // If charge_details shows this tenant/unit/amount already has a payment recorded, flag as duplicate
+      if (allChargeDetails.length > 0 && item.tenant && item.amount) {
+        const itemTenant = (item.tenant || "").toLowerCase().trim();
+        const itemUnit = (item.unit || "").replace(/^#/, "").trim().toLowerCase();
+        const itemAmount = Math.abs(item.amount);
+
+        const alreadyPaid = allChargeDetails.find(cd => {
+          const cdTenant = (cd.charged_to || "").toLowerCase().trim();
+          const cdUnit = (cd.unit || "").replace(/^#/, "").trim().toLowerCase();
+          const cdPaid = Math.abs(cd.paid_amount);
+
+          const tenantMatch = cdTenant && itemTenant && (
+            cdTenant === itemTenant || cdTenant.includes(itemTenant) || itemTenant.includes(cdTenant)
+          );
+          const unitMatch = cdUnit && itemUnit && (
+            cdUnit === itemUnit || cdUnit.endsWith("-" + itemUnit) || itemUnit.endsWith("-" + cdUnit)
+          );
+          const amountMatch = Math.abs(cdPaid - itemAmount) < 0.01;
+
+          return amountMatch && (tenantMatch || unitMatch);
+        });
+
+        if (alreadyPaid) {
+          console.log(`AppFolio cross-check: "${item.tenant}" $${itemAmount} already recorded (paid_amount=$${alreadyPaid.paid_amount} for ${alreadyPaid.charged_to} @ ${alreadyPaid.unit})`);
+          duplicates.push({
+            tenant: item.tenant,
+            amount: item.amount,
+            receipt_date: item.receipt_date,
+            existing_receipt_id: "APPFOLIO_ALREADY_RECORDED",
+            reason: "appfolio_paid",
+          });
+          // Store in skipped_duplicates for operator review
+          await supabase.from("skipped_duplicates").insert({
+            user_id: userId,
+            tenant: item.tenant || "",
+            property: item.property || "",
+            unit: item.unit || "",
+            amount: item.amount || 0,
+            receipt_date: item.receipt_date || null,
+            rent_month: item.rent_month || null,
+            payment_type: item.payment_type || "",
+            reference: item.reference || "",
+            memo: item.memo || "",
+            file_name: file.name,
+            file_path: filePath,
+            existing_receipt_id: "APPFOLIO_ALREADY_RECORDED",
+            status: "pending",
+            confidence_scores: {
+              property: item.property_confidence || 0,
+              unit: item.unit_confidence || 0,
+              tenant: item.tenant_confidence || 0,
+              amount: item.amount_confidence || 0,
+              receiptDate: item.receipt_date_confidence || 0,
+              paymentType: item.payment_type_confidence || 0,
+              appfolioPaidMatch: true,
+            },
+          });
+          continue;
+        }
+      }
+
       // Infer payment_type from reference if not already set or generic
       if (item.reference && (!item.payment_type || item.payment_type === "" || item.payment_type === "other")) {
         const ref = item.reference.toUpperCase();
