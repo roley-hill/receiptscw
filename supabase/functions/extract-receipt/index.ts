@@ -1221,7 +1221,8 @@ ${knownTenantsList}` : ""}`;
           .eq("amount", item.amount)
           .eq("receipt_date", item.receipt_date)
           .eq("property", item.property || "")
-          .eq("unit", item.unit || "");
+          .eq("unit", item.unit || "")
+          .is("deleted_at", null);
 
         if (item.rent_month) {
           reuploadQuery = reuploadQuery.eq("rent_month", item.rent_month);
