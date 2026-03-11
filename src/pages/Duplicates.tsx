@@ -142,13 +142,13 @@ export default function Duplicates() {
     setPreviewUrl(null);
   };
 
-  const handleBulkDelete = async () => {
+  const handleBulkDelete = async (ids?: string[]) => {
     setBulkDeleting(true);
     try {
-      const ids = duplicates.map((d) => d.id);
-      const { error } = await supabase.from("skipped_duplicates").delete().in("id", ids);
+      const toDelete = ids || duplicates.map((d) => d.id);
+      const { error } = await supabase.from("skipped_duplicates").delete().in("id", toDelete);
       if (error) throw error;
-      toast.success(`Deleted ${ids.length} duplicate(s)`);
+      toast.success(`Deleted ${toDelete.length} duplicate(s)`);
       setExpandedId(null);
       queryClient.invalidateQueries({ queryKey: ["skipped_duplicates"] });
       queryClient.invalidateQueries({ queryKey: ["pending_counts"] });
