@@ -302,17 +302,28 @@ export default function ColumnFilterPanel({
         </div>
       </div>
 
-      {/* Column sections */}
       <div className="max-h-[calc(100vh-260px)] overflow-auto">
-        {filteredColumns.map(col => (
-          <ColumnSection
-            key={col.key}
-            column={col}
-            group={filterGroups.find(g => g.columnKey === col.key)}
-            onUpdate={(g) => updateGroup(col.key, g)}
-            onRemoveGroup={() => removeGroup(col.key)}
-          />
-        ))}
+        {filteredColumns.map(col => {
+          const distinctValues = useMemo(() => {
+            const set = new Set<string>();
+            for (const row of filteredRows) {
+              const v = col.accessor(row);
+              if (v && v.trim()) set.add(v);
+            }
+            return Array.from(set).sort();
+          }, [filteredRows, col]);
+
+          return (
+            <ColumnSection
+              key={col.key}
+              column={col}
+              group={filterGroups.find(g => g.columnKey === col.key)}
+              onUpdate={(g) => updateGroup(col.key, g)}
+              onRemoveGroup={() => removeGroup(col.key)}
+              distinctValues={distinctValues}
+            />
+          );
+        })}
       </div>
 
       {/* Active filter summary */}
