@@ -82,33 +82,39 @@ function normalizeUnit(unit: string): string {
 }
 
 // Hook to batch-lookup which receipts are already paid in AppFolio charge_details
+// Returns Map<receiptId, latestReceiptDate>
 function useAppfolioPaidLookup(receipts: any[]) {
-  const { data: paidSet } = useQuery({
+  const { data: paidMap } = useQuery({
     queryKey: ["appfolio_paid_lookup", receipts.map(r => r.id).join(",")],
     queryFn: async () => {
-      if (receipts.length === 0) return new Set<string>();
-      // Fetch all charge_details with paid_amount > 0
+      if (receipts.length === 0) return new Map<string, string>();
       const { data: charges } = await supabase
         .from("charge_details")
-        .select("charged_to, unit, paid_amount, property_address")
+        .select("charged_to, unit, paid_amount, property_address, receipt_date")
         .gt("paid_amount", 0);
-      if (!charges || charges.length === 0) return new Set<string>();
+      if (!charges || charges.length === 0) return new Map<string, string>();
 
-      // Build a lookup set of "normalizedName|normalizedUnit" from paid charges
-      const paidKeys = new Set<string>();
+      // Build lookup: "normalizedName|normalizedUnit" → latest receipt_date
+      const paidKeys = new Map<string, string>();
       for (const c of charges) {
         const name = normalizeName(c.charged_to || "");
         const unit = normalizeUnit(c.unit || "");
-        if (name && unit) paidKeys.add(`${name}|${unit}`);
+        if (!name || !unit) continue;
+        const key = `${name}|${unit}`;
+        const date = c.receipt_date || "";
+        if (!paidKeys.has(key) || date > (paidKeys.get(key) || "")) {
+          paidKeys.set(key, date);
+        }
       }
 
-      // Match receipts against paid charges
-      const matched = new Set<string>();
+      // Match receipts
+      const matched = new Map<string, string>();
       for (const r of receipts) {
         const tenant = normalizeName(r.tenant || "");
         const unit = normalizeUnit(r.unit || "");
-        if (tenant && unit && paidKeys.has(`${tenant}|${unit}`)) {
-          matched.add(r.id);
+        const key = `${tenant}|${unit}`;
+        if (tenant && unit && paidKeys.has(key)) {
+          matched.set(r.id, paidKeys.get(key)!);
         }
       }
       return matched;
@@ -116,7 +122,7 @@ function useAppfolioPaidLookup(receipts: any[]) {
     staleTime: 60000,
     enabled: receipts.length > 0,
   });
-  return paidSet || new Set<string>();
+  return paidMap || new Map<string, string>();
 }
 
 export default function ReviewPage() {
@@ -589,7 +595,7 @@ export default function ReviewPage() {
                             {r.status === "needs_review" && <span className="vault-badge-warning text-[10px]">Needs Review</span>}
                             {conf.tenantStatus && <TenantStatusBadge status={conf.tenantStatus} />}
                             {conf.chargeType && <ChargeTypeBadge chargeType={conf.chargeType} />}
-                            {appfolioPaidIds.has(r.id) && <AppfolioPaidBadge />}
+                            {appfolioPaidIds.has(r.id) && <AppfolioPaidBadge recordedDate={appfolioPaidIds.get(r.id)} />}
                           </div>
                           <p className="text-xs text-muted-foreground mt-0.5">
                             {r.property || "Unknown Property"} · Unit {r.unit || "?"} · ${Number(r.amount).toLocaleString("en-US", { minimumFractionDigits: 2 })} · {r.file_name || "No file"}
@@ -643,8 +649,8 @@ function ReviewDetail({
   const currentAmount = parseFloat(getVal("amount", String(receipt.amount))) || receipt.amount;
   const chargeSubsidy = useSubsidyLookup(currentUnit, currentAmount);
   const subsidyProviders = useSubsidyProviders();
-  const detailPaidSet = useAppfolioPaidLookup([receipt]);
-  const isPaidInAppfolio = detailPaidSet.has(receipt.id);
+  const detailPaidMap = useAppfolioPaidLookup([receipt]);
+  const isPaidInAppfolio = detailPaidMap.has(receipt.id);
 
   // Subsidy value: manual edit > existing receipt value > charge_details lookup
   const subsidyValue = edits["subsidy_provider"] !== undefined
@@ -768,7 +774,7 @@ function ReviewDetail({
             {receipt.status === "needs_review" && <span className="vault-badge-warning">Needs Review</span>}
             {receipt.status === "exception" && <span className="vault-badge-error flex items-center gap-1"><AlertTriangle className="h-3 w-3" /> Exception</span>}
             {Number(receipt.amount) < 0 && <span className="vault-badge-deduction">Deduction</span>}
-            {isPaidInAppfolio && <AppfolioPaidBadge />}
+            {isPaidInAppfolio && <AppfolioPaidBadge recordedDate={detailPaidMap.get(receipt.id)} />}
           </div>
           <div className="space-y-3">
             <FieldRow label="Receipt ID" value={receipt.receipt_id} confidence={1} readOnly />

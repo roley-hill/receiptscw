@@ -20,10 +20,16 @@ export function ChargeTypeBadge({ chargeType }: { chargeType: string }) {
   return <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold bg-muted text-muted-foreground ring-1 ring-border">{chargeType}</span>;
 }
 
-export function AppfolioPaidBadge() {
+export function AppfolioPaidBadge({ recordedDate }: { recordedDate?: string }) {
+  const dateLabel = recordedDate
+    ? (() => {
+        const d = new Date(recordedDate + "T00:00:00");
+        return ` ${d.getMonth() + 1}/${d.getDate()}/${String(d.getFullYear()).slice(-2)}`;
+      })()
+    : "";
   return (
-    <span className="inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-[10px] font-semibold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 ring-1 ring-emerald-500/20" title="This receipt is already recorded as paid in AppFolio">
-      ✓ Paid in AppFolio
+    <span className="inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-[10px] font-semibold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 ring-1 ring-emerald-500/20" title={`Already recorded as paid in AppFolio${recordedDate ? ` on ${recordedDate}` : ""}`}>
+      ✓ Paid in AF{dateLabel}
     </span>
   );
 }
