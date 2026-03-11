@@ -1162,7 +1162,8 @@ ${knownTenantsList}` : ""}`;
           .eq("amount", item.amount)
           .eq("receipt_date", item.receipt_date)
           .eq("property", item.property || "")
-          .eq("unit", item.unit || "");
+          .eq("unit", item.unit || "")
+          .is("deleted_at", null);
 
         // Only match rent_month: if both have a value they must be equal, 
         // if the new item has a rent_month we filter by it
