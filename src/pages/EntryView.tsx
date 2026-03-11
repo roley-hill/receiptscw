@@ -1308,6 +1308,7 @@ export default function EntryView() {
             filterGroups={columnFilterGroups}
             onFilterGroupsChange={setColumnFilterGroups}
             onClose={() => setFilterPanelOpen(false)}
+            filteredRows={sidebarFiltered}
           />
         )}
       </div>
