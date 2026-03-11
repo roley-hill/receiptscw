@@ -112,6 +112,7 @@ export default function ReviewPage() {
   const { role } = useAuth();
   const isAdmin = role === "admin";
   const reviewable = allReceipts.filter((r) => r.status === "needs_review" || r.status === "exception");
+  const appfolioPaidIds = useAppfolioPaidLookup(reviewable);
 
   const [activeReceiptId, setActiveReceiptId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
