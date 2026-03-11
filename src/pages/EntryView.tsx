@@ -173,12 +173,27 @@ export default function EntryView() {
   const [isBatchCreating, setIsBatchCreating] = useState(false);
   const [collapsedMonths, setCollapsedMonths] = useState<Set<string>>(new Set());
   const [filterPanelOpen, setFilterPanelOpen] = useState(false);
-  const [selectedSubsidies, setSelectedSubsidies] = useState<Set<string>>(new Set());
-  const [selectedPayTypes, setSelectedPayTypes] = useState<Set<string>>(new Set());
-  const [filterSearch, setFilterSearch] = useState("");
-  const [includeNoSubsidy, setIncludeNoSubsidy] = useState(false);
+  const [columnFilterGroups, setColumnFilterGroups] = useState<ColumnFilterGroup[]>([]);
 
-  // Collect unique subsidy providers and payment types from finalized receipts
+  // Define filterable columns
+  const filterableColumns: FilterableColumn[] = useMemo(() => [
+    { key: "unit", label: "Unit", accessor: (r: DbReceipt) => r.unit || "" },
+    { key: "tenant", label: "Tenant", accessor: (r: DbReceipt) => r.tenant || "" },
+    { key: "amount", label: "Amount", accessor: (r: DbReceipt) => String(r.amount) },
+    { key: "receipt_date", label: "Receipt Date", accessor: (r: DbReceipt) => r.receipt_date || "" },
+    { key: "rent_month", label: "Rent Month", accessor: (r: DbReceipt) => r.rent_month || "" },
+    { key: "payment_type", label: "Payment Type", accessor: (r: DbReceipt) => r.payment_type || "" },
+    { key: "reference", label: "Reference", accessor: (r: DbReceipt) => r.reference || "" },
+    { key: "subsidy_provider", label: "Subsidy Provider", accessor: (r: DbReceipt) => r.subsidy_provider || "" },
+    { key: "memo", label: "Memo", accessor: (r: DbReceipt) => r.memo || "" },
+    { key: "property", label: "Property", accessor: (r: DbReceipt) => r.property || "" },
+    { key: "transfer_status", label: "Transfer Status", accessor: (r: DbReceipt) => r.transfer_status || "" },
+    { key: "appfolio_recorded", label: "Recorded", accessor: (r: DbReceipt) => (r as any).appfolio_recorded ? "yes" : "no" },
+  ], []);
+
+  const hasActiveFilters = columnFilterGroups.length > 0;
+
+  // Collect unique subsidy providers for the inline dropdown
   const uniqueSubsidies = useMemo(() => {
     const set = new Set<string>();
     for (const r of finalized) {
@@ -186,39 +201,6 @@ export default function EntryView() {
     }
     return Array.from(set).sort();
   }, [finalized]);
-
-  const uniquePayTypes = useMemo(() => {
-    const set = new Set<string>();
-    for (const r of finalized) {
-      if (r.payment_type) set.add(r.payment_type);
-    }
-    return Array.from(set).sort();
-  }, [finalized]);
-
-  const hasActiveFilters = selectedSubsidies.size > 0 || selectedPayTypes.size > 0 || includeNoSubsidy;
-
-  const toggleSubsidy = (s: string) => {
-    setSelectedSubsidies(prev => {
-      const next = new Set(prev);
-      next.has(s) ? next.delete(s) : next.add(s);
-      return next;
-    });
-  };
-
-  const togglePayType = (p: string) => {
-    setSelectedPayTypes(prev => {
-      const next = new Set(prev);
-      next.has(p) ? next.delete(p) : next.add(p);
-      return next;
-    });
-  };
-
-  const clearAllFilters = () => {
-    setSelectedSubsidies(new Set());
-    setSelectedPayTypes(new Set());
-    setIncludeNoSubsidy(false);
-    setFilterSearch("");
-  };
 
   const filteredProperties = [...new Set(finalized.map((r) => canonical(r.property)).filter(Boolean))];
 
@@ -232,22 +214,11 @@ export default function EntryView() {
     return acc;
   }, {} as Record<string, Record<string, DbReceipt[]>>);
 
-  // Apply sidebar filters first
+  // Apply column filters
   const sidebarFiltered = useMemo(() => {
-    let result = finalized;
-    if (selectedSubsidies.size > 0 || includeNoSubsidy) {
-      result = result.filter(r => {
-        if (includeNoSubsidy && !r.subsidy_provider) return true;
-        if (selectedSubsidies.size > 0 && r.subsidy_provider && selectedSubsidies.has(r.subsidy_provider)) return true;
-        if (selectedSubsidies.size === 0 && includeNoSubsidy) return !r.subsidy_provider;
-        return false;
-      });
-    }
-    if (selectedPayTypes.size > 0) {
-      result = result.filter(r => r.payment_type && selectedPayTypes.has(r.payment_type));
-    }
-    return result;
-  }, [finalized, selectedSubsidies, selectedPayTypes, includeNoSubsidy]);
+    return applyColumnFilters(finalized, columnFilterGroups, filterableColumns);
+  }, [finalized, columnFilterGroups, filterableColumns]);
+
 
   const filtered = selectedProperty === "all"
     ? (selectedTenant ? sidebarFiltered.filter(r => (r.tenant || "(No Tenant)") === selectedTenant) : sidebarFiltered)
