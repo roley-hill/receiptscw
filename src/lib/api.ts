@@ -8,6 +8,7 @@ export async function fetchReceipts() {
   const { data, error } = await supabase
     .from("receipts")
     .select("*")
+    .is("deleted_at", null)
     .order("uploaded_at", { ascending: false });
   if (error) throw error;
   return data;
@@ -18,6 +19,7 @@ export async function fetchReceiptsByStatus(status: "needs_review" | "finalized"
     .from("receipts")
     .select("*")
     .eq("status", status)
+    .is("deleted_at", null)
     .order("uploaded_at", { ascending: false });
   if (error) throw error;
   return data;

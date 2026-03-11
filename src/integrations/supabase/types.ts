@@ -477,6 +477,7 @@ export type Database = {
           batch_id: string | null
           confidence_scores: Json | null
           created_at: string
+          deleted_at: string | null
           file_content_hash: string | null
           file_name: string | null
           file_path: string | null
@@ -510,6 +511,7 @@ export type Database = {
           batch_id?: string | null
           confidence_scores?: Json | null
           created_at?: string
+          deleted_at?: string | null
           file_content_hash?: string | null
           file_name?: string | null
           file_path?: string | null
@@ -543,6 +545,7 @@ export type Database = {
           batch_id?: string | null
           confidence_scores?: Json | null
           created_at?: string
+          deleted_at?: string | null
           file_content_hash?: string | null
           file_name?: string | null
           file_path?: string | null

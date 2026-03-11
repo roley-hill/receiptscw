@@ -364,10 +364,8 @@ export default function EntryView() {
   // ─── Inline bulk action buttons for a set of receipts ───
   const bulkDeleteMutation = useMutation({
     mutationFn: async (ids: string[]) => {
-      for (const id of ids) {
-        const { error } = await supabase.from("receipts").delete().eq("id", id);
-        if (error) throw error;
-      }
+      const { softDeleteReceipts } = await import("@/hooks/useAdminDelete");
+      await softDeleteReceipts(ids, user?.id);
     },
     onSuccess: (_data, ids) => {
       toast({ title: `${ids.length} receipt${ids.length > 1 ? "s" : ""} deleted` });

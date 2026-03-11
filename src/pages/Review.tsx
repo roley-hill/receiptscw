@@ -129,11 +129,8 @@ export default function ReviewPage() {
     setDeleting(true);
     try {
       const ids = Array.from(selected);
-      for (let i = 0; i < ids.length; i += 100) {
-        const chunk = ids.slice(i, i + 100);
-        const { error } = await supabase.from("receipts").delete().in("id", chunk);
-        if (error) throw error;
-      }
+      const { softDeleteReceipts } = await import("@/hooks/useAdminDelete");
+      await softDeleteReceipts(ids);
       toast.success(`Deleted ${selected.size} receipt(s)`);
       setSelected(new Set());
       queryClient.invalidateQueries({ queryKey: ["receipts"] });
@@ -171,11 +168,8 @@ export default function ReviewPage() {
       const idsToDelete = reviewable
         .filter((r) => (r.file_name || "No file") === fileName)
         .map((r) => r.id);
-      for (let i = 0; i < idsToDelete.length; i += 100) {
-        const chunk = idsToDelete.slice(i, i + 100);
-        const { error } = await supabase.from("receipts").delete().in("id", chunk);
-        if (error) throw error;
-      }
+      const { softDeleteReceipts } = await import("@/hooks/useAdminDelete");
+      await softDeleteReceipts(idsToDelete);
       toast.success(`Deleted ${idsToDelete.length} receipt(s) from "${fileName}"`);
       setSelected(new Set());
       if (fileFilter === fileName) setFileFilter("all");
@@ -525,8 +519,8 @@ function ReviewDetail({
 
   const handleDelete = async () => {
     try {
-      const { error } = await supabase.from("receipts").delete().eq("id", receipt.id);
-      if (error) throw error;
+      const { softDeleteReceipts } = await import("@/hooks/useAdminDelete");
+      await softDeleteReceipts([receipt.id]);
       toast.success("Receipt deleted");
       queryClient.invalidateQueries({ queryKey: ["receipts"] });
       onBack();
