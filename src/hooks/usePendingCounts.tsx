@@ -6,9 +6,9 @@ export function usePendingCounts() {
     queryKey: ["pending_counts"],
     queryFn: async () => {
       const [reviewRes, entryRes, exceptionsRes, duplicatesRes] = await Promise.all([
-        supabase.from("receipts").select("id", { count: "exact", head: true }).eq("status", "needs_review"),
-        supabase.from("receipts").select("id", { count: "exact", head: true }).eq("status", "finalized").is("batch_id", null),
-        supabase.from("receipts").select("id", { count: "exact", head: true }).eq("status", "exception"),
+        supabase.from("receipts").select("id", { count: "exact", head: true }).eq("status", "needs_review").is("deleted_at", null),
+        supabase.from("receipts").select("id", { count: "exact", head: true }).eq("status", "finalized").is("batch_id", null).is("deleted_at", null),
+        supabase.from("receipts").select("id", { count: "exact", head: true }).eq("status", "exception").is("deleted_at", null),
         supabase.from("skipped_duplicates").select("id", { count: "exact", head: true }).eq("status", "pending"),
       ]);
       return {
