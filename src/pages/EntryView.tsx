@@ -168,6 +168,51 @@ export default function EntryView() {
   const [batchCreationType, setBatchCreationType] = useState<"individual" | "grouped">("individual");
   const [isBatchCreating, setIsBatchCreating] = useState(false);
   const [collapsedMonths, setCollapsedMonths] = useState<Set<string>>(new Set());
+  const [filterPanelOpen, setFilterPanelOpen] = useState(false);
+  const [selectedSubsidies, setSelectedSubsidies] = useState<Set<string>>(new Set());
+  const [selectedPayTypes, setSelectedPayTypes] = useState<Set<string>>(new Set());
+  const [filterSearch, setFilterSearch] = useState("");
+
+  // Collect unique subsidy providers and payment types from finalized receipts
+  const uniqueSubsidies = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of finalized) {
+      if (r.subsidy_provider) set.add(r.subsidy_provider);
+    }
+    return Array.from(set).sort();
+  }, [finalized]);
+
+  const uniquePayTypes = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of finalized) {
+      if (r.payment_type) set.add(r.payment_type);
+    }
+    return Array.from(set).sort();
+  }, [finalized]);
+
+  const hasActiveFilters = selectedSubsidies.size > 0 || selectedPayTypes.size > 0;
+
+  const toggleSubsidy = (s: string) => {
+    setSelectedSubsidies(prev => {
+      const next = new Set(prev);
+      next.has(s) ? next.delete(s) : next.add(s);
+      return next;
+    });
+  };
+
+  const togglePayType = (p: string) => {
+    setSelectedPayTypes(prev => {
+      const next = new Set(prev);
+      next.has(p) ? next.delete(p) : next.add(p);
+      return next;
+    });
+  };
+
+  const clearAllFilters = () => {
+    setSelectedSubsidies(new Set());
+    setSelectedPayTypes(new Set());
+    setFilterSearch("");
+  };
 
   const filteredProperties = [...new Set(finalized.map((r) => canonical(r.property)).filter(Boolean))];
 
