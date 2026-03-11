@@ -48,6 +48,42 @@ serve(async (req) => {
     } catch { /* no body or not JSON */ }
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+    // Auto-detect date range from earliest receipt if no from_date provided
+    if (!fromDate) {
+      const { data: earliestReceipt } = await supabase
+        .from("receipts")
+        .select("receipt_date")
+        .not("receipt_date", "is", null)
+        .not("deleted_at", "is", null) // include all non-deleted
+        .order("receipt_date", { ascending: true })
+        .limit(1);
+      
+      // Also check for receipts where deleted_at IS null (active receipts)
+      const { data: earliestActive } = await supabase
+        .from("receipts")
+        .select("receipt_date")
+        .not("receipt_date", "is", null)
+        .is("deleted_at", null)
+        .order("receipt_date", { ascending: true })
+        .limit(1);
+
+      const dates = [
+        earliestReceipt?.[0]?.receipt_date,
+        earliestActive?.[0]?.receipt_date,
+      ].filter(Boolean).sort();
+
+      if (dates.length > 0) {
+        fromDate = dates[0];
+        console.log(`Auto-detected from_date from earliest receipt: ${fromDate}`);
+      } else {
+        // Fallback: 6 months back
+        const sixMonthsAgo = new Date();
+        sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+        fromDate = sixMonthsAgo.toISOString().substring(0, 10);
+        console.log(`No receipts found, defaulting from_date to 6 months ago: ${fromDate}`);
+      }
+    }
     const appfolioBase = "https://countywidemanagement.appfolio.com";
     const basicAuth = btoa(`${clientId}:${clientSecret}`);
 
