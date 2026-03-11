@@ -370,7 +370,8 @@ export default function Duplicates() {
       <div className="space-y-3">
         {duplicates.map((dup, i) => {
           const isExpanded = expandedId === dup.id;
-          const existing = dup.existing_receipt_uuid ? existingReceipts[dup.existing_receipt_uuid] : null;
+          const cacheKey = dup.existing_receipt_uuid || `appfolio-${dup.id}`;
+          const existing = existingReceipts[cacheKey] || null;
           const isLoadingThis = loadingExisting.has(dup.id);
           const isProcessing = processing.has(dup.id);
 
