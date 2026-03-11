@@ -1399,11 +1399,21 @@ export default function EntryView() {
                         );
                       })}
                     {/* No subsidy option */}
-                    {!filterSearch && (
+                    {(!filterSearch || "no subsidy".includes(filterSearch.toLowerCase())) && (
                       <label
-                        className={`flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer text-xs transition-colors text-muted-foreground hover:bg-muted/50`}
+                        className={`flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer text-xs transition-colors ${
+                          includeNoSubsidy
+                            ? "bg-accent/10 text-accent font-medium"
+                            : "text-muted-foreground hover:bg-muted/50"
+                        }`}
                       >
-                        <span className="flex-1 truncate italic">No subsidy: {finalized.filter(r => !r.subsidy_provider).length}</span>
+                        <Checkbox
+                          checked={includeNoSubsidy}
+                          onCheckedChange={() => setIncludeNoSubsidy(prev => !prev)}
+                          className="h-3.5 w-3.5"
+                        />
+                        <span className="flex-1 truncate italic">No subsidy</span>
+                        <span className="text-[10px] vault-mono text-muted-foreground shrink-0">{finalized.filter(r => !r.subsidy_provider).length}</span>
                       </label>
                     )}
                   </div>
