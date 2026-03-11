@@ -20,6 +20,14 @@ export function ChargeTypeBadge({ chargeType }: { chargeType: string }) {
   return <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold bg-muted text-muted-foreground ring-1 ring-border">{chargeType}</span>;
 }
 
+export function AppfolioPaidBadge() {
+  return (
+    <span className="inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-[10px] font-semibold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 ring-1 ring-emerald-500/20" title="This receipt is already recorded as paid in AppFolio">
+      ✓ Paid in AppFolio
+    </span>
+  );
+}
+
 export function UnverifiedBadge({ field }: { field: string }) {
   return (
     <span className="inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-[10px] font-semibold bg-amber-500/15 text-amber-600 dark:text-amber-400 ring-1 ring-amber-500/20" title={`${field} not found in AppFolio — using receipt data`}>
