@@ -190,7 +190,7 @@ export default function DepositBatches() {
     return <div className="flex items-center justify-center py-20"><div className="h-8 w-8 border-2 border-accent border-t-transparent rounded-full animate-spin" /></div>;
   }
 
-  const hasAnyBatches = entityGroups.length > 0 || unassignedBatches.length > 0;
+  const hasAnyBatches = entityGroups.length > 0 || unassignedBatches.length > 0 || bulkBatches.length > 0;
 
   const renderEntityGroup = (entityId: string, group: EntityGroup) => {
     const isCollapsed = collapsedEntities.has(entityId);
