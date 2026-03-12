@@ -341,6 +341,91 @@ export default function DepositBatches() {
         <div className="space-y-6">
           {entityGroups.map(([entityId, group]) => renderEntityGroup(entityId, group))}
 
+          {/* Bulk Deposit Batches (cross-entity) */}
+          {bulkBatches.length > 0 && (
+            <div className="space-y-3">
+              <div className="px-1">
+                <h3 className="text-sm font-semibold text-muted-foreground">Bulk Deposit Batches</h3>
+              </div>
+              {bulkBatches.map((gs, gsIndex) => {
+                const sectionKey = `bulk__${gsIndex}`;
+                const isSectionCollapsed = collapsedSections.has(sectionKey);
+                const childBatches = gs.children.sort((a, b) => a.property.localeCompare(b.property));
+                const groupedReceipts = childBatches.flatMap(b => allReceipts.filter(r => r.batch_id === b.id));
+                const groupedTotal = groupedReceipts.reduce((s, r) => s + Number(r.amount), 0);
+                const buildingBatches = childBatches.map(b => ({ batch: b, receipts: allReceipts.filter(r => r.batch_id === b.id) }));
+                const childBatchIds = childBatches.map(b => b.id);
+
+                return (
+                  <div key={sectionKey} className="space-y-3">
+                    <div className="vault-card px-4 py-3 flex items-center justify-between">
+                      <button onClick={() => toggleSection(sectionKey)} className="group flex items-center gap-2 text-sm font-semibold text-foreground hover:opacity-80 transition-opacity cursor-pointer flex-1">
+                        {isSectionCollapsed ? <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />}
+                        <Layers className="h-3.5 w-3.5 text-accent" />
+                        <span>Bulk Deposit — {gs.parentBatch.batch_id}</span>
+                        <span className="text-xs vault-mono text-muted-foreground font-normal ml-1">
+                          {childBatches.length} properties · {groupedReceipts.length} receipts ·{" "}
+                          <button
+                            onClick={(e) => { e.stopPropagation(); copyAmount(sectionKey, groupedTotal); }}
+                            className="inline-flex items-center gap-1 hover:text-foreground transition-colors cursor-copy"
+                            title="Click to copy amount"
+                          >
+                            ${fmt(groupedTotal)}
+                            {copiedKey === sectionKey ? <Check className="h-3 w-3 text-accent" /> : <Copy className="h-3 w-3 opacity-0 group-hover:opacity-100" />}
+                          </button>
+                        </span>
+                      </button>
+                      <div className="flex gap-1">
+                        <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); setPreviewEntityId("bulk__" + gsIndex); }} title="Preview all documents">
+                          <Eye className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          variant="outline" size="sm"
+                          disabled={downloadingEntityZip === sectionKey}
+                          onClick={(e) => { e.stopPropagation(); handleEntityZipDownload(sectionKey, gs.parentBatch.property, buildingBatches); }}
+                          title="Download deposit package (ZIP)"
+                        >
+                          {downloadingEntityZip === sectionKey ? <div className="h-3.5 w-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" /> : <PackageOpen className="h-3.5 w-3.5" />}
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); downloadGroupedOwnerPDF(gs.parentBatch.property, buildingBatches); }} title="Download PDF report">
+                          <FileTextIcon className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); generateGroupedXLSX(gs.parentBatch.property, buildingBatches); }} title="Download XLSX report">
+                          <FileSpreadsheet className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button variant="outline" size="sm" title="Email report" onClick={(e) => e.stopPropagation()}>
+                          <Mail className="h-3.5 w-3.5" />
+                        </Button>
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button variant="outline" size="sm" title="Reverse this batch" className="text-destructive hover:text-destructive" onClick={(e) => e.stopPropagation()}>
+                              <Undo2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Reverse Bulk Batch {gs.parentBatch.batch_id}?</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                This will reverse all {childBatchIds.length} property batches in this bulk deposit, unlinking {groupedReceipts.length} receipts. They will be available for re-batching.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Cancel</AlertDialogCancel>
+                              <AlertDialogAction onClick={() => reverseEntityMutation.mutate(childBatchIds)} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                                Reverse Batch
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      </div>
+                    </div>
+                    {!isSectionCollapsed && <div className="space-y-3 pl-4">{childBatches.map((batch, i) => renderBatchCard(batch, i, true))}</div>}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
           {unassignedBatches.length > 0 && (
             <div className="space-y-3">
               {entityGroups.length > 0 && (
