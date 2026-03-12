@@ -45,10 +45,18 @@ export default function BatchDocumentPreview({ receipts, batch, onClose, grouped
     for (const r of receipts) {
       if (!r.file_path || seenPaths.has(r.file_path)) continue;
       seenPaths.add(r.file_path);
+      // Count how many receipts share this file
+      const fileReceipts = receipts.filter(rx => rx.file_path === r.file_path);
+      const fileLabel = fileReceipts.length > 1
+        ? (r.file_name || "Source Document")
+        : r.tenant;
+      const fileSublabel = fileReceipts.length > 1
+        ? `${fileReceipts.length} receipts  ·  $${fileReceipts.reduce((s: number, rx: any) => s + Number(rx.amount), 0).toLocaleString("en-US", { minimumFractionDigits: 2 })}`
+        : `${r.unit}  ·  $${Number(r.amount).toLocaleString("en-US", { minimumFractionDigits: 2 })}`;
       list.push({
         id: r.id,
-        label: r.tenant,
-        sublabel: `${r.unit}  ·  $${Number(r.amount).toLocaleString("en-US", { minimumFractionDigits: 2 })}`,
+        label: fileLabel,
+        sublabel: fileSublabel,
         detail: r.file_name || "document",
         type: "document",
         filePath: r.file_path,
