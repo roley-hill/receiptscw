@@ -359,6 +359,23 @@ export default function EntryView() {
     return selected.length > 0 && selected.length < receipts.length;
   };
 
+  // Select / deselect all currently visible (filtered) receipts
+  const visibleReceipts = useMemo(() => filtered.filter(r => !r.batch_id), [filtered]);
+  const allVisibleSelected = visibleReceipts.length > 0 && visibleReceipts.every(r => selectedReceipts.has(r.id));
+  const someVisibleSelected = visibleReceipts.some(r => selectedReceipts.has(r.id));
+
+  const toggleSelectAllVisible = () => {
+    setSelectedReceipts(prev => {
+      const next = new Set(prev);
+      if (allVisibleSelected) {
+        for (const r of visibleReceipts) next.delete(r.id);
+      } else {
+        for (const r of visibleReceipts) next.add(r.id);
+      }
+      return next;
+    });
+  };
+
   const selectedTotal = finalized.filter(r => selectedReceipts.has(r.id)).reduce((s, r) => s + Number(r.amount), 0);
 
   // ─── Inline bulk action buttons for a set of receipts ───
@@ -1023,6 +1040,16 @@ export default function EntryView() {
             <CheckSquare className="h-4 w-4 mr-1" />
             {batchMode ? "Exit Batch Mode" : "Select for Batching"}
           </Button>
+          {batchMode && (
+            <Button
+              variant={allVisibleSelected ? "default" : "outline"}
+              size="sm"
+              onClick={toggleSelectAllVisible}
+            >
+              {allVisibleSelected ? <Square className="h-4 w-4 mr-1" /> : <CheckSquare className="h-4 w-4 mr-1" />}
+              {allVisibleSelected ? "Deselect All" : `Select All Visible (${visibleReceipts.length})`}
+            </Button>
+          )}
         </div>
       </div>
 
