@@ -1366,6 +1366,9 @@ export default function EntryView() {
               </div>
             </div>
           )}
+
+          {/* Spacer for floating bar */}
+          {hasSelections && <div className="h-20" />}
         </div>
 
         {/* ─── Right Filter Sidebar ─── */}
@@ -1379,6 +1382,59 @@ export default function EntryView() {
           />
         )}
       </div>
+
+      {/* ─── Floating Selection Bar ─── */}
+      {hasSelections && (
+        <motion.div
+          initial={{ y: 80, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          exit={{ y: 80, opacity: 0 }}
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-card border border-border shadow-xl rounded-xl px-6 py-3.5 flex items-center gap-5"
+        >
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-semibold text-foreground">{selectedReceipts.size} receipts selected</span>
+            <span className="text-sm vault-mono font-bold text-accent">${fmt(selectedTotal)}</span>
+          </div>
+          <div className="h-6 w-px bg-border" />
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={isBatchCreating}
+              onClick={() => handleCreateBatches("individual")}
+            >
+              {isBatchCreating ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <Layers className="h-3.5 w-3.5 mr-1" />}
+              Individual Batches
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={isBatchCreating}
+              onClick={() => handleCreateBatches("grouped")}
+            >
+              {isBatchCreating ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <Building2 className="h-3.5 w-3.5 mr-1" />}
+              Group by Owner
+            </Button>
+            <Button
+              size="sm"
+              disabled={isBatchCreating}
+              onClick={() => handleCreateBatches("cross-entity")}
+            >
+              {isBatchCreating ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <Layers className="h-3.5 w-3.5 mr-1" />}
+              Batch All Selected
+            </Button>
+          </div>
+          <div className="h-6 w-px bg-border" />
+          <Button
+            size="sm"
+            variant="ghost"
+            className="text-muted-foreground"
+            onClick={() => { setSelectedReceipts(new Set()); setBatchMode(false); }}
+          >
+            <X className="h-3.5 w-3.5 mr-1" /> Clear
+          </Button>
+        </motion.div>
+      )}
 
       <Dialog open={batchDialogOpen} onOpenChange={setBatchDialogOpen}>
         <DialogContent>
