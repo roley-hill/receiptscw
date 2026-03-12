@@ -138,7 +138,7 @@ export default function DepositBatches() {
   type GroupedSet = { parentBatch: typeof batches[0]; children: typeof batches };
   type EntityGroup = { entity: OwnerEntity | null; groupedSets: GroupedSet[]; standalone: typeof batches };
 
-  const { entityGroups, unassignedBatches, reversedBatches } = useMemo(() => {
+  const { entityGroups, unassignedBatches, reversedBatches, bulkBatches } = useMemo(() => {
     const active = batches.filter(b => b.status !== "reversed");
     const reversed = batches.filter(b => b.status === "reversed");
     const parentBatchIds = new Set(active.filter(b => b.parent_batch_id).map(b => b.parent_batch_id!));
@@ -146,6 +146,8 @@ export default function DepositBatches() {
 
     const entityMap: Record<string, EntityGroup> = {};
     const unassigned: typeof batches = [];
+    // Cross-entity bulk batches: parent batches with no ownership_entity_id that have children
+    const bulk: GroupedSet[] = [];
 
     for (const batch of active) {
       if (childBatchIds.has(batch.id)) continue;
@@ -166,6 +168,12 @@ export default function DepositBatches() {
         } else {
           entityMap[entityId].standalone.push(batch);
         }
+      } else if (parentBatchIds.has(batch.id)) {
+        // Cross-entity parent batch (no entity, has children)
+        bulk.push({
+          parentBatch: batch,
+          children: active.filter(b => b.parent_batch_id === batch.id),
+        });
       } else {
         unassigned.push(batch);
       }
@@ -175,14 +183,14 @@ export default function DepositBatches() {
       (a.entity?.name || "").localeCompare(b.entity?.name || "")
     );
 
-    return { entityGroups: sorted, unassignedBatches: unassigned, reversedBatches: reversed };
+    return { entityGroups: sorted, unassignedBatches: unassigned, reversedBatches: reversed, bulkBatches: bulk };
   }, [batches, ownerEntities]);
 
   if (isLoading) {
     return <div className="flex items-center justify-center py-20"><div className="h-8 w-8 border-2 border-accent border-t-transparent rounded-full animate-spin" /></div>;
   }
 
-  const hasAnyBatches = entityGroups.length > 0 || unassignedBatches.length > 0;
+  const hasAnyBatches = entityGroups.length > 0 || unassignedBatches.length > 0 || bulkBatches.length > 0;
 
   const renderEntityGroup = (entityId: string, group: EntityGroup) => {
     const isCollapsed = collapsedEntities.has(entityId);
@@ -333,6 +341,91 @@ export default function DepositBatches() {
         <div className="space-y-6">
           {entityGroups.map(([entityId, group]) => renderEntityGroup(entityId, group))}
 
+          {/* Bulk Deposit Batches (cross-entity) */}
+          {bulkBatches.length > 0 && (
+            <div className="space-y-3">
+              <div className="px-1">
+                <h3 className="text-sm font-semibold text-muted-foreground">Bulk Deposit Batches</h3>
+              </div>
+              {bulkBatches.map((gs, gsIndex) => {
+                const sectionKey = `bulk__${gsIndex}`;
+                const isSectionCollapsed = collapsedSections.has(sectionKey);
+                const childBatches = gs.children.sort((a, b) => a.property.localeCompare(b.property));
+                const groupedReceipts = childBatches.flatMap(b => allReceipts.filter(r => r.batch_id === b.id));
+                const groupedTotal = groupedReceipts.reduce((s, r) => s + Number(r.amount), 0);
+                const buildingBatches = childBatches.map(b => ({ batch: b, receipts: allReceipts.filter(r => r.batch_id === b.id) }));
+                const childBatchIds = childBatches.map(b => b.id);
+
+                return (
+                  <div key={sectionKey} className="space-y-3">
+                    <div className="vault-card px-4 py-3 flex items-center justify-between">
+                      <button onClick={() => toggleSection(sectionKey)} className="group flex items-center gap-2 text-sm font-semibold text-foreground hover:opacity-80 transition-opacity cursor-pointer flex-1">
+                        {isSectionCollapsed ? <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />}
+                        <Layers className="h-3.5 w-3.5 text-accent" />
+                        <span>Bulk Deposit — {gs.parentBatch.batch_id}</span>
+                        <span className="text-xs vault-mono text-muted-foreground font-normal ml-1">
+                          {childBatches.length} properties · {groupedReceipts.length} receipts ·{" "}
+                          <button
+                            onClick={(e) => { e.stopPropagation(); copyAmount(sectionKey, groupedTotal); }}
+                            className="inline-flex items-center gap-1 hover:text-foreground transition-colors cursor-copy"
+                            title="Click to copy amount"
+                          >
+                            ${fmt(groupedTotal)}
+                            {copiedKey === sectionKey ? <Check className="h-3 w-3 text-accent" /> : <Copy className="h-3 w-3 opacity-0 group-hover:opacity-100" />}
+                          </button>
+                        </span>
+                      </button>
+                      <div className="flex gap-1">
+                        <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); setPreviewEntityId("bulk__" + gsIndex); }} title="Preview all documents">
+                          <Eye className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          variant="outline" size="sm"
+                          disabled={downloadingEntityZip === sectionKey}
+                          onClick={(e) => { e.stopPropagation(); handleEntityZipDownload(sectionKey, gs.parentBatch.property, buildingBatches); }}
+                          title="Download deposit package (ZIP)"
+                        >
+                          {downloadingEntityZip === sectionKey ? <div className="h-3.5 w-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" /> : <PackageOpen className="h-3.5 w-3.5" />}
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); downloadGroupedOwnerPDF(gs.parentBatch.property, buildingBatches); }} title="Download PDF report">
+                          <FileTextIcon className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); generateGroupedXLSX(gs.parentBatch.property, buildingBatches); }} title="Download XLSX report">
+                          <FileSpreadsheet className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button variant="outline" size="sm" title="Email report" onClick={(e) => e.stopPropagation()}>
+                          <Mail className="h-3.5 w-3.5" />
+                        </Button>
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button variant="outline" size="sm" title="Reverse this batch" className="text-destructive hover:text-destructive" onClick={(e) => e.stopPropagation()}>
+                              <Undo2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Reverse Bulk Batch {gs.parentBatch.batch_id}?</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                This will reverse all {childBatchIds.length} property batches in this bulk deposit, unlinking {groupedReceipts.length} receipts. They will be available for re-batching.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Cancel</AlertDialogCancel>
+                              <AlertDialogAction onClick={() => reverseEntityMutation.mutate(childBatchIds)} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                                Reverse Batch
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      </div>
+                    </div>
+                    {!isSectionCollapsed && <div className="space-y-3 pl-4">{childBatches.map((batch, i) => renderBatchCard(batch, i, true))}</div>}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
           {unassignedBatches.length > 0 && (
             <div className="space-y-3">
               {entityGroups.length > 0 && (
@@ -374,6 +467,27 @@ export default function DepositBatches() {
       )}
 
       {previewEntityId && (() => {
+        // Handle bulk batch previews
+        if (previewEntityId.startsWith("bulk__")) {
+          const gsIdx = Number(previewEntityId.replace("bulk__", ""));
+          const gs = bulkBatches[gsIdx];
+          if (!gs) return null;
+          const childBatches = gs.children.sort((a, b) => a.property.localeCompare(b.property));
+          const buildingBatches = childBatches.map(b => ({ batch: b, receipts: allReceipts.filter(r => r.batch_id === b.id) }));
+          const previewReceipts = buildingBatches.flatMap(bb => bb.receipts);
+          return (
+            <Suspense fallback={null}>
+              <BatchDocumentPreview
+                receipts={previewReceipts}
+                batch={childBatches[0]}
+                onClose={() => setPreviewEntityId(null)}
+                groupedMode={{ entityName: gs.parentBatch.property, buildingBatches }}
+              />
+            </Suspense>
+          );
+        }
+
+        // Handle entity grouped batch previews
         const parts = previewEntityId.split("__gs__");
         if (parts.length !== 2) return null;
         const [eid, gsIdxStr] = parts;
