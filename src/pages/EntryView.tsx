@@ -531,9 +531,8 @@ export default function EntryView() {
               .single();
             if (childErr) throw childErr;
 
-            for (const id of ids) {
-              await supabase.from("receipts").update({ batch_id: childBatch.id }).eq("id", id);
-            }
+            const { error: updateErr } = await supabase.from("receipts").update({ batch_id: childBatch.id }).in("id", ids);
+            if (updateErr) throw updateErr;
             created++;
           }
         }
@@ -599,9 +598,8 @@ export default function EntryView() {
             .single();
           if (childErr) throw childErr;
 
-          for (const id of ids) {
-            await supabase.from("receipts").update({ batch_id: childBatch.id }).eq("id", id);
-          }
+          const { error: updateErr } = await supabase.from("receipts").update({ batch_id: childBatch.id }).in("id", ids);
+          if (updateErr) throw updateErr;
         }
 
         toast({
@@ -614,8 +612,10 @@ export default function EntryView() {
       queryClient.invalidateQueries({ queryKey: ["batches"] });
       setSelectedReceipts(new Set());
       setBatchMode(false);
-    } catch (e) {
-      toast({ title: "Error", description: e instanceof Error ? e.message : "Batch creation failed", variant: "destructive" });
+    } catch (e: any) {
+      console.error("Batch creation error:", e);
+      const msg = e?.message || (typeof e === "object" ? JSON.stringify(e) : "Batch creation failed");
+      toast({ title: "Batch creation failed", description: msg, variant: "destructive" });
     } finally {
       setIsBatchCreating(false);
       setGroupedBatchDialogOpen(false);
