@@ -8,10 +8,12 @@ function normalizeName(name: string): string {
   return name.replace(/\s+/g, " ").trim().toLowerCase();
 }
 
+const NAME_SUFFIXES = new Set(["jr", "sr", "sir", "ii", "iii", "iv", "esq", "md", "phd"]);
+
 function extractLastName(fullName: string): string {
   const name = normalizeName(fullName);
   if (name.includes(",")) return name.split(",")[0].trim();
-  const parts = name.split(" ");
+  const parts = name.split(" ").filter(p => !NAME_SUFFIXES.has(p));
   return parts[parts.length - 1] || name;
 }
 
