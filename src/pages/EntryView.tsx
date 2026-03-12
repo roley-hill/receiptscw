@@ -1040,6 +1040,16 @@ export default function EntryView() {
             <CheckSquare className="h-4 w-4 mr-1" />
             {batchMode ? "Exit Batch Mode" : "Select for Batching"}
           </Button>
+          {batchMode && (
+            <Button
+              variant={allVisibleSelected ? "default" : "outline"}
+              size="sm"
+              onClick={toggleSelectAllVisible}
+            >
+              {allVisibleSelected ? <Square className="h-4 w-4 mr-1" /> : <CheckSquare className="h-4 w-4 mr-1" />}
+              {allVisibleSelected ? "Deselect All" : `Select All Visible (${visibleReceipts.length})`}
+            </Button>
+          )}
         </div>
       </div>
 
