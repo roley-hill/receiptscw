@@ -467,6 +467,27 @@ export default function DepositBatches() {
       )}
 
       {previewEntityId && (() => {
+        // Handle bulk batch previews
+        if (previewEntityId.startsWith("bulk__")) {
+          const gsIdx = Number(previewEntityId.replace("bulk__", ""));
+          const gs = bulkBatches[gsIdx];
+          if (!gs) return null;
+          const childBatches = gs.children.sort((a, b) => a.property.localeCompare(b.property));
+          const buildingBatches = childBatches.map(b => ({ batch: b, receipts: allReceipts.filter(r => r.batch_id === b.id) }));
+          const previewReceipts = buildingBatches.flatMap(bb => bb.receipts);
+          return (
+            <Suspense fallback={null}>
+              <BatchDocumentPreview
+                receipts={previewReceipts}
+                batch={childBatches[0]}
+                onClose={() => setPreviewEntityId(null)}
+                groupedMode={{ entityName: gs.parentBatch.property, buildingBatches }}
+              />
+            </Suspense>
+          );
+        }
+
+        // Handle entity grouped batch previews
         const parts = previewEntityId.split("__gs__");
         if (parts.length !== 2) return null;
         const [eid, gsIdxStr] = parts;
