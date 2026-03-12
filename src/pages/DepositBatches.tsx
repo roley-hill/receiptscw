@@ -138,7 +138,7 @@ export default function DepositBatches() {
   type GroupedSet = { parentBatch: typeof batches[0]; children: typeof batches };
   type EntityGroup = { entity: OwnerEntity | null; groupedSets: GroupedSet[]; standalone: typeof batches };
 
-  const { entityGroups, unassignedBatches, reversedBatches } = useMemo(() => {
+  const { entityGroups, unassignedBatches, reversedBatches, bulkBatches } = useMemo(() => {
     const active = batches.filter(b => b.status !== "reversed");
     const reversed = batches.filter(b => b.status === "reversed");
     const parentBatchIds = new Set(active.filter(b => b.parent_batch_id).map(b => b.parent_batch_id!));
@@ -146,6 +146,8 @@ export default function DepositBatches() {
 
     const entityMap: Record<string, EntityGroup> = {};
     const unassigned: typeof batches = [];
+    // Cross-entity bulk batches: parent batches with no ownership_entity_id that have children
+    const bulk: GroupedSet[] = [];
 
     for (const batch of active) {
       if (childBatchIds.has(batch.id)) continue;
@@ -166,6 +168,12 @@ export default function DepositBatches() {
         } else {
           entityMap[entityId].standalone.push(batch);
         }
+      } else if (parentBatchIds.has(batch.id)) {
+        // Cross-entity parent batch (no entity, has children)
+        bulk.push({
+          parentBatch: batch,
+          children: active.filter(b => b.parent_batch_id === batch.id),
+        });
       } else {
         unassigned.push(batch);
       }
@@ -175,7 +183,7 @@ export default function DepositBatches() {
       (a.entity?.name || "").localeCompare(b.entity?.name || "")
     );
 
-    return { entityGroups: sorted, unassignedBatches: unassigned, reversedBatches: reversed };
+    return { entityGroups: sorted, unassignedBatches: unassigned, reversedBatches: reversed, bulkBatches: bulk };
   }, [batches, ownerEntities]);
 
   if (isLoading) {
