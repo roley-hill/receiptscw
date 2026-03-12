@@ -444,12 +444,14 @@ export default function EntryView() {
   };
 
   // ─── Batch creation ───
-  const handleCreateBatches = async (type: "individual" | "grouped") => {
+  const handleCreateBatches = async (type: "individual" | "grouped" | "cross-entity") => {
     if (selectedReceipts.size === 0) return;
     setIsBatchCreating(true);
 
     try {
       const selectedArr = finalized.filter(r => selectedReceipts.has(r.id));
+      const today = new Date();
+      const period = `${today.getMonth() + 1}/${today.getDate()}/${String(today.getFullYear()).slice(-2)}`;
 
       if (type === "individual") {
         // Group selected receipts by canonical property, create one batch per property
@@ -463,16 +465,13 @@ export default function EntryView() {
         let created = 0;
         for (const [prop, receipts] of Object.entries(byProperty)) {
           const ids = receipts.map(r => r.id);
-          const today = new Date();
-          const period = `${today.getMonth() + 1}/${today.getDate()}/${String(today.getFullYear()).slice(-2)}`;
           await createDepositBatch(prop, ids, period, user!.id);
           created++;
         }
 
         toast({ title: `${created} batch${created > 1 ? "es" : ""} created`, description: `Created individual batches for ${created} properties.` });
-      } else {
+      } else if (type === "grouped") {
         // "Grouped by Owner" — group by entity, create one parent + children per entity
-        // For properties without an entity, create individual batches
         const byEntity: Record<string, Record<string, DbReceipt[]>> = {};
         const noEntity: Record<string, DbReceipt[]> = {};
 
@@ -490,17 +489,13 @@ export default function EntryView() {
         }
 
         let created = 0;
-        const today = new Date();
-        const period = `${today.getMonth() + 1}/${today.getDate()}/${String(today.getFullYear()).slice(-2)}`;
 
-        // For each entity group: create parent batch, then child batches
         for (const [entityId, propMap] of Object.entries(byEntity)) {
           const entity = ownerEntities.find(e => e.id === entityId);
           const allIds = Object.values(propMap).flat().map(r => r.id);
           const allTotal = Object.values(propMap).flat().reduce((s, r) => s + Number(r.amount), 0);
           const entityName = entity?.name || "Unknown Entity";
 
-          // Create parent batch
           const { data: parentBatch, error: parentErr } = await supabase
             .from("deposit_batches")
             .insert({
@@ -516,7 +511,6 @@ export default function EntryView() {
             .single();
           if (parentErr) throw parentErr;
 
-          // Create child batches per property
           for (const [prop, receipts] of Object.entries(propMap)) {
             const ids = receipts.map(r => r.id);
             const propTotal = receipts.reduce((s, r) => s + Number(r.amount), 0);
@@ -537,7 +531,6 @@ export default function EntryView() {
               .single();
             if (childErr) throw childErr;
 
-            // Assign receipts to child batch
             for (const id of ids) {
               await supabase.from("receipts").update({ batch_id: childBatch.id }).eq("id", id);
             }
@@ -545,7 +538,6 @@ export default function EntryView() {
           }
         }
 
-        // Unassigned properties get individual batches
         for (const [prop, receipts] of Object.entries(noEntity)) {
           const ids = receipts.map(r => r.id);
           await createDepositBatch(prop, ids, period, user!.id);
@@ -553,6 +545,69 @@ export default function EntryView() {
         }
 
         toast({ title: "Grouped batches created", description: `Created ${created} batches across ${Object.keys(byEntity).length} ownership groups.` });
+      } else if (type === "cross-entity") {
+        // Cross-entity: one parent batch containing child batches for ALL selected properties
+        const byProperty: Record<string, DbReceipt[]> = {};
+        for (const r of selectedArr) {
+          const prop = canonical(r.property);
+          if (!byProperty[prop]) byProperty[prop] = [];
+          byProperty[prop].push(r);
+        }
+
+        const allTotal = selectedArr.reduce((s, r) => s + Number(r.amount), 0);
+        const propertyNames = Object.keys(byProperty).sort();
+
+        // Create parent batch (no single entity — use a summary label)
+        const parentLabel = propertyNames.length <= 3
+          ? propertyNames.join(" + ")
+          : `${propertyNames.length} Properties`;
+
+        const { data: parentBatch, error: parentErr } = await supabase
+          .from("deposit_batches")
+          .insert({
+            property: parentLabel,
+            deposit_period: period,
+            total_amount: allTotal,
+            receipt_count: selectedArr.length,
+            created_by: user!.id,
+            ownership_entity_id: null,
+            status: "draft" as any,
+          })
+          .select()
+          .single();
+        if (parentErr) throw parentErr;
+
+        // Create child batches per property
+        for (const [prop, receipts] of Object.entries(byProperty)) {
+          const ids = receipts.map(r => r.id);
+          const propTotal = receipts.reduce((s, r) => s + Number(r.amount), 0);
+          const entityId = propertyToEntity.get(prop) || null;
+
+          const { data: childBatch, error: childErr } = await supabase
+            .from("deposit_batches")
+            .insert({
+              property: prop,
+              deposit_period: period,
+              total_amount: propTotal,
+              receipt_count: ids.length,
+              created_by: user!.id,
+              parent_batch_id: parentBatch.id,
+              ownership_entity_id: entityId,
+              status: "draft" as any,
+            })
+            .select()
+            .single();
+          if (childErr) throw childErr;
+
+          for (const id of ids) {
+            await supabase.from("receipts").update({ batch_id: childBatch.id }).eq("id", id);
+          }
+        }
+
+        toast({
+          title: "Cross-entity batch created",
+          description: `Batched ${selectedArr.length} receipts across ${propertyNames.length} properties into one grouped deposit.`,
+        });
       }
 
       queryClient.invalidateQueries({ queryKey: ["receipts"] });
@@ -1311,6 +1366,9 @@ export default function EntryView() {
               </div>
             </div>
           )}
+
+          {/* Spacer for floating bar */}
+          {hasSelections && <div className="h-20" />}
         </div>
 
         {/* ─── Right Filter Sidebar ─── */}
@@ -1324,6 +1382,59 @@ export default function EntryView() {
           />
         )}
       </div>
+
+      {/* ─── Floating Selection Bar ─── */}
+      {hasSelections && (
+        <motion.div
+          initial={{ y: 80, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          exit={{ y: 80, opacity: 0 }}
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-card border border-border shadow-xl rounded-xl px-6 py-3.5 flex items-center gap-5"
+        >
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-semibold text-foreground">{selectedReceipts.size} receipts selected</span>
+            <span className="text-sm vault-mono font-bold text-accent">${fmt(selectedTotal)}</span>
+          </div>
+          <div className="h-6 w-px bg-border" />
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={isBatchCreating}
+              onClick={() => handleCreateBatches("individual")}
+            >
+              {isBatchCreating ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <Layers className="h-3.5 w-3.5 mr-1" />}
+              Individual Batches
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={isBatchCreating}
+              onClick={() => handleCreateBatches("grouped")}
+            >
+              {isBatchCreating ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <Building2 className="h-3.5 w-3.5 mr-1" />}
+              Group by Owner
+            </Button>
+            <Button
+              size="sm"
+              disabled={isBatchCreating}
+              onClick={() => handleCreateBatches("cross-entity")}
+            >
+              {isBatchCreating ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <Layers className="h-3.5 w-3.5 mr-1" />}
+              Batch All Selected
+            </Button>
+          </div>
+          <div className="h-6 w-px bg-border" />
+          <Button
+            size="sm"
+            variant="ghost"
+            className="text-muted-foreground"
+            onClick={() => { setSelectedReceipts(new Set()); setBatchMode(false); }}
+          >
+            <X className="h-3.5 w-3.5 mr-1" /> Clear
+          </Button>
+        </motion.div>
+      )}
 
       <Dialog open={batchDialogOpen} onOpenChange={setBatchDialogOpen}>
         <DialogContent>
