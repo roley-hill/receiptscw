@@ -531,9 +531,8 @@ export default function EntryView() {
               .single();
             if (childErr) throw childErr;
 
-            for (const id of ids) {
-              await supabase.from("receipts").update({ batch_id: childBatch.id }).eq("id", id);
-            }
+            const { error: updateErr } = await supabase.from("receipts").update({ batch_id: childBatch.id }).in("id", ids);
+            if (updateErr) throw updateErr;
             created++;
           }
         }
