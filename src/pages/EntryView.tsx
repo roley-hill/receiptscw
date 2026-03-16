@@ -397,6 +397,22 @@ export default function EntryView() {
     onError: (err: Error) => toast({ title: "Delete failed", description: err.message, variant: "destructive" }),
   });
 
+  const sendBackToReviewMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase
+        .from("receipts")
+        .update({ status: "needs_review" as any, finalized_at: null })
+        .eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast({ title: "Receipt sent back to review" });
+      queryClient.invalidateQueries({ queryKey: ["receipts"] });
+      queryClient.invalidateQueries({ queryKey: ["pending_counts"] });
+    },
+    onError: (err: Error) => toast({ title: "Failed", description: err.message, variant: "destructive" }),
+  });
+
   const renderBulkActions = (scopeReceipts: DbReceipt[]) => {
     const selected = scopeReceipts.filter(r => selectedReceipts.has(r.id));
     if (selected.length === 0) return null;
