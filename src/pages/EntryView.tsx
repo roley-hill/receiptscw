@@ -852,6 +852,20 @@ export default function EntryView() {
       <td className="px-3 py-2.5">
         <div className="flex items-center justify-center gap-1">
           <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => copyRowAll(r)}><Copy className="h-3.5 w-3.5 text-muted-foreground" /></Button></TooltipTrigger><TooltipContent>Copy all fields</TooltipContent></Tooltip>
+          <AlertDialog>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <AlertDialogTrigger asChild>
+                  <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-[hsl(var(--vault-amber))] hover:text-[hsl(var(--vault-amber))]"><Undo2 className="h-3.5 w-3.5" /></Button>
+                </AlertDialogTrigger>
+              </TooltipTrigger>
+              <TooltipContent>Send back to review</TooltipContent>
+            </Tooltip>
+            <AlertDialogContent>
+              <AlertDialogHeader><AlertDialogTitle>Send back to review?</AlertDialogTitle><AlertDialogDescription>This will move {r.receipt_id} back to the review queue for re-verification.</AlertDialogDescription></AlertDialogHeader>
+              <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={() => sendBackToReviewMutation.mutate(r.id)}>Confirm</AlertDialogAction></AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
           {isAdmin && (
             <AlertDialog>
               <Tooltip>
