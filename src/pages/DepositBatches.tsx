@@ -54,7 +54,9 @@ export default function DepositBatches() {
 
   const reverseMutation = useMutation({
     mutationFn: (batchId: string) => reverseBatch(batchId),
-    onSuccess: () => {
+    onSuccess: (_data, batchId) => {
+      // Note: undo for batch reversal would require re-creating the batch which is complex,
+      // so we don't add undo for this destructive action
       queryClient.invalidateQueries({ queryKey: ["batches"] });
       queryClient.invalidateQueries({ queryKey: ["receipts"] });
       toast({ title: "Batch reversed", description: "Receipts have been unlinked and are available for re-batching." });
