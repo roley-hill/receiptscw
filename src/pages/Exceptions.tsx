@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { useUndoStack } from "@/hooks/useUndoStack";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchReceipts, updateReceipt } from "@/lib/api";
 import { supabase } from "@/integrations/supabase/client";
