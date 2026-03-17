@@ -36,8 +36,8 @@ serve(async (req) => {
     const appfolioBase = "https://countywidemanagement.appfolio.com";
     const basicAuth = btoa(`${clientId}:${clientSecret}`);
 
-    // Pull first 200 rows to analyze deposit grouping structure
-    const url = `${appfolioBase}/api/v0/reports/deposit_register.json?paginate_results=true&per_page=200&from_date=2026-01-01&to_date=2026-03-17`;
+    // Pull ALL rows
+    const url = `${appfolioBase}/api/v0/reports/deposit_register.json?paginate_results=true&per_page=5000&from_date=2026-01-01&to_date=2026-03-17`;
     const resp = await fetch(url, {
       headers: {
         "Authorization": `Basic ${basicAuth}`,
@@ -47,7 +47,7 @@ serve(async (req) => {
     const data = await resp.json();
     const rows = data.results || [];
 
-    // Analyze: group by DepositNumber to understand the structure
+    // Group by DepositNumber
     const deposits: Record<string, any[]> = {};
     for (const row of rows) {
       const depNum = row.DepositNumber || "unknown";
@@ -55,27 +55,39 @@ serve(async (req) => {
       deposits[depNum].push(row);
     }
 
-    // Show first 3 deposits with all their rows
-    const sampleDeposits: Record<string, any> = {};
-    let count = 0;
-    for (const [depNum, depRows] of Object.entries(deposits)) {
-      if (count >= 5) break;
-      sampleDeposits[depNum] = {
+    // Find deposits with the most rows (likely have receipt breakdowns)
+    const depositSizes = Object.entries(deposits)
+      .map(([num, rows]) => ({ num, count: rows.length }))
+      .sort((a, b) => b.count - a.count);
+
+    // Show top 5 largest deposits with full data
+    const largestDeposits: Record<string, any> = {};
+    for (const { num } of depositSizes.slice(0, 5)) {
+      const depRows = deposits[num];
+      largestDeposits[num] = {
         row_count: depRows.length,
-        rows: depRows.slice(0, 20), // first 20 rows of each deposit
+        rows: depRows.slice(0, 15),
       };
-      count++;
     }
 
-    // Also get unique deposit numbers across all data
-    const uniqueDepositNumbers = Object.keys(deposits);
+    // Also show deposits 62-69 specifically (the ones user referenced)
+    const bankDeposits62_69: Record<string, any> = {};
+    for (let i = 62; i <= 69; i++) {
+      const key = String(i);
+      if (deposits[key]) {
+        bankDeposits62_69[key] = {
+          row_count: deposits[key].length,
+          rows: deposits[key].slice(0, 10),
+        };
+      }
+    }
 
     return new Response(JSON.stringify({
-      total_rows_in_page: rows.length,
-      has_next_page: !!data.next_page_url,
-      unique_deposits_in_page: uniqueDepositNumbers.length,
-      deposit_numbers: uniqueDepositNumbers,
-      sample_deposits: sampleDeposits,
+      total_rows: rows.length,
+      total_deposits: Object.keys(deposits).length,
+      deposit_sizes: depositSizes,
+      largest_deposits: largestDeposits,
+      bank_deposits_62_69: bankDeposits62_69,
     }, null, 2), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
