@@ -46,6 +46,7 @@ export default function DepositBatches() {
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
   const [reversedCollapsed, setReversedCollapsed] = useState(true);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [showImport, setShowImport] = useState(false);
 
   const copyAmount = (key: string, amount: number) => {
     navigator.clipboard.writeText(amount.toFixed(2));
