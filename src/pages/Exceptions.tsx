@@ -28,6 +28,7 @@ export default function Exceptions() {
   const queryClient = useQueryClient();
   const { role } = useAuth();
   const isAdmin = role === "admin";
+  const { pushUndo } = useUndoStack("exceptions");
   const exceptions = allReceipts.filter((r) => r.status === "exception");
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
