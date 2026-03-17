@@ -292,11 +292,14 @@ serve(async (req) => {
 
 /**
  * Match a deposit line item to a receipt in the DB.
- * Priority: exact amount + fuzzy tenant name + fuzzy property/unit
+ * Priority: reference match > amount + date + tenant + property/unit
+ * Hard filters: amount within $0.01, date within ±15 days
  */
 function findBestMatch(item: any, receipts: any[], used: Set<string>): any | null {
   const itemAmount = Number(item.amount);
   const itemTenant = normalizeName(item.tenant_name);
+  const itemDate = item.date ? new Date(item.date) : null;
+  const itemRef = normalizeRef(item.check_number);
   const { streetNum, unitNum } = parsePropertyUnit(item.property);
 
   let bestScore = 0;
@@ -304,13 +307,37 @@ function findBestMatch(item: any, receipts: any[], used: Set<string>): any | nul
 
   for (const r of receipts) {
     if (used.has(r.id)) continue;
-    // Skip receipts already in a batch
     if (r.batch_id) continue;
 
     // Amount must match within $0.01
     if (Math.abs(Number(r.amount) - itemAmount) > 0.01) continue;
 
+    // Date must be within ±15 days (hard filter)
+    if (itemDate && r.receipt_date) {
+      const rDate = new Date(r.receipt_date);
+      const diffDays = Math.abs((itemDate.getTime() - rDate.getTime()) / 86400000);
+      if (diffDays > 15) continue;
+    }
+
     let score = 1; // base score for amount match
+
+    // Reference / check number match (very strong signal)
+    const rRef = normalizeRef(r.reference);
+    if (itemRef && rRef && itemRef === rRef) {
+      score += 10; // reference match is nearly definitive
+    } else if (itemRef && rRef && (rRef.includes(itemRef) || itemRef.includes(rRef))) {
+      score += 7; // partial reference match (one contains the other)
+    }
+
+    // Date proximity scoring
+    if (itemDate && r.receipt_date) {
+      const rDate = new Date(r.receipt_date);
+      const diffDays = Math.abs((itemDate.getTime() - rDate.getTime()) / 86400000);
+      if (diffDays === 0) score += 4;
+      else if (diffDays <= 3) score += 3;
+      else if (diffDays <= 7) score += 2;
+      else score += 1; // within 15 days
+    }
 
     // Tenant name match
     const rTenant = normalizeName(r.tenant);
@@ -320,7 +347,8 @@ function findBestMatch(item: any, receipts: any[], used: Set<string>): any | nul
       score += 3;
     } else if (fuzzyNameMatch(itemTenant, rTenant)) {
       score += 2;
-    } else {
+    } else if (score < 10) {
+      // Only skip if we don't have a strong reference match
       continue;
     }
 
@@ -336,7 +364,8 @@ function findBestMatch(item: any, receipts: any[], used: Set<string>): any | nul
     }
   }
 
-  return bestScore >= 4 ? bestReceipt : null;
+  // Require minimum score of 5 (tighter than before)
+  return bestScore >= 5 ? bestReceipt : null;
 }
 
 function normalizeName(name: string): string {
