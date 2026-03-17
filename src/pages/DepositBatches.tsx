@@ -24,6 +24,7 @@ const fmt = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 2 
 export default function DepositBatches() {
   const queryClient = useQueryClient();
   const { session } = useAuth();
+  const { pushUndo } = useUndoStack("batches");
   const { data: batches = [], isLoading } = useQuery({ queryKey: ["batches"], queryFn: fetchBatches });
   const { data: allReceipts = [] } = useQuery({ queryKey: ["receipts"], queryFn: fetchReceipts });
   const { data: ownerEntities = [] } = useQuery({
