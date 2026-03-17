@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { toast } from "@/hooks/use-toast";
 import { useState, useMemo, lazy, Suspense } from "react";
+import { useUndoStack } from "@/hooks/useUndoStack";
 import { useAuth } from "@/hooks/useAuth";
 import { motion } from "framer-motion";
 import BatchCard from "@/components/BatchCard";
