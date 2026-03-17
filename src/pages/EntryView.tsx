@@ -406,8 +406,14 @@ export default function EntryView() {
         .update({ status: "needs_review" as any, finalized_at: null })
         .eq("id", id);
       if (error) throw error;
+      return id;
     },
-    onSuccess: () => {
+    onSuccess: (_data, id) => {
+      pushUndo("Send back to review", async () => {
+        await supabase.from("receipts").update({ status: "finalized" as any, finalized_at: new Date().toISOString() }).eq("id", id);
+        queryClient.invalidateQueries({ queryKey: ["receipts"] });
+        queryClient.invalidateQueries({ queryKey: ["pending_counts"] });
+      });
       toast({ title: "Receipt sent back to review" });
       queryClient.invalidateQueries({ queryKey: ["receipts"] });
       queryClient.invalidateQueries({ queryKey: ["pending_counts"] });
