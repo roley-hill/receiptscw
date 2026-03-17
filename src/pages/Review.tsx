@@ -168,6 +168,7 @@ export default function ReviewPage() {
   const queryClient = useQueryClient();
   const { role } = useAuth();
   const isAdmin = role === "admin";
+  const { pushUndo } = useUndoStack("review");
   const reviewable = allReceipts.filter((r) => r.status === "needs_review" || r.status === "exception");
   const appfolioPaidIds = useAppfolioPaidLookup(reviewable);
 
