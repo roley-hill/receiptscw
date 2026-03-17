@@ -1,4 +1,5 @@
 import { useState, useRef, useMemo } from "react";
+import { useUndoStack } from "@/hooks/useUndoStack";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { fetchReceipts, markAppfolioRecorded, getFilePreviewUrl, createDepositBatch, updateReceipt } from "@/lib/api";
@@ -109,6 +110,7 @@ export default function EntryView() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const { isAdmin, deleteMutation } = useAdminDelete();
+  const { pushUndo } = useUndoStack("entry");
   const { data: allReceipts = [], isLoading } = useQuery({ queryKey: ["receipts"], queryFn: fetchReceipts });
 
   const { data: ownerEntities = [] } = useQuery({
@@ -404,8 +406,14 @@ export default function EntryView() {
         .update({ status: "needs_review" as any, finalized_at: null })
         .eq("id", id);
       if (error) throw error;
+      return id;
     },
-    onSuccess: () => {
+    onSuccess: (_data, id) => {
+      pushUndo("Send back to review", async () => {
+        await supabase.from("receipts").update({ status: "finalized" as any, finalized_at: new Date().toISOString() }).eq("id", id);
+        queryClient.invalidateQueries({ queryKey: ["receipts"] });
+        queryClient.invalidateQueries({ queryKey: ["pending_counts"] });
+      });
       toast({ title: "Receipt sent back to review" });
       queryClient.invalidateQueries({ queryKey: ["receipts"] });
       queryClient.invalidateQueries({ queryKey: ["pending_counts"] });

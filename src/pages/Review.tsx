@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { fetchReceipts, updateReceipt, getFilePreviewUrl } from "@/lib/api";
+import { useUndoStack } from "@/hooks/useUndoStack";
 import { supabase } from "@/integrations/supabase/client";
 import { motion } from "framer-motion";
 import { CheckCircle2, AlertTriangle, ChevronLeft, ChevronRight, ChevronDown, Eye, Edit3, Save, FileText, Image as ImageIcon, Loader2, ZoomIn, ZoomOut, RotateCcw, Trash2, CheckCheck, ArrowLeft, Shield } from "lucide-react";
@@ -167,6 +168,7 @@ export default function ReviewPage() {
   const queryClient = useQueryClient();
   const { role } = useAuth();
   const isAdmin = role === "admin";
+  const { pushUndo } = useUndoStack("review");
   const reviewable = allReceipts.filter((r) => r.status === "needs_review" || r.status === "exception");
   const appfolioPaidIds = useAppfolioPaidLookup(reviewable);
 
@@ -295,7 +297,16 @@ export default function ReviewPage() {
           .in("id", chunk);
         if (error) throw error;
       }
-      toast.success(`Finalized ${selected.size} receipt(s)`);
+      const count = ids.length;
+      pushUndo(`Finalize ${count} receipt(s)`, async () => {
+        for (let i = 0; i < ids.length; i += 100) {
+          const chunk = ids.slice(i, i + 100);
+          await supabase.from("receipts").update({ status: "needs_review" as any, finalized_at: null }).in("id", chunk);
+        }
+        queryClient.invalidateQueries({ queryKey: ["receipts"] });
+        queryClient.invalidateQueries({ queryKey: ["pending_counts"] });
+      });
+      toast.success(`Finalized ${count} receipt(s)`);
       setSelected(new Set());
       queryClient.invalidateQueries({ queryKey: ["receipts"] });
     } catch (err: any) {
@@ -336,6 +347,15 @@ export default function ReviewPage() {
           .in("id", chunk);
         if (error) throw error;
       }
+      const ids = [...idsToFinalize];
+      pushUndo(`Finalize ${ids.length} receipt(s) from file`, async () => {
+        for (let i = 0; i < ids.length; i += 100) {
+          const chunk = ids.slice(i, i + 100);
+          await supabase.from("receipts").update({ status: "needs_review" as any, finalized_at: null }).in("id", chunk);
+        }
+        queryClient.invalidateQueries({ queryKey: ["receipts"] });
+        queryClient.invalidateQueries({ queryKey: ["pending_counts"] });
+      });
       toast.success(`Finalized ${idsToFinalize.length} receipt(s) from "${fileName}"`);
       setSelected(new Set());
       if (fileFilter === fileName) setFileFilter("all");

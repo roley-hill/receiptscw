@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { toast } from "@/hooks/use-toast";
 import { useState, useMemo, lazy, Suspense } from "react";
+import { useUndoStack } from "@/hooks/useUndoStack";
 import { useAuth } from "@/hooks/useAuth";
 import { motion } from "framer-motion";
 import BatchCard from "@/components/BatchCard";
@@ -23,6 +24,7 @@ const fmt = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 2 
 export default function DepositBatches() {
   const queryClient = useQueryClient();
   const { session } = useAuth();
+  const { pushUndo } = useUndoStack("batches");
   const { data: batches = [], isLoading } = useQuery({ queryKey: ["batches"], queryFn: fetchBatches });
   const { data: allReceipts = [] } = useQuery({ queryKey: ["receipts"], queryFn: fetchReceipts });
   const { data: ownerEntities = [] } = useQuery({
@@ -52,7 +54,9 @@ export default function DepositBatches() {
 
   const reverseMutation = useMutation({
     mutationFn: (batchId: string) => reverseBatch(batchId),
-    onSuccess: () => {
+    onSuccess: (_data, batchId) => {
+      // Note: undo for batch reversal would require re-creating the batch which is complex,
+      // so we don't add undo for this destructive action
       queryClient.invalidateQueries({ queryKey: ["batches"] });
       queryClient.invalidateQueries({ queryKey: ["receipts"] });
       toast({ title: "Batch reversed", description: "Receipts have been unlinked and are available for re-batching." });
