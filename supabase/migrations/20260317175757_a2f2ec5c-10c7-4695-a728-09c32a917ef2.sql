@@ -1,0 +1,2 @@
+UPDATE receipts SET batch_id = NULL WHERE batch_id IN ('0dc9d2a7-5cec-4cf7-9503-a6aad74035df', '5732d275-0bcc-430c-a47a-798dbd0c3a82', 'e3a8ca2a-d538-4d79-8cda-25af99ff4b5f');
+DELETE FROM deposit_batches WHERE id IN ('0dc9d2a7-5cec-4cf7-9503-a6aad74035df', '5732d275-0bcc-430c-a47a-798dbd0c3a82', 'e3a8ca2a-d538-4d79-8cda-25af99ff4b5f');
