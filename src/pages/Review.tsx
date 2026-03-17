@@ -297,7 +297,16 @@ export default function ReviewPage() {
           .in("id", chunk);
         if (error) throw error;
       }
-      toast.success(`Finalized ${selected.size} receipt(s)`);
+      const count = ids.length;
+      pushUndo(`Finalize ${count} receipt(s)`, async () => {
+        for (let i = 0; i < ids.length; i += 100) {
+          const chunk = ids.slice(i, i + 100);
+          await supabase.from("receipts").update({ status: "needs_review" as any, finalized_at: null }).in("id", chunk);
+        }
+        queryClient.invalidateQueries({ queryKey: ["receipts"] });
+        queryClient.invalidateQueries({ queryKey: ["pending_counts"] });
+      });
+      toast.success(`Finalized ${count} receipt(s)`);
       setSelected(new Set());
       queryClient.invalidateQueries({ queryKey: ["receipts"] });
     } catch (err: any) {
