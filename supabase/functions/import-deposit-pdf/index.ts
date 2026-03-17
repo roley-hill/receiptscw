@@ -20,8 +20,7 @@ serve(async (req) => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const anonKey = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUPABASE_PUBLISHABLE_KEY")!;
-    
-    // Authenticate user
+
     const userClient = createClient(supabaseUrl, anonKey, {
       global: { headers: { Authorization: authHeader } },
     });
@@ -32,10 +31,8 @@ serve(async (req) => {
       });
     }
 
-    // Use service role for DB operations
     const adminClient = createClient(supabaseUrl, serviceKey);
 
-    // Parse the multipart form
     const formData = await req.formData();
     const file = formData.get("file") as File | null;
     if (!file) {
@@ -48,7 +45,6 @@ serve(async (req) => {
     const fileBytes = new Uint8Array(await file.arrayBuffer());
     const base64 = btoa(String.fromCharCode(...fileBytes));
 
-    // Use Lovable AI to extract structured data from the PDF
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
 
@@ -153,7 +149,7 @@ serve(async (req) => {
       });
     }
 
-    // Fetch all active receipts for matching
+    // Fetch all active, unbatched receipts for matching
     const allReceipts: any[] = [];
     let from = 0;
     const PAGE = 1000;
@@ -184,93 +180,104 @@ serve(async (req) => {
       }
     }
 
-    // Look up property for ownership entity
-    let ownershipEntityId: string | null = null;
-    if (matched.length > 0) {
-      const firstReceipt = allReceipts.find(r => r.id === matched[0].receiptId);
-      if (firstReceipt?.property) {
-        const { data: prop } = await adminClient
-          .from("properties")
-          .select("ownership_entity_id")
-          .eq("address", firstReceipt.property)
-          .maybeSingle();
-        if (prop?.ownership_entity_id) ownershipEntityId = prop.ownership_entity_id;
-      }
+    const totalItems = deposit.line_items.length;
+    const matchedCount = matched.length;
+    const unmatchedCount = unmatched.length;
+
+    // Determine match category
+    let matchCategory: "perfect" | "partial" | "unrelated";
+    if (matchedCount === 0) {
+      matchCategory = "unrelated";
+    } else if (unmatchedCount === 0) {
+      matchCategory = "perfect";
+    } else {
+      matchCategory = "partial";
     }
 
-    // Create the deposit batch with AppFolio deposit number
-    const totalMatched = matched.reduce((s, m) => s + Number(m.lineItem.amount), 0);
+    // Only create a batch for PERFECT matches
+    if (matchCategory === "perfect") {
+      // Look up property for ownership entity
+      let ownershipEntityId: string | null = null;
+      if (matched.length > 0) {
+        const firstReceipt = allReceipts.find(r => r.id === matched[0].receiptId);
+        if (firstReceipt?.property) {
+          const { data: prop } = await adminClient
+            .from("properties")
+            .select("ownership_entity_id")
+            .eq("address", firstReceipt.property)
+            .maybeSingle();
+          if (prop?.ownership_entity_id) ownershipEntityId = prop.ownership_entity_id;
+        }
+      }
 
-    // Use raw SQL via service role to set batch_id directly
-    const { data: newBatch, error: batchErr } = await adminClient
-      .from("deposit_batches")
-      .insert({
+      const totalMatched = matched.reduce((s, m) => s + Number(m.lineItem.amount), 0);
+
+      const { data: newBatch, error: batchErr } = await adminClient
+        .from("deposit_batches")
+        .insert({
+          batch_id: batchLabel,
+          property: allReceipts.find(r => r.id === matched[0].receiptId)?.property || "Unknown",
+          deposit_period: deposit.deposit_date,
+          total_amount: totalMatched,
+          receipt_count: matched.length,
+          created_by: user.id,
+          status: "ready",
+          ownership_entity_id: ownershipEntityId,
+          external_reference: deposit.description || null,
+          notes: `Imported from AppFolio Bank Deposit #${depNum}`,
+        })
+        .select()
+        .single();
+
+      if (batchErr) {
+        console.error("Batch creation error:", batchErr);
+        throw new Error(`Failed to create batch: ${batchErr.message}`);
+      }
+
+      // Assign matched receipts to this batch
+      for (const m of matched) {
+        await adminClient
+          .from("receipts")
+          .update({ batch_id: newBatch.id })
+          .eq("id", m.receiptId);
+      }
+
+      return new Response(JSON.stringify({
+        status: "perfect",
         batch_id: batchLabel,
-        property: matched.length > 0
-          ? allReceipts.find(r => r.id === matched[0].receiptId)?.property || "Unknown"
-          : "Unknown",
-        deposit_period: deposit.deposit_date,
-        total_amount: totalMatched,
-        receipt_count: matched.length,
-        created_by: user.id,
-        status: "ready",
-        ownership_entity_id: ownershipEntityId,
-        external_reference: deposit.description || null,
-        notes: `Imported from AppFolio Bank Deposit #${depNum}`,
-      })
-      .select()
-      .single();
-
-    if (batchErr) {
-      console.error("Batch creation error:", batchErr);
-      throw new Error(`Failed to create batch: ${batchErr.message}`);
+        deposit_number: depNum,
+        deposit_date: deposit.deposit_date,
+        total_amount: deposit.total_amount,
+        matched_count: matchedCount,
+        unmatched_count: 0,
+        message: `All ${matchedCount} receipts matched — batch ${batchLabel} created`,
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
-    // Unlink matched receipts from any existing batch and assign to new one
-    for (const m of matched) {
-      await adminClient
-        .from("receipts")
-        .update({ batch_id: newBatch.id })
-        .eq("id", m.receiptId);
-    }
-
-    // Recalculate any source batches that lost receipts
-    const affectedBatchIds = new Set<string>();
-    for (const m of matched) {
-      const orig = allReceipts.find(r => r.id === m.receiptId);
-      if (orig?.batch_id && orig.batch_id !== newBatch.id) {
-        affectedBatchIds.add(orig.batch_id);
-      }
-    }
-    for (const bId of affectedBatchIds) {
-      const { data: remaining } = await adminClient
-        .from("receipts")
-        .select("id, amount")
-        .eq("batch_id", bId)
-        .is("deleted_at", null);
-      const remTotal = remaining?.reduce((s, r) => s + Number(r.amount), 0) || 0;
-      const remCount = remaining?.length || 0;
-      if (remCount === 0) {
-        await adminClient.from("deposit_batches").update({
-          total_amount: 0, receipt_count: 0, status: "reversed",
-        }).eq("id", bId);
-      } else {
-        await adminClient.from("deposit_batches").update({
-          total_amount: remTotal, receipt_count: remCount,
-        }).eq("id", bId);
-      }
-    }
-
+    // For partial and unrelated — just return info, don't create anything
     return new Response(JSON.stringify({
-      status: "success",
+      status: matchCategory,
       batch_id: batchLabel,
       deposit_number: depNum,
       deposit_date: deposit.deposit_date,
       total_amount: deposit.total_amount,
-      matched_count: matched.length,
-      unmatched_count: unmatched.length,
-      unmatched_items: unmatched,
-      affected_batches: Array.from(affectedBatchIds).length,
+      matched_count: matchedCount,
+      unmatched_count: unmatchedCount,
+      matched_items: matched.map(m => ({
+        tenant: m.lineItem.tenant_name,
+        amount: m.lineItem.amount,
+        receiptId: m.receiptId,
+      })),
+      unmatched_items: unmatched.map(u => ({
+        tenant: u.tenant_name,
+        amount: u.amount,
+        property: u.property,
+      })),
+      message: matchCategory === "partial"
+        ? `${matchedCount}/${totalItems} receipts matched — batch NOT created`
+        : `No matching receipts found — deposit is unrelated`,
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
@@ -292,12 +299,13 @@ function findBestMatch(item: any, receipts: any[], used: Set<string>): any | nul
   const itemTenant = normalizeName(item.tenant_name);
   const { streetNum, unitNum } = parsePropertyUnit(item.property);
 
-  // Score each candidate
   let bestScore = 0;
   let bestReceipt: any = null;
 
   for (const r of receipts) {
     if (used.has(r.id)) continue;
+    // Skip receipts already in a batch
+    if (r.batch_id) continue;
 
     // Amount must match within $0.01
     if (Math.abs(Number(r.amount) - itemAmount) > 0.01) continue;
@@ -313,7 +321,7 @@ function findBestMatch(item: any, receipts: any[], used: Set<string>): any | nul
     } else if (fuzzyNameMatch(itemTenant, rTenant)) {
       score += 2;
     } else {
-      continue; // skip if no name match at all
+      continue;
     }
 
     // Property/unit match
@@ -328,7 +336,7 @@ function findBestMatch(item: any, receipts: any[], used: Set<string>): any | nul
     }
   }
 
-  return bestScore >= 4 ? bestReceipt : null; // require at least amount + some name match
+  return bestScore >= 4 ? bestReceipt : null;
 }
 
 function normalizeName(name: string): string {
@@ -359,7 +367,6 @@ function fuzzyNameMatch(a: string, b: string): boolean {
 
 function parsePropertyUnit(prop: string): { streetNum: string; unitNum: string } {
   if (!prop) return { streetNum: "", unitNum: "" };
-  // "14732 Blythe St. - 8" → streetNum=14732, unitNum=8
   const streetMatch = prop.match(/^(\d+)/);
   const unitMatch = prop.match(/[-–]\s*(\d+)\s*$/);
   return {
@@ -376,7 +383,6 @@ function extractStreetNumber(address: string): string {
 
 function extractUnitNumber(unit: string): string {
   if (!unit) return "";
-  // "14732-8" → "8", "9010-154" → "154", "8" → "8"
   const m = unit.match(/(?:^|\D)(\d+)$/);
   return m?.[1] || unit.replace(/\D/g, "");
 }
