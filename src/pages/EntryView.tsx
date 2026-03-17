@@ -110,6 +110,7 @@ export default function EntryView() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const { isAdmin, deleteMutation } = useAdminDelete();
+  const { pushUndo } = useUndoStack("entry");
   const { data: allReceipts = [], isLoading } = useQuery({ queryKey: ["receipts"], queryFn: fetchReceipts });
 
   const { data: ownerEntities = [] } = useQuery({
