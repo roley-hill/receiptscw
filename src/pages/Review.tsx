@@ -347,6 +347,15 @@ export default function ReviewPage() {
           .in("id", chunk);
         if (error) throw error;
       }
+      const ids = [...idsToFinalize];
+      pushUndo(`Finalize ${ids.length} receipt(s) from file`, async () => {
+        for (let i = 0; i < ids.length; i += 100) {
+          const chunk = ids.slice(i, i + 100);
+          await supabase.from("receipts").update({ status: "needs_review" as any, finalized_at: null }).in("id", chunk);
+        }
+        queryClient.invalidateQueries({ queryKey: ["receipts"] });
+        queryClient.invalidateQueries({ queryKey: ["pending_counts"] });
+      });
       toast.success(`Finalized ${idsToFinalize.length} receipt(s) from "${fileName}"`);
       setSelected(new Set());
       if (fileFilter === fileName) setFileFilter("all");
