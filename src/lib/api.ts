@@ -140,10 +140,10 @@ export async function reverseBatch(batchId: string) {
     .eq("batch_id", batchId);
   if (unlinkError) throw unlinkError;
 
-  // Set batch status to reversed
+  // Set batch status to reversed and zero out stale totals
   const { data, error } = await supabase
     .from("deposit_batches")
-    .update({ status: "reversed" as any })
+    .update({ status: "reversed" as any, total_amount: 0, receipt_count: 0 })
     .eq("id", batchId)
     .select()
     .single();
