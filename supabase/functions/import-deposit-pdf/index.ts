@@ -156,7 +156,7 @@ serve(async (req) => {
     while (true) {
       const { data: page } = await adminClient
         .from("receipts")
-        .select("id, tenant, unit, property, amount, receipt_date, batch_id, status")
+        .select("id, tenant, unit, property, amount, receipt_date, batch_id, status, reference")
         .is("deleted_at", null)
         .range(from, from + PAGE - 1);
       if (!page || page.length === 0) break;
