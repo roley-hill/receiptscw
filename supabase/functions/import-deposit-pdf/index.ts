@@ -368,6 +368,12 @@ function findBestMatch(item: any, receipts: any[], used: Set<string>): any | nul
   return bestScore >= 5 ? bestReceipt : null;
 }
 
+function normalizeRef(ref: string): string {
+  if (!ref) return "";
+  // Strip common prefixes and non-alphanumeric chars, keep core number
+  return ref.replace(/^(CHK|ACH|EFT|WIRE|REF|#)\s*/i, "").replace(/[^a-z0-9]/gi, "").toLowerCase();
+}
+
 function normalizeName(name: string): string {
   if (!name) return "";
   return name
