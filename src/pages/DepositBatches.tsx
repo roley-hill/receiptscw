@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchBatches, fetchReceipts, reverseBatch, moveReceiptsToNewBatch } from "@/lib/api";
 import { downloadBatchPDF, generateBatchXLSX, downloadBatchZIP, downloadGroupedOwnerPDF, generateGroupedXLSX, downloadGroupedZIP } from "@/lib/batchReports";
 import { supabase } from "@/integrations/supabase/client";
-import { Building2, ChevronDown, ChevronRight, FileText as FileTextIcon, FileSpreadsheet, Layers, Eye, PackageOpen, Mail, Undo2, SquareCheck, Copy, Check } from "lucide-react";
+import { Building2, ChevronDown, ChevronRight, FileText as FileTextIcon, FileSpreadsheet, Layers, Eye, PackageOpen, Mail, Undo2, SquareCheck, Copy, Check, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -14,6 +14,7 @@ import { useUndoStack } from "@/hooks/useUndoStack";
 import { useAuth } from "@/hooks/useAuth";
 import { motion } from "framer-motion";
 import BatchCard from "@/components/BatchCard";
+import ImportDepositPDFs from "@/components/ImportDepositPDFs";
 
 const BatchDocumentPreview = lazy(() => import("@/components/BatchDocumentPreview"));
 
@@ -45,6 +46,7 @@ export default function DepositBatches() {
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
   const [reversedCollapsed, setReversedCollapsed] = useState(true);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [showImport, setShowImport] = useState(false);
 
   const copyAmount = (key: string, amount: number) => {
     navigator.clipboard.writeText(amount.toFixed(2));
@@ -334,10 +336,26 @@ export default function DepositBatches() {
 
   return (
     <div className="space-y-6 max-w-6xl">
-      <div>
-        <h1 className="text-2xl font-bold text-foreground">Deposit Batches</h1>
-        <p className="text-sm text-muted-foreground mt-1">Group receipts into one transfer per property. Download reports for your accountant.</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">Deposit Batches</h1>
+          <p className="text-sm text-muted-foreground mt-1">Group receipts into one transfer per property. Download reports for your accountant.</p>
+        </div>
+        <Button
+          variant={showImport ? "default" : "outline"}
+          size="sm"
+          onClick={() => setShowImport(v => !v)}
+        >
+          <Upload className="h-3.5 w-3.5 mr-1.5" />
+          Import from AppFolio
+        </Button>
       </div>
+
+      {showImport && (
+        <div className="vault-card p-5">
+          <ImportDepositPDFs />
+        </div>
+      )}
 
       {!hasAnyBatches && reversedBatches.length === 0 ? (
         <div className="vault-card p-8 text-center text-muted-foreground text-sm">No deposit batches yet. Create one from the Entry & Recording page.</div>
