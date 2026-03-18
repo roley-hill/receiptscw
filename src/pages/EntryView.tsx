@@ -473,15 +473,9 @@ export default function EntryView() {
           </Button>
         )}
         {recorded.length > 0 && (
-          <Button size="sm" variant="outline" className="h-6 text-[10px] px-2" onClick={async (e) => {
-            e.stopPropagation();
-            for (const r of recorded) await markAppfolioRecorded(r.id, false, user!.id);
-            queryClient.invalidateQueries({ queryKey: ["receipts"] });
-            toast({ title: `${recorded.length} unmarked` });
-            setSelectedReceipts(prev => { const next = new Set(prev); recorded.forEach(r => next.delete(r.id)); return next; });
-          }} disabled={toggleMutation.isPending}>
-            <Square className="h-3 w-3 mr-0.5" />Unmark ({recorded.length})
-          </Button>
+          <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
+            <Lock className="h-2.5 w-2.5" />{recorded.length} locked
+          </span>
         )}
         {isAdmin && (
           <AlertDialog>
