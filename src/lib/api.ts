@@ -5,13 +5,24 @@ export type DbReceipt = Tables<"receipts">;
 export type DbDepositBatch = Tables<"deposit_batches">;
 
 export async function fetchReceipts() {
-  const { data, error } = await supabase
-    .from("receipts")
-    .select("*")
-    .is("deleted_at", null)
-    .order("uploaded_at", { ascending: false });
-  if (error) throw error;
-  return data;
+  // Supabase PostgREST defaults to 1000 rows — paginate to get all receipts
+  const allReceipts: Tables<"receipts">[] = [];
+  const PAGE = 1000;
+  let from = 0;
+  while (true) {
+    const { data, error } = await supabase
+      .from("receipts")
+      .select("*")
+      .is("deleted_at", null)
+      .order("uploaded_at", { ascending: false })
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    allReceipts.push(...data);
+    if (data.length < PAGE) break;
+    from += PAGE;
+  }
+  return allReceipts;
 }
 
 export async function fetchReceiptsByStatus(status: "needs_review" | "finalized" | "exception") {

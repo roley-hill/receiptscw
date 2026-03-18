@@ -114,6 +114,19 @@ export default function EntryView() {
   const { pushUndo } = useUndoStack("entry");
   const { data: allReceipts = [], isLoading } = useQuery({ queryKey: ["receipts"], queryFn: fetchReceipts });
 
+  const { data: depositBatches = [] } = useQuery({
+    queryKey: ["deposit_batches_list"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("deposit_batches")
+        .select("id, deposit_period, property, total_amount, receipt_count")
+        .order("created_at", { ascending: false })
+        .limit(500);
+      if (error) throw error;
+      return data;
+    },
+  });
+
   const { data: ownerEntities = [] } = useQuery({
     queryKey: ["ownership_entities"],
     queryFn: async () => {
@@ -202,6 +215,8 @@ export default function EntryView() {
   const [collapsedMonths, setCollapsedMonths] = useState<Set<string>>(new Set());
   const [filterPanelOpen, setFilterPanelOpen] = useState(false);
   const [columnFilterGroups, setColumnFilterGroups] = useState<ColumnFilterGroup[]>([]);
+  const [assignBatchReceiptId, setAssignBatchReceiptId] = useState<string | null>(null);
+  const [assignBatchSelectedId, setAssignBatchSelectedId] = useState<string>("");
 
   // Define filterable columns
   const filterableColumns: FilterableColumn[] = useMemo(() => [
@@ -717,6 +732,33 @@ export default function EntryView() {
     onError: (e: Error) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
 
+  const assignToBatchMutation = useMutation({
+    mutationFn: async ({ receiptId, batchId }: { receiptId: string; batchId: string }) => {
+      const { error } = await supabase
+        .from("receipts")
+        .update({ batch_id: batchId } as any)
+        .eq("id", receiptId);
+      if (error) throw error;
+      // Update batch receipt_count
+      const batch = depositBatches.find(b => b.id === batchId);
+      if (batch) {
+        const receipt = finalized.find(r => r.id === receiptId);
+        const newTotal = Number(batch.total_amount || 0) + Number(receipt?.amount || 0);
+        const newCount = Number(batch.receipt_count || 0) + 1;
+        await supabase.from("deposit_batches").update({ total_amount: newTotal, receipt_count: newCount }).eq("id", batchId);
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["receipts"] });
+      queryClient.invalidateQueries({ queryKey: ["pending_counts"] });
+      queryClient.invalidateQueries({ queryKey: ["deposit_batches_list"] });
+      setAssignBatchReceiptId(null);
+      setAssignBatchSelectedId("");
+      toast({ title: "Receipt assigned to deposit batch" });
+    },
+    onError: (e: Error) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
+
   const handleViewAttachment = async (receipt: DbReceipt) => {
     if (!receipt.file_path) return;
     setPreviewReceipt(receipt);
@@ -889,6 +931,17 @@ export default function EntryView() {
       <td className="px-3 py-2.5">
         <div className="flex items-center justify-center gap-1">
           <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => copyRowAll(r)}><Copy className="h-3.5 w-3.5 text-muted-foreground" /></Button></TooltipTrigger><TooltipContent>Copy all fields</TooltipContent></Tooltip>
+          {/* Assign to deposit batch — only shown when receipt has no batch_id */}
+          {!r.batch_id && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-blue-400 hover:text-blue-300" onClick={() => { setAssignBatchReceiptId(r.id); setAssignBatchSelectedId(""); }}>
+                  <Layers className="h-3.5 w-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Assign to deposit batch</TooltipContent>
+            </Tooltip>
+          )}
           <AlertDialog>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -1082,15 +1135,18 @@ export default function EntryView() {
           <p className="text-sm text-muted-foreground mt-1">Select a building, copy fields into AppFolio, mark as recorded, then create deposit batches.</p>
           <Tabs value={recordedFilter} onValueChange={(v) => setRecordedFilter(v as any)} className="mt-3">
             <TabsList>
-              <TabsTrigger value="all">All ({finalized.length})</TabsTrigger>
+              <TabsTrigger value="all">All receipts ({finalized.length})</TabsTrigger>
               <TabsTrigger value="recorded">
-                ✅ Recorded ({finalized.filter(r => (r as any).appfolio_recorded).length})
+                ✅ Recorded in AppFolio ({finalized.filter(r => (r as any).appfolio_recorded).length})
               </TabsTrigger>
               <TabsTrigger value="unrecorded">
-                ☐ Unrecorded ({finalized.filter(r => !(r as any).appfolio_recorded).length})
+                ☐ Not yet recorded ({finalized.filter(r => !(r as any).appfolio_recorded).length})
               </TabsTrigger>
             </TabsList>
           </Tabs>
+          <p className="text-xs text-muted-foreground mt-1.5">
+            Showing <span className="font-semibold text-foreground">{finalized.length} receipts</span> across <span className="font-semibold text-foreground">{filteredProperties.length} properties</span> — finalized but not yet in a deposit batch
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <Button
@@ -1560,6 +1616,59 @@ export default function EntryView() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setBatchDialogOpen(false)}>Cancel</Button>
             <Button onClick={handleCreateBatch} disabled={batchMutation.isPending}><Layers className="h-4 w-4 mr-2" /> Create Batch</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Assign to existing deposit batch */}
+      <Dialog open={!!assignBatchReceiptId} onOpenChange={(open) => { if (!open) { setAssignBatchReceiptId(null); setAssignBatchSelectedId(""); } }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Assign to Deposit Batch</DialogTitle></DialogHeader>
+          <div className="space-y-4 py-2">
+            {(() => {
+              const receipt = finalized.find(r => r.id === assignBatchReceiptId);
+              if (!receipt) return null;
+              return (
+                <>
+                  <div className="p-3 rounded-lg bg-muted/50 text-sm space-y-1">
+                    <p><span className="text-muted-foreground">Receipt:</span> <span className="font-medium">{receipt.receipt_id}</span></p>
+                    <p><span className="text-muted-foreground">Tenant:</span> <span className="font-medium">{receipt.tenant}</span></p>
+                    <p><span className="text-muted-foreground">Amount:</span> <span className="font-medium vault-mono">${Number(receipt.amount).toFixed(2)}</span></p>
+                    <p><span className="text-muted-foreground">Property:</span> <span className="font-medium">{receipt.property}</span></p>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Select Deposit Batch</Label>
+                    <Select value={assignBatchSelectedId} onValueChange={setAssignBatchSelectedId}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Choose a deposit batch..." />
+                      </SelectTrigger>
+                      <SelectContent className="max-h-[300px]">
+                        {depositBatches
+                          .filter(b => !b.deposit_period?.startsWith("AF-") || b.property?.toLowerCase().includes((receipt.property || "").toLowerCase().split(" ")[0] || ""))
+                          .map(b => (
+                            <SelectItem key={b.id} value={b.id}>
+                              <span className="font-medium">{b.deposit_period}</span>
+                              <span className="text-muted-foreground ml-2">· {b.property?.substring(0, 30)}</span>
+                              <span className="vault-mono text-muted-foreground ml-2">${Number(b.total_amount || 0).toFixed(2)}</span>
+                            </SelectItem>
+                          ))
+                        }
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setAssignBatchReceiptId(null); setAssignBatchSelectedId(""); }}>Cancel</Button>
+            <Button
+              disabled={!assignBatchSelectedId || assignToBatchMutation.isPending}
+              onClick={() => assignBatchReceiptId && assignToBatchMutation.mutate({ receiptId: assignBatchReceiptId, batchId: assignBatchSelectedId })}
+            >
+              <Layers className="h-4 w-4 mr-2" />
+              {assignToBatchMutation.isPending ? "Assigning..." : "Assign to Batch"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
