@@ -40,13 +40,31 @@ export function usePendingCounts() {
   return useQuery({
     queryKey: ["pending_counts"],
     queryFn: async () => {
-      const [review, entry, exceptions, duplicates] = await Promise.all([
+      const [review, entry, exceptions, duplicates, batches] = await Promise.all([
         fetchCount("receipts", { status: "needs_review", deleted_at: null }),
         fetchCount("receipts", { status: "finalized", batch_id: null, deleted_at: null }),
         fetchCount("receipts", { status: "exception", deleted_at: null }),
         fetchCount("skipped_duplicates", { status: "pending" }),
+        // deposit_batches total count
+        (async () => {
+          const { count, error } = await supabase
+            .from("deposit_batches")
+            .select("id", { count: "exact", head: true });
+          if (error) {
+            let total = 0, from = 0;
+            while (true) {
+              const { data } = await supabase.from("deposit_batches").select("id").range(from, from + 999);
+              if (!data || !data.length) break;
+              total += data.length;
+              if (data.length < 1000) break;
+              from += 1000;
+            }
+            return total;
+          }
+          return count ?? 0;
+        })(),
       ]);
-      return { review, entry, exceptions, duplicates };
+      return { review, entry, exceptions, duplicates, batches };
     },
     refetchInterval: 30000,
   });

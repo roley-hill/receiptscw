@@ -37,7 +37,7 @@ const navItems = [
   { title: "Review", url: "/review", icon: ClipboardCheck, countKey: "review" as const },
   { title: "Entry & Recording", url: "/entry", icon: FileText, countKey: "entry" as const },
   { title: "Receivables Report", url: "/receivables", icon: FileText, countKey: null },
-  { title: "Deposit Batches", url: "/batches", icon: Layers, countKey: null },
+  { title: "Deposit Batches", url: "/batches", icon: Layers, countKey: "batches" as const },
   { title: "Browse Files", url: "/browse", icon: FolderOpen, countKey: null },
   { title: "Exceptions", url: "/exceptions", icon: AlertTriangle, countKey: "exceptions" as const },
   { title: "Duplicates", url: "/duplicates", icon: Copy, countKey: "duplicates" as const },

@@ -151,7 +151,41 @@ export default function EntryView() {
 
   // Recorded filter state
   const [recordedFilter, setRecordedFilter] = useState<"all" | "recorded" | "unrecorded">("all");
-  const [isSyncing, setIsSyncing] = useState(false);
+  const [isSyncingBatches, setIsSyncingBatches] = useState(false);
+
+  const syncBatches = async () => {
+    if (!session?.access_token) return;
+    setIsSyncingBatches(true);
+    toast({ title: "Syncing deposit batches...", description: "Matching receipts to AppFolio deposits. This may take 30–60s." });
+    try {
+      // Run month by month to avoid compute limits
+      const months = [
+        { from: "2026-01-01", to: "2026-01-31" },
+        { from: "2026-02-01", to: "2026-02-28" },
+        { from: "2026-03-01", to: "2026-03-18" },
+      ];
+      let totalMatched = 0, totalBatches = 0;
+      for (const { from, to } of months) {
+        const resp = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/sync-appfolio-deposits`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ from_date: from, to_date: to, auto_create_batches: true, create_missing_receipts: false }),
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+        totalMatched += data.matched_receipts || 0;
+        totalBatches += data.batches_created || 0;
+      }
+      toast({ title: "Batch Sync Complete", description: `${totalMatched} receipts matched to deposits, ${totalBatches} new batches created` });
+      queryClient.invalidateQueries({ queryKey: ["receipts"] });
+      queryClient.invalidateQueries({ queryKey: ["batches"] });
+      queryClient.invalidateQueries({ queryKey: ["pending_counts"] });
+    } catch (err: any) {
+      toast({ title: "Batch Sync Failed", description: err.message, variant: "destructive" });
+    } finally {
+      setIsSyncingBatches(false);
+    }
+  };
 
   const syncWithAppfolio = async () => {
     if (!session?.access_token) return;
@@ -1149,6 +1183,15 @@ export default function EntryView() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={syncBatches}
+            disabled={isSyncingBatches}
+          >
+            <Layers className={`h-4 w-4 mr-1 ${isSyncingBatches ? "animate-pulse" : ""}`} />
+            {isSyncingBatches ? "Syncing Batches..." : "Sync Batches"}
+          </Button>
           <Button
             variant="outline"
             size="sm"
