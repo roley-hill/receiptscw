@@ -152,6 +152,7 @@ export default function EntryView() {
   // Recorded filter state
   const [recordedFilter, setRecordedFilter] = useState<"all" | "recorded" | "unrecorded">("all");
   const [isSyncingBatches, setIsSyncingBatches] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
 
   const syncBatches = async () => {
     if (!session?.access_token) return;
