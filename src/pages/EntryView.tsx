@@ -830,7 +830,10 @@ export default function EntryView() {
         </td>
       )}
       <td className="px-3 py-2.5">
-        <Checkbox checked={(r as any).appfolio_recorded || false} onCheckedChange={(checked) => toggleMutation.mutate({ id: r.id, recorded: !!checked })} disabled={toggleMutation.isPending} />
+        <div className="flex items-center gap-1">
+          <Checkbox checked={(r as any).appfolio_recorded || false} onCheckedChange={(checked) => toggleMutation.mutate({ id: r.id, recorded: !!checked })} disabled={toggleMutation.isPending || (r as any).appfolio_recorded} />
+          {(r as any).appfolio_recorded && <Lock className="h-3 w-3 text-emerald-500 shrink-0" />}
+        </div>
       </td>
       <td className="px-3 py-2.5 text-center">
         {r.file_path && (<Tooltip><TooltipTrigger asChild><Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => handleViewAttachment(r)}><FileText className="h-3.5 w-3.5 text-vault-blue" /></Button></TooltipTrigger><TooltipContent>View document</TooltipContent></Tooltip>)}
