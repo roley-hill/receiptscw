@@ -6,24 +6,33 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-// ── Normalisation helpers ──────────────────────────────────────────────────
+// ── Normalisation ──────────────────────────────────────────────────────────
 
 function normName(s: string): string {
   if (!s) return "";
-  // AppFolio stores names as "Last, First" — normalise to "first last"
-  const parts = s.split(",").map(p => p.trim().toLowerCase());
-  return (parts.length === 2 ? `${parts[1]} ${parts[0]}` : parts[0])
-    .replace(/[.,'-]/g, " ").replace(/\s+/g, " ").trim();
+  // AppFolio stores "Last, First" — normalise to "first last"
+  const parts = s.split(",").map((p: string) => p.trim());
+  const reordered = parts.length === 2 ? `${parts[1]} ${parts[0]}` : s;
+  return reordered.toLowerCase().replace(/[.,'-]/g, " ").replace(/\s+/g, " ").trim();
 }
 
 function normAddr(s: string): string {
-  // AppFolio PropertyName is "Address - Full Address City State Zip" — take first part
-  const addr = (s || "").split(" - ")[0];
-  return addr.toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+  return (s || "").toLowerCase()
+    .replace(/\bstreet\b/g, "st").replace(/\bavenue\b/g, "ave")
+    .replace(/\bboulevard\b/g, "blvd").replace(/\bdrive\b/g, "dr")
+    .replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
 }
 
 function normRef(s: string): string {
   return (s || "").replace(/[^0-9a-z]/gi, "").toLowerCase();
+}
+
+// Extract just the street number + street name from a full property string
+// "13412 Vanowen Street - 13412 Vanowen Street Van Nuys, CA 91405" → "13412 vanowen"
+function shortAddr(s: string): string {
+  const a = normAddr(s.split(" - ")[0] || s);
+  const parts = a.split(" ").slice(0, 3);
+  return parts.join(" ");
 }
 
 function namesMatch(a: string, b: string): boolean {
@@ -31,44 +40,45 @@ function namesMatch(a: string, b: string): boolean {
   if (!a || !b) return false;
   if (a === b) return true;
   if (a.includes(b) || b.includes(a)) return true;
-  // Word overlap ≥ 2
   const wa = new Set(a.split(" ").filter((w: string) => w.length > 1));
   const wb = b.split(" ").filter((w: string) => w.length > 1);
   return wb.filter((w: string) => wa.has(w)).length >= 2;
 }
 
-function parseAmount(s: string | null): number {
+function parseAmount(s: string | null | undefined): number {
   if (!s) return 0;
   return Math.abs(parseFloat(String(s).replace(/[$,]/g, "")) || 0);
 }
 
-function parseDate(s: string | null): string {
-  // AppFolio returns MM/DD/YYYY — convert to YYYY-MM-DD
-  if (!s) return "";
-  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (m) return `${m[3]}-${m[1].padStart(2,"0")}-${m[2].padStart(2,"0")}`;
-  return s;
-}
-
-// ── Actual AppFolio column names from the deposit_register report ──────────
-// Header row:  DepositNumber = "82" | DepositAmount = "2,732.00" | rest = null
-// Receipt row: DepositNumber = null  | ReceiptAmount = "1,705.00" | Payer, PropertyName, Reference, ReceiptDate, UnitName
+// ── AppFolio deposit register structure ────────────────────────────────────
+//
+// The deposit_register report returns rows where:
+//   DepositNumber = null  → individual receipt/payment line (the actual transactions)
+//   DepositNumber = value → deposit header/summary row (groups the lines below)
+//
+// Receipt lines have: Payer, PropertyName, UnitName, ReceiptAmount, Reference,
+//                     ReceiptDate, ReceiptDescription, Type, TxnId
+// Header rows have:   DepositNumber, DepositAmount, Date
+//
+// The grouping is sequential: header row → all null-DepositNumber rows until next header
 
 interface AfLine {
-  tenant: string;
+  payer: string;
   amount: number;
   reference: string;
   property: string;
+  propertyFull: string;
   unit: string;
-  memo: string;
-  date: string;        // YYYY-MM-DD
-  rentMonth: string;   // YYYY-MM inferred from ReceiptDescription
+  date: string;
+  description: string;
+  type: string;
+  txnId: number;
 }
 
 interface AfDeposit {
   depositNumber: string;
   depositDate: string;
-  totalAmount: number;
+  depositAmount: number;
   lines: AfLine[];
 }
 
@@ -77,85 +87,83 @@ function parseDepositRegister(rows: any[]): AfDeposit[] {
   let current: AfDeposit | null = null;
 
   for (const row of rows) {
-    const depNum = row["DepositNumber"];   // null on receipt lines, string on headers
+    const depNum = row["DepositNumber"];
 
     if (depNum !== null && depNum !== undefined && String(depNum).trim() !== "") {
-      // ── Deposit header row ──
-      if (current) deposits.push(current);
+      // Deposit header row
+      if (current && current.lines.length > 0) deposits.push(current);
+      // If current has no lines, discard it (empty header)
+      else if (current) { /* discard empty */ }
+
       current = {
         depositNumber: String(depNum).trim(),
-        depositDate: parseDate(row["ReceiptDate"] || row["Date"] || ""),
-        totalAmount: parseAmount(row["DepositAmount"]),
+        depositDate: (row["ReceiptDate"] || row["Date"] || "").trim(),
+        depositAmount: parseAmount(row["DepositAmount"] || row["Amount"]),
         lines: [],
       };
     } else if (current) {
-      // ── Receipt line row ──
-      const amount = parseAmount(row["ReceiptAmount"]);
+      // Receipt line belonging to current deposit
+      const amount = parseAmount(row["ReceiptAmount"] || row["Amount"]);
       if (amount === 0) continue;
 
-      const rawDate = parseDate(row["ReceiptDate"] || "");
-      // Infer rent month from ReceiptDescription e.g. "January 2026"
-      let rentMonth = "";
-      const desc = row["ReceiptDescription"] || "";
-      const monthMatch = desc.match(/(\w+)\s+(20\d{2})/);
-      if (monthMatch) {
-        const months: Record<string,string> = {january:"01",february:"02",march:"03",april:"04",may:"05",june:"06",july:"07",august:"08",september:"09",october:"10",november:"11",december:"12"};
-        const mon = months[monthMatch[1].toLowerCase()];
-        if (mon) rentMonth = `${monthMatch[2]}-${mon}`;
-      }
-      if (!rentMonth && rawDate) rentMonth = rawDate.substring(0, 7);
-
+      const propertyFull = String(row["PropertyName"] || "");
       current.lines.push({
-        tenant: row["Payer"] || "",
+        payer: String(row["Payer"] || "").trim(),
         amount,
-        reference: row["Reference"] || "",
-        property: row["PropertyName"] || "",
-        unit: row["UnitName"] || "",
-        memo: desc,
-        date: rawDate,
-        rentMonth,
+        reference: String(row["Reference"] || "").trim(),
+        property: shortAddr(propertyFull),
+        propertyFull,
+        unit: String(row["UnitName"] || "").trim(),
+        date: String(row["ReceiptDate"] || current.depositDate || "").trim(),
+        description: String(row["ReceiptDescription"] || row["Description"] || "").trim(),
+        type: String(row["Type"] || "").trim(),
+        txnId: Number(row["TxnId"] || 0),
+      });
+    } else {
+      // Receipt line BEFORE any deposit header — create an "undeposited" bucket
+      const amount = parseAmount(row["ReceiptAmount"] || row["Amount"]);
+      if (amount === 0) continue;
+      if (!current) {
+        current = { depositNumber: "UNDEPOSITED", depositDate: "", depositAmount: 0, lines: [] };
+      }
+      const propertyFull = String(row["PropertyName"] || "");
+      current.lines.push({
+        payer: String(row["Payer"] || "").trim(),
+        amount,
+        reference: String(row["Reference"] || "").trim(),
+        property: shortAddr(propertyFull),
+        propertyFull,
+        unit: String(row["UnitName"] || "").trim(),
+        date: String(row["ReceiptDate"] || "").trim(),
+        description: String(row["ReceiptDescription"] || "").trim(),
+        type: String(row["Type"] || "").trim(),
+        txnId: Number(row["TxnId"] || 0),
       });
     }
-    // rows before the first header are ignored
   }
-
-  if (current) deposits.push(current);
+  if (current && current.lines.length > 0) deposits.push(current);
   return deposits;
 }
 
-// ── Match an app receipt to a deposit line ─────────────────────────────────
+// ── Match app receipt to deposit line ──────────────────────────────────────
 
 function matchLine(receipt: any, line: AfLine): boolean {
-  // Amount must match exactly (to the cent)
   const rAmt = Math.round(Math.abs(Number(receipt.amount)) * 100);
   const lAmt = Math.round(line.amount * 100);
   if (rAmt === 0 || lAmt === 0 || rAmt !== lAmt) return false;
 
-  // Tenant name match (handles "Last, First" vs "First Last")
-  const tenantOk = namesMatch(receipt.tenant, line.tenant);
-
-  // Property street number match as fallback
-  const rAddr = normAddr(receipt.property);
-  const lAddr = normAddr(line.property);
-  const rNum = rAddr.match(/^\d+/)?.[0];
-  const lNum = lAddr.match(/^\d+/)?.[0];
-  const propOk = !!(rNum && lNum && rNum === lNum);
+  // Payer (AppFolio) vs tenant (app) — also try property match
+  const tenantOk = namesMatch(receipt.tenant, line.payer);
+  const propOk = line.property && receipt.property &&
+    shortAddr(receipt.property).split(" ")[0] === line.property.split(" ")[0];
 
   if (!tenantOk && !propOk) return false;
 
-  // If both have references, they must agree
+  // Reference match tightens — if both have refs, they must agree
   const rRef = normRef(receipt.reference);
   const lRef = normRef(line.reference);
   if (rRef.length >= 4 && lRef.length >= 4) {
     if (!rRef.includes(lRef) && !lRef.includes(rRef)) return false;
-  }
-
-  // If we have rent months on both, they must be within 1 month
-  if (receipt.rent_month && line.rentMonth) {
-    const [ry, rm] = receipt.rent_month.split("-").map(Number);
-    const [ly, lm] = line.rentMonth.split("-").map(Number);
-    const diff = Math.abs((ry * 12 + rm) - (ly * 12 + lm));
-    if (diff > 1) return false;
   }
 
   return true;
@@ -178,9 +186,7 @@ serve(async (req) => {
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const anonKey = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUPABASE_PUBLISHABLE_KEY")!;
 
-    const userClient = createClient(supabaseUrl, anonKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
+    const userClient = createClient(supabaseUrl, anonKey, { global: { headers: { Authorization: authHeader } } });
     const { data: { user }, error: authError } = await userClient.auth.getUser();
     if (authError || !user) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), {
@@ -193,9 +199,7 @@ serve(async (req) => {
     const clientSecret = Deno.env.get("APPFOLIO_CLIENT_SECRET");
     if (!clientId || !clientSecret) throw new Error("AppFolio credentials not configured");
 
-    let fromDate = "", toDate = "";
-    let autoCreateBatches = false;
-    let createMissingReceipts = false;
+    let fromDate = "", toDate = "", autoCreateBatches = false, createMissingReceipts = false;
     try {
       const body = await req.json();
       fromDate = body.from_date || "";
@@ -216,28 +220,21 @@ serve(async (req) => {
     let pg = 1, more = true;
     while (more) {
       const url = `${appfolioBase}/api/v0/reports/deposit_register.json?paginate_results=true&per_page=500&page=${pg}&from_date=${fromDate}&to_date=${toDate}`;
-      const resp = await fetch(url, {
-        headers: { "Authorization": `Basic ${basicAuth}`, "Accept": "application/json" },
-      });
-      if (!resp.ok) {
-        const err = await resp.text();
-        console.error(`AppFolio deposit_register ${resp.status}: ${err.substring(0, 200)}`);
-        break;
-      }
+      const resp = await fetch(url, { headers: { "Authorization": `Basic ${basicAuth}`, "Accept": "application/json" } });
+      if (!resp.ok) { console.error(`AppFolio ${resp.status}`); break; }
       const data = await resp.json();
-      const results: any[] = data?.results || (Array.isArray(data) ? data : []);
-      console.log(`Page ${pg}: ${results.length} rows`);
+      const results = data?.results || (Array.isArray(data) ? data : []);
       if (!results.length) { more = false; break; }
       rawRows.push(...results);
       if (results.length < 500) more = false; else pg++;
     }
-    console.log(`Fetched ${rawRows.length} raw rows from AppFolio`);
+    console.log(`Fetched ${rawRows.length} raw rows`);
 
     const afDeposits = parseDepositRegister(rawRows);
-    const totalLines = afDeposits.reduce((s: number, d: AfDeposit) => s + d.lines.length, 0);
-    console.log(`Parsed ${afDeposits.length} deposits, ${totalLines} receipt lines`);
+    const totalAfLines = afDeposits.reduce((s: number, d: AfDeposit) => s + d.lines.length, 0);
+    console.log(`Parsed ${afDeposits.length} deposits, ${totalAfLines} receipt lines`);
 
-    // ── Load app receipts ──────────────────────────────────────────────────
+    // ── Load all app receipts ──────────────────────────────────────────────
     const appReceipts: any[] = [];
     let cur = 0;
     while (true) {
@@ -267,49 +264,60 @@ serve(async (req) => {
           matchedIds.add(match.id);
         } else {
           unmatchedLines.push(line);
-          missingInApp.push({
-            deposit_number: dep.depositNumber,
-            deposit_date: dep.depositDate,
-            property: line.property,
-            tenant: line.tenant,
-            unit: line.unit,
-            amount: line.amount,
-            reference: line.reference,
-            rent_month: line.rentMonth,
-            memo: line.memo,
-          });
+          if (dep.depositNumber !== "UNDEPOSITED") {
+            missingInApp.push({
+              deposit_number: dep.depositNumber,
+              deposit_date: dep.depositDate,
+              property: line.propertyFull,
+              unit: line.unit,
+              tenant: line.payer,
+              amount: line.amount,
+              reference: line.reference,
+              description: line.description,
+              type: line.type,
+            });
+          }
 
-          if (createMissingReceipts) {
+          if (createMissingReceipts && dep.depositNumber !== "UNDEPOSITED") {
+            // Parse date from MM/DD/YYYY to YYYY-MM-DD
+            let receiptDate: string | null = null;
+            let rentMonth: string | null = null;
+            if (line.date) {
+              const parts = line.date.split("/");
+              if (parts.length === 3) {
+                receiptDate = `${parts[2]}-${parts[0].padStart(2,"0")}-${parts[1].padStart(2,"0")}`;
+                rentMonth = `${parts[2]}-${parts[0].padStart(2,"0")}`;
+              }
+            }
             const { data: newR } = await adminClient.from("receipts").insert({
               user_id: user.id,
-              property: line.property.split(" - ")[0],
-              tenant: line.tenant,
+              property: line.propertyFull.split(" - ")[0] || line.propertyFull,
+              tenant: line.payer,
               unit: line.unit,
               amount: line.amount,
               reference: line.reference,
-              receipt_date: line.date || null,
-              rent_month: line.rentMonth || null,
-              memo: line.memo || `AppFolio deposit #${dep.depositNumber}`,
+              receipt_date: receiptDate,
+              rent_month: rentMonth,
+              memo: line.description || `Auto-created from AppFolio deposit #${dep.depositNumber}`,
               status: "finalized",
               appfolio_recorded: true,
               appfolio_recorded_at: new Date().toISOString(),
-              payment_type: "",
+              payment_type: line.type || "",
               file_name: `appfolio_deposit_${dep.depositNumber}`,
             }).select().single();
             if (newR) {
               lineMatches.push({ appReceipt: newR, line, autoCreated: true });
               matchedIds.add(newR.id);
-              autoCreated.push({ id: newR.id, receipt_id: newR.receipt_id, tenant: newR.tenant, amount: newR.amount });
-              console.log(`Auto-created: ${line.tenant} $${line.amount} → deposit #${dep.depositNumber}`);
+              autoCreated.push(newR);
+              console.log(`Auto-created: ${line.payer} $${line.amount} deposit #${dep.depositNumber}`);
             }
           }
         }
       }
 
-      // ── Create deposit batch ───────────────────────────────────────────
+      // Create batch if requested and deposit has real lines
       let batchId: string | null = null, batchCreated = false, batchExisted = false;
-
-      if (autoCreateBatches && lineMatches.length > 0) {
+      if (autoCreateBatches && lineMatches.length > 0 && dep.depositNumber !== "UNDEPOSITED") {
         const { data: existing } = await adminClient.from("deposit_batches")
           .select("id").eq("deposit_period", `AF-${dep.depositNumber}`).maybeSingle();
 
@@ -317,9 +325,13 @@ serve(async (req) => {
           batchId = existing.id; batchExisted = true;
         } else {
           const total = lineMatches.reduce((s: number, m: any) => s + Math.abs(Number(m.appReceipt.amount)), 0);
-          const prop = lineMatches[0]?.line.property?.split(" - ")[0] || dep.depositNumber;
-          const { data: nb, error: bErr } = await adminClient.from("deposit_batches").insert({
-            property: prop,
+          // Use most common property name among matched receipts
+          const propCounts: Record<string,number> = {};
+          lineMatches.forEach((m: any) => { const p = m.appReceipt.property || ""; propCounts[p] = (propCounts[p]||0)+1; });
+          const batchProp = Object.entries(propCounts).sort((a,b)=>b[1]-a[1])[0]?.[0] || dep.depositNumber;
+
+          const { data: nb } = await adminClient.from("deposit_batches").insert({
+            property: batchProp,
             deposit_period: `AF-${dep.depositNumber}`,
             total_amount: Math.round(total * 100) / 100,
             receipt_count: lineMatches.length,
@@ -327,26 +339,27 @@ serve(async (req) => {
             status: "draft",
             notes: `Synced from AppFolio deposit #${dep.depositNumber} (${dep.depositDate})`,
           }).select().single();
-          if (bErr) console.error(`Batch error ${dep.depositNumber}:`, bErr.message);
-          else if (nb) { batchId = nb.id; batchCreated = true; batchesCreated.push(nb); }
+          if (nb) { batchId = nb.id; batchCreated = true; batchesCreated.push(nb); }
         }
 
-        if (batchId && lineMatches.length > 0) {
+        if (batchId) {
           const ids = lineMatches.map((m: any) => m.appReceipt.id);
-          await adminClient.from("receipts").update({
-            batch_id: batchId,
-            appfolio_recorded: true,
-            appfolio_recorded_at: new Date().toISOString(),
-            status: "finalized",
-          }).in("id", ids);
+          if (ids.length) {
+            await adminClient.from("receipts").update({
+              batch_id: batchId,
+              appfolio_recorded: true,
+              appfolio_recorded_at: new Date().toISOString(),
+              status: "finalized",
+            }).in("id", ids);
+          }
         }
       }
 
       depositResults.push({
         deposit_number: dep.depositNumber,
         deposit_date: dep.depositDate,
-        appfolio_total: Math.round(dep.totalAmount * 100) / 100,
         appfolio_line_count: dep.lines.length,
+        appfolio_total: Math.round(dep.depositAmount * 100) / 100,
         matched_count: lineMatches.length,
         auto_created_count: lineMatches.filter((m: any) => m.autoCreated).length,
         unmatched_count: unmatchedLines.length,
@@ -356,22 +369,21 @@ serve(async (req) => {
       });
     }
 
-    // ── App receipts with no deposit match ─────────────────────────────────
+    // App receipts with no AppFolio deposit match
     const missingInAppfolio = appReceipts
       .filter((r: any) => !matchedIds.has(r.id) && !r.batch_id)
       .map((r: any) => ({
-        receipt_id: r.receipt_id, id: r.id, tenant: r.tenant, property: r.property,
-        unit: r.unit, amount: r.amount, reference: r.reference,
+        receipt_id: r.receipt_id, id: r.id, tenant: r.tenant,
+        property: r.property, amount: r.amount, reference: r.reference,
         rent_month: r.rent_month, appfolio_recorded: r.appfolio_recorded, status: r.status,
       }));
-
-    console.log(`Done: ${afDeposits.length} deposits | ${matchedIds.size} matched | ${missingInApp.length} missing in app | ${missingInAppfolio.length} missing in AppFolio`);
 
     return new Response(JSON.stringify({
       success: true,
       date_range: { from: fromDate, to: toDate },
-      appfolio_deposits_found: afDeposits.length,
-      appfolio_total_lines: totalLines,
+      appfolio_deposits_found: afDeposits.filter((d: AfDeposit) => d.depositNumber !== "UNDEPOSITED").length,
+      appfolio_undeposited_receipts: afDeposits.find((d: AfDeposit) => d.depositNumber === "UNDEPOSITED")?.lines.length || 0,
+      appfolio_total_lines: totalAfLines,
       app_receipts_total: appReceipts.length,
       matched_receipts: matchedIds.size,
       batches_created: batchesCreated.length,
@@ -381,9 +393,7 @@ serve(async (req) => {
       missing_in_app: missingInApp,
       missing_in_appfolio: missingInAppfolio,
       deposits: depositResults,
-    }, null, 2), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    }, null, 2), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
   } catch (e) {
     console.error("sync-appfolio-deposits error:", e);
