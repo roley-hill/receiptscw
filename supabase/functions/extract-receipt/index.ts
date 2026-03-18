@@ -62,8 +62,8 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
+    const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
+    if (!ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY not configured");
 
     const formData = await req.formData();
     const file = formData.get("file") as File;
@@ -223,48 +223,72 @@ serve(async (req) => {
     }
 
     // Tool definition for MULTI-receipt extraction
+    // Claude tool_use format (Anthropic native API)
     const extractMultiReceiptTool = {
-      type: "function" as const,
-      function: {
-        name: "extract_receipts",
-        description: "Extract one or more structured rent payment/receipt records from a document. Each line item on a remittance detail, spreadsheet row, or individual receipt should be its own entry in the items array.",
-        parameters: {
-          type: "object",
-          properties: {
+      name: "extract_receipts",
+      description: "Extract one or more structured rent payment/receipt records from a document. Each line item on a remittance detail, spreadsheet row, or individual receipt should be its own entry in the items array.",
+      input_schema: {
+        type: "object",
+        properties: {
+          items: {
+            type: "array",
+            description: "Array of receipt line items. One entry per tenant/unit payment.",
             items: {
-              type: "array",
-              description: "Array of receipt line items. One entry per tenant/unit payment.",
-              items: {
-                type: "object",
-                properties: {
-                  property: { type: "string", description: "Street address of the rental property (e.g. '9034 Orion Ave'). Never an owner entity or LP name." },
-                  property_confidence: { type: "number", description: "Confidence 0-1" },
-                  unit: { type: "string", description: "Unit or apartment number (e.g. '#11', 'Apt 3B')." },
-                  unit_confidence: { type: "number", description: "Confidence 0-1" },
-                  tenant: { type: "string", description: "Individual person's name who is the tenant/resident. Never an organization." },
-                  tenant_confidence: { type: "number", description: "Confidence 0-1" },
-                  payer: { type: "string", description: "Organization or person who made the payment." },
-                  receipt_date: { type: "string", description: "Date of payment, format YYYY-MM-DD" },
-                  receipt_date_confidence: { type: "number", description: "Confidence 0-1" },
-                  rent_month: { type: "string", description: "Month the rent covers, format YYYY-MM" },
-                  amount: { type: "number", description: "Payment amount in dollars." },
-                  amount_confidence: { type: "number", description: "Confidence 0-1" },
-                  payment_type: { type: "string", description: "Payment method: 'ACH', 'EFT', 'Check', 'Cash', 'Money Order', 'Wire', or other" },
-                  payment_type_confidence: { type: "number", description: "Confidence 0-1" },
-                  reference: { type: "string", description: "Check number, transaction ID, or EFT reference" },
-                  memo: { type: "string", description: "Any memo or notes about the payment" },
-                },
-                required: ["property", "tenant", "amount"],
-                additionalProperties: false,
+              type: "object",
+              properties: {
+                property: { type: "string", description: "Street address of the rental property (e.g. '9034 Orion Ave'). Never an owner entity or LP name." },
+                property_confidence: { type: "number", description: "Confidence 0-1" },
+                unit: { type: "string", description: "Unit or apartment number (e.g. '#11', 'Apt 3B')." },
+                unit_confidence: { type: "number", description: "Confidence 0-1" },
+                tenant: { type: "string", description: "Individual person's name who is the tenant/resident. Never an organization." },
+                tenant_confidence: { type: "number", description: "Confidence 0-1" },
+                payer: { type: "string", description: "Organization or person who made the payment." },
+                receipt_date: { type: "string", description: "Date of payment, format YYYY-MM-DD" },
+                receipt_date_confidence: { type: "number", description: "Confidence 0-1" },
+                rent_month: { type: "string", description: "Month the rent covers, format YYYY-MM" },
+                amount: { type: "number", description: "Payment amount in dollars." },
+                amount_confidence: { type: "number", description: "Confidence 0-1" },
+                payment_type: { type: "string", description: "Payment method: 'ACH', 'EFT', 'Check', 'Cash', 'Money Order', 'Wire', or other" },
+                payment_type_confidence: { type: "number", description: "Confidence 0-1" },
+                reference: { type: "string", description: "Check number, transaction ID, or EFT reference" },
+                memo: { type: "string", description: "Any memo or notes about the payment" },
               },
+              required: ["property", "tenant", "amount"],
+              additionalProperties: false,
             },
-            extracted_text: { type: "string", description: "Key text excerpts from the document (first 2000 chars)" },
           },
-          required: ["items"],
-          additionalProperties: false,
+          extracted_text: { type: "string", description: "Key text excerpts from the document (first 2000 chars)" },
         },
+        required: ["items"],
+        additionalProperties: false,
       },
     };
+
+    // Helper: call Claude API and extract tool_use result
+    async function callClaude(messages: any[], systemPrompt: string): Promise<any> {
+      const body = JSON.stringify({
+        model: "claude-sonnet-4-5",
+        max_tokens: 4096,
+        system: systemPrompt,
+        tools: [extractMultiReceiptTool],
+        tool_choice: { type: "tool", name: "extract_receipts" },
+        messages,
+      });
+      const resp = await fetchAIWithRetry("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "x-api-key": ANTHROPIC_API_KEY!,
+          "anthropic-version": "2023-06-01",
+          "Content-Type": "application/json",
+        },
+        body,
+      }, corsHeaders);
+      if (!resp.ok) return resp;
+      const data = await resp.json();
+      // Extract tool_use block from Claude response
+      const toolUse = data.content?.find((b: any) => b.type === "tool_use");
+      return { ok: true, items: toolUse?.input?.items || [], extracted_text: toolUse?.input?.extracted_text || "" };
+    }
 
     const systemPrompt = `You are a rent payment data extraction AI for a property management company.
 
@@ -336,32 +360,10 @@ ${knownTenantsList}` : ""}`;
         },
       ];
 
-      const aiRequestBody = JSON.stringify({
-        model: "google/gemini-2.5-flash",
-        messages,
-        tools: [extractMultiReceiptTool],
-        tool_choice: { type: "function", function: { name: "extract_receipts" } },
-      });
-
-      const aiResponse = await fetchAIWithRetry("https://ai.gateway.lovable.dev/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${LOVABLE_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: aiRequestBody,
-      }, corsHeaders);
-
-      // If retry helper returned a non-OK response (402/429), pass it through
-      if (!aiResponse.ok) return aiResponse;
-
-      const aiData = await aiResponse.json();
-      const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
-      if (toolCall) {
-        const parsed = JSON.parse(toolCall.function.arguments);
-        extractedItems = parsed.items || [];
-        extractedText = parsed.extracted_text || "";
-      }
+      const claudeResult = await callClaude(messages, systemPrompt);
+      if (claudeResult?.ok === false) return claudeResult;
+      extractedItems = claudeResult.items || [];
+      extractedText = claudeResult.extracted_text || "";
     } else if (isXlsx || isEml) {
       let textContent = "";
 
@@ -594,37 +596,14 @@ ${knownTenantsList}` : ""}`;
           const pdfDataUrl = `data:application/pdf;base64,${pdfBase64}`;
           console.log("Using PDF attachment for AI extraction instead of raw EML text");
 
-          const pdfAiResponse = await fetchAIWithRetry("https://ai.gateway.lovable.dev/v1/chat/completions", {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${LOVABLE_API_KEY}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              model: "google/gemini-2.5-flash",
-              messages: [
-                { role: "system", content: systemPrompt },
-                {
-                  role: "user",
-                  content: [
-                    { type: "text", text: "Extract ALL rent payment line items from this PDF document attached to an email. If it is a remittance detail with multiple tenants/units, extract EACH line item separately. Carefully distinguish between: the property street address, each tenant's personal name, the paying organization/agency, the payment amount per tenant, and the payment method." },
-                    { type: "image_url", image_url: { url: pdfDataUrl } },
-                  ],
-                },
-              ],
-              tools: [extractMultiReceiptTool],
-              tool_choice: { type: "function", function: { name: "extract_receipts" } },
-            }),
-          }, corsHeaders);
-
-          if (!pdfAiResponse.ok) return pdfAiResponse;
-
-          const pdfAiData = await pdfAiResponse.json();
-          const pdfToolCall = pdfAiData.choices?.[0]?.message?.tool_calls?.[0];
-          if (pdfToolCall) {
-            const parsed = JSON.parse(pdfToolCall.function.arguments);
-            extractedItems = parsed.items || [];
-          }
+          const pdfClaudeResult = await callClaude([
+            { role: "user", content: [
+              { type: "text", text: "Extract ALL rent payment line items from this PDF document attached to an email. If it is a remittance detail with multiple tenants/units, extract EACH line item separately. Carefully distinguish between: the property street address, each tenant's personal name, the paying organization/agency, the payment amount per tenant, and the payment method." },
+              { type: "image", source: { type: "base64", media_type: "application/pdf", data: pdfBase64 } },
+            ]},
+          ], systemPrompt);
+          if (!pdfClaudeResult?.ok) return new Response(JSON.stringify({ error: "AI extraction failed" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+          extractedItems = pdfClaudeResult.items || [];
 
           // Upload the PDF for preview and set extractedText
           const pdfPath = `uploads/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}_attachment.pdf`;
@@ -648,37 +627,14 @@ ${knownTenantsList}` : ""}`;
           const attachmentDataUrl = `data:${isActuallyPdf ? "application/pdf" : imageAttachment.mimeType};base64,${attachmentBase64}`;
           console.log(`Using ${isActuallyPdf ? "PDF (from image search)" : "image"} attachment for AI extraction`);
 
-          const imgAiResponse = await fetchAIWithRetry("https://ai.gateway.lovable.dev/v1/chat/completions", {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${LOVABLE_API_KEY}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              model: "google/gemini-2.5-flash",
-              messages: [
-                { role: "system", content: systemPrompt },
-                {
-                  role: "user",
-                  content: [
-                    { type: "text", text: `Extract ALL rent payment line items from this ${isActuallyPdf ? "PDF document" : "image"} attached to an email. If it is a remittance detail with multiple tenants/units, extract EACH line item separately. Carefully distinguish between: the property street address, each tenant's personal name, the paying organization/agency, the payment amount per tenant, and the payment method.` },
-                    { type: "image_url", image_url: { url: attachmentDataUrl } },
-                  ],
-                },
-              ],
-              tools: [extractMultiReceiptTool],
-              tool_choice: { type: "function", function: { name: "extract_receipts" } },
-            }),
-          }, corsHeaders);
-
-          if (!imgAiResponse.ok) return imgAiResponse;
-
-          const imgAiData = await imgAiResponse.json();
-          const imgToolCall = imgAiData.choices?.[0]?.message?.tool_calls?.[0];
-          if (imgToolCall) {
-            const parsed = JSON.parse(imgToolCall.function.arguments);
-            extractedItems = parsed.items || [];
-          }
+          const imgClaudeResult = await callClaude([
+            { role: "user", content: [
+              { type: "text", text: `Extract ALL rent payment line items from this ${isActuallyPdf ? "PDF document" : "image"} attached to an email. If it is a remittance detail with multiple tenants/units, extract EACH line item separately. Carefully distinguish between: the property street address, each tenant's personal name, the paying organization/agency, the payment amount per tenant, and the payment method.` },
+              { type: "image", source: { type: "base64", media_type: isActuallyPdf ? "application/pdf" : imageAttachment.mimeType as any, data: attachmentBase64 } },
+            ]},
+          ], systemPrompt);
+          if (!imgClaudeResult?.ok) return new Response(JSON.stringify({ error: "AI extraction failed" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+          extractedItems = imgClaudeResult.items || [];
 
           // Upload the attachment for preview
           if (isActuallyPdf) {
@@ -762,37 +718,15 @@ ${knownTenantsList}` : ""}`;
 
       // Only run text-based AI extraction if we haven't already extracted from a PDF attachment
       if (textContent !== "__PDF_EXTRACTED__" && textContent !== "__IMAGE_EXTRACTED__") {
-        const aiResponse = await fetchAIWithRetry("https://ai.gateway.lovable.dev/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${LOVABLE_API_KEY}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            model: "google/gemini-2.5-flash",
-            messages: [
-              { role: "system", content: systemPrompt },
-              {
-                role: "user",
-                content: `Extract ALL rent payment line items from this ${isEml ? "email" : "spreadsheet"}. EVERY row/line item in the ${isEml ? "remittance detail" : "spreadsheet"} represents a separate receipt for a different tenant — extract ALL of them as separate items.\n\n${textContent}`,
-              },
-            ],
-            tools: [extractMultiReceiptTool],
-            tool_choice: { type: "function", function: { name: "extract_receipts" } },
-          }),
-        }, corsHeaders);
+        const textClaudeResult = await callClaude([
+          { role: "user", content: `Extract ALL rent payment line items from this ${isEml ? "email" : "spreadsheet"}. EVERY row/line item in the ${isEml ? "remittance detail" : "spreadsheet"} represents a separate receipt for a different tenant — extract ALL of them as separate items.\n\n${textContent}` },
+        ], systemPrompt);
 
-        if (!aiResponse.ok) return aiResponse;
+        if (!textClaudeResult?.ok) return new Response(JSON.stringify({ error: "AI extraction failed" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
-        const aiData = await aiResponse.json();
-        const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
-        if (toolCall) {
-          const parsed = JSON.parse(toolCall.function.arguments);
-          extractedItems = parsed.items || [];
-          // For EML, keep the HTML body we already extracted; for XLSX keep the CSV
-          if (!extractedText) {
-            extractedText = parsed.extracted_text || textContent.substring(0, 5000);
-          }
+        extractedItems = textClaudeResult.items || [];
+        if (!extractedText) {
+          extractedText = textClaudeResult.extracted_text || textContent.substring(0, 5000);
         }
       }
     } else {
