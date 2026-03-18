@@ -108,7 +108,7 @@ function sortRentMonths(a: string, b: string): number {
 
 /* ─── Main page ─── */
 export default function EntryView() {
-  const { user } = useAuth();
+  const { user, session } = useAuth();
   const queryClient = useQueryClient();
   const { isAdmin, deleteMutation } = useAdminDelete();
   const { pushUndo } = useUndoStack("entry");
