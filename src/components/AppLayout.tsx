@@ -120,11 +120,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <div className="px-4 py-5">
               <div className="flex items-center gap-2.5">
                 <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-sidebar-primary">
-                  <FileText className="h-4 w-4 text-sidebar-primary-foreground" />
+                  <span className="text-xs font-black text-sidebar-primary-foreground tracking-tighter">CW</span>
                 </div>
                 <div>
-                  <h1 className="text-sm font-bold text-sidebar-accent-foreground tracking-tight">ReceiptVault</h1>
-                  <p className="text-[10px] text-sidebar-foreground/60 uppercase tracking-widest">Rent Receipts</p>
+                  <h1 className="text-sm font-bold text-sidebar-accent-foreground tracking-tight">Countywide</h1>
+                  <p className="text-[10px] text-sidebar-foreground/60 uppercase tracking-widest">Receipt Hub</p>
                 </div>
               </div>
             </div>

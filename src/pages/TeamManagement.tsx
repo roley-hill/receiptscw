@@ -176,7 +176,7 @@ export default function TeamManagement() {
           body: JSON.stringify({
             email: inviteEmail,
             role: inviteRole,
-            redirectTo: `https://receiptscw.lovable.app/accept-invite`,
+            redirectTo: `https://receiptscw.vercel.app/accept-invite`,
           }),
         }
       );
@@ -203,7 +203,7 @@ export default function TeamManagement() {
         {
           method: "POST",
           headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ email, redirectTo: `https://receiptscw.lovable.app/accept-invite` }),
+          body: JSON.stringify({ email, redirectTo: `https://receiptscw.vercel.app/accept-invite` }),
         }
       );
       if (!resp.ok) {
