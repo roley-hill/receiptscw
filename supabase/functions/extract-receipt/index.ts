@@ -1146,29 +1146,38 @@ ${knownTenantsList}` : ""}`;
     }
 
     for (const item of extractedItems) {
-      // ---- CHECK 1: Exact field match ----
+      // ---- CHECK 1: Exact field match (normalize names first) ----
+      // Normalise "Last, First" → "First Last" so AppFolio-created receipts match PDF-extracted ones
+      const normalizePersonName = (s: string) => {
+        if (!s) return "";
+        const p = s.split(",").map((x: string) => x.trim());
+        const reordered = p.length === 2 ? `${p[1]} ${p[0]}` : s;
+        return reordered.toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+      };
+      const normalizedItemTenant = normalizePersonName(item.tenant);
+
       if (item.tenant && item.amount && item.receipt_date) {
+        // Query by amount + date + property + unit, then compare normalized names
         let dupQuery = supabase
           .from("receipts")
-          .select("id, receipt_id")
-          .eq("tenant", item.tenant)
+          .select("id, receipt_id, tenant")
           .eq("amount", item.amount)
           .eq("receipt_date", item.receipt_date)
           .eq("property", item.property || "")
-          .eq("unit", item.unit || "")
           .is("deleted_at", null);
 
         if (item.rent_month) {
           dupQuery = dupQuery.eq("rent_month", item.rent_month);
-        } else {
-          dupQuery = dupQuery.is("rent_month", null);
         }
 
-        const { data: existing } = await dupQuery.limit(1);
+        const { data: existing } = await dupQuery.limit(20);
 
         if (existing && existing.length > 0) {
-          await recordSkippedDuplicate(item, existing[0].receipt_id, existing[0].id, "exact_match");
-          continue;
+          const exactDup = existing.find(r => normalizePersonName(r.tenant) === normalizedItemTenant);
+          if (exactDup) {
+            await recordSkippedDuplicate(item, exactDup.receipt_id, exactDup.id, "exact_match");
+            continue;
+          }
         }
       }
 
@@ -1210,7 +1219,36 @@ ${knownTenantsList}` : ""}`;
         }
       }
 
-      // Also check by file_name + all key fields to catch re-uploads
+      // ---- CHECK 3: REFERENCE NUMBER MATCH ----
+      // Reference numbers (ACH ref, check #, EFT ID) are unique per transaction.
+      // If an AppFolio-auto-created receipt already exists with the same reference + amount,
+      // this is a duplicate regardless of name format differences (Last,First vs First Last).
+      if (item.reference && item.amount) {
+        const normRef = (s: string) => (s || "").replace(/[^0-9a-z]/gi, "").toLowerCase();
+        const itemRef = normRef(item.reference);
+        if (itemRef.length >= 4) {
+          const { data: refMatches } = await supabase
+            .from("receipts")
+            .select("id, receipt_id, tenant, reference")
+            .eq("amount", item.amount)
+            .is("deleted_at", null)
+            .limit(50);
+
+          if (refMatches && refMatches.length > 0) {
+            const refDup = refMatches.find(r => {
+              const existingRef = normRef(r.reference || "");
+              return existingRef.length >= 4 && (existingRef.includes(itemRef) || itemRef.includes(existingRef));
+            });
+            if (refDup) {
+              console.log(`Reference duplicate: "${item.tenant}" ref=${item.reference} matches existing "${refDup.tenant}" ref=${refDup.reference} $${item.amount}`);
+              await recordSkippedDuplicate(item, refDup.receipt_id, refDup.id, "reference_match");
+              continue;
+            }
+          }
+        }
+      }
+
+
       if (item.tenant && item.amount && item.receipt_date) {
         let reuploadQuery = supabase
           .from("receipts")

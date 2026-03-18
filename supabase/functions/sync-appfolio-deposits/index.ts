@@ -274,7 +274,7 @@ serve(async (req) => {
               deposit_date: dep.depositDate,
               property: line.propertyFull,
               unit: line.unit,
-              tenant: line.payer,
+              tenant: (() => { const p = (line.payer||"").split(",").map((x:string)=>x.trim()); return p.length===2 ? `${p[1]} ${p[0]}` : line.payer; })(),
               amount: line.amount,
               reference: line.reference,
               description: line.description,
@@ -296,7 +296,7 @@ serve(async (req) => {
             const { data: newR } = await adminClient.from("receipts").insert({
               user_id: user.id,
               property: line.propertyFull.split(" - ")[0] || line.propertyFull,
-              tenant: line.payer,
+              tenant: (() => { const p = (line.payer||"").split(",").map((x:string)=>x.trim()); return p.length===2 ? `${p[1]} ${p[0]}` : line.payer; })(),
               unit: line.unit,
               amount: line.amount,
               reference: line.reference,
