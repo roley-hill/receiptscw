@@ -136,6 +136,31 @@ export default function EntryView() {
   const canonicalMap = buildCanonicalPropertyMap(finalized);
   const canonical = (prop: string) => canonicalMap.get(normalizeAddress(prop)) ?? prop;
 
+  // Recorded filter state
+  const [recordedFilter, setRecordedFilter] = useState<"all" | "recorded" | "unrecorded">("all");
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  const syncWithAppfolio = async () => {
+    if (!session?.access_token) return;
+    setIsSyncing(true);
+    toast({ title: "Syncing with AppFolio...", description: "Checking receipts against AppFolio records. This may take a moment." });
+    try {
+      const resp = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/verify-appfolio-receipts`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      toast({ title: "Sync Complete", description: `${data.verified} receipts confirmed recorded, ${data.not_found} not found in AppFolio` });
+      queryClient.invalidateQueries({ queryKey: ["receipts"] });
+    } catch (err: any) {
+      toast({ title: "Sync Failed", description: err.message, variant: "destructive" });
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   // Map canonical property names to their ownership entity
   const propertyToEntity = useMemo(() => {
     const map = new Map<string, string | null>(); // canonical property → entity id
