@@ -1086,8 +1086,28 @@ export default function EntryView() {
         <div>
           <h1 className="text-2xl font-bold text-foreground">AppFolio Entry & Recording</h1>
           <p className="text-sm text-muted-foreground mt-1">Select a building, copy fields into AppFolio, mark as recorded, then create deposit batches.</p>
+          <Tabs value={recordedFilter} onValueChange={(v) => setRecordedFilter(v as any)} className="mt-3">
+            <TabsList>
+              <TabsTrigger value="all">All ({finalized.length})</TabsTrigger>
+              <TabsTrigger value="recorded">
+                ✅ Recorded ({finalized.filter(r => (r as any).appfolio_recorded).length})
+              </TabsTrigger>
+              <TabsTrigger value="unrecorded">
+                ☐ Unrecorded ({finalized.filter(r => !(r as any).appfolio_recorded).length})
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={syncWithAppfolio}
+            disabled={isSyncing}
+          >
+            <RefreshCw className={`h-4 w-4 mr-1 ${isSyncing ? "animate-spin" : ""}`} />
+            {isSyncing ? "Syncing..." : "Sync with AppFolio"}
+          </Button>
           <Button
             variant={filterPanelOpen ? "default" : "outline"}
             size="sm"
