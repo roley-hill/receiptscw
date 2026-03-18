@@ -1279,9 +1279,9 @@ ${knownTenantsList}` : ""}`;
         });
 
         if (alreadyPaid) {
-          console.log(`AppFolio cross-check: "${item.tenant}" $${itemAmount} month=${itemMonth} already recorded (paid_amount=$${alreadyPaid.paid_amount} for ${alreadyPaid.charged_to} @ ${alreadyPaid.unit}, receipt_date=${alreadyPaid.receipt_date})`);
-          await recordSkippedDuplicate(item, "APPFOLIO_ALREADY_RECORDED", null, "appfolio_paid");
-          continue;
+          console.log(`AppFolio cross-check: "${item.tenant}" $${itemAmount} month=${itemMonth} already recorded in AppFolio — saving as finalized+recorded.`);
+          // Mark as already recorded in AppFolio so it lands on Entry page pre-checked
+          item._appfolio_recorded = true;
         }
       }
 
@@ -1359,7 +1359,7 @@ ${knownTenantsList}` : ""}`;
       ];
       const avgCriticalConfidence = criticalConfidences.reduce((a: number, b: number) => a + b, 0) / criticalConfidences.length;
       const hasMissingRequired = !item.property || !item.tenant || !item.amount;
-      const status = hasMissingRequired ? "exception" : avgCriticalConfidence < 0.7 ? "exception" : "needs_review";
+      const status = item._appfolio_recorded ? "finalized" : (hasMissingRequired ? "exception" : avgCriticalConfidence < 0.7 ? "exception" : "needs_review");
 
       const { data: receipt, error: insertError } = await supabase
         .from("receipts")
@@ -1388,6 +1388,8 @@ ${knownTenantsList}` : ""}`;
             amountVerified: item.amount_verified ?? null,
           },
           status,
+          appfolio_recorded: item._appfolio_recorded === true,
+          appfolio_recorded_at: item._appfolio_recorded ? new Date().toISOString() : null,
           subsidy_provider: subsidyProvider,
           file_path: extractedText.startsWith("PDF_ATTACHMENT:") ? extractedText.replace("PDF_ATTACHMENT:", "") : filePath,
           file_name: file.name,
@@ -1396,7 +1398,6 @@ ${knownTenantsList}` : ""}`;
         })
         .select()
         .single();
-
       if (insertError) {
         console.error("Insert error for item:", item.tenant, insertError.message);
         // Retry once after a brief pause
@@ -1427,6 +1428,8 @@ ${knownTenantsList}` : ""}`;
               amountVerified: item.amount_verified ?? null,
             },
             status,
+            appfolio_recorded: item._appfolio_recorded === true,
+            appfolio_recorded_at: item._appfolio_recorded ? new Date().toISOString() : null,
             subsidy_provider: subsidyProvider,
             file_path: extractedText.startsWith("PDF_ATTACHMENT:") ? extractedText.replace("PDF_ATTACHMENT:", "") : filePath,
             file_name: file.name,
@@ -1435,7 +1438,6 @@ ${knownTenantsList}` : ""}`;
           })
           .select()
           .single();
-
         if (retryError) {
           console.error("Retry insert also failed for:", item.tenant, retryError.message);
           // Track as a failed item so counts stay accurate
