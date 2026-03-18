@@ -149,14 +149,14 @@ serve(async (req) => {
       });
     }
 
-    // Fetch all active, unbatched receipts for matching
+    // Fetch all active receipts for matching (including already-batched for info, but won't re-batch)
     const allReceipts: any[] = [];
     let from = 0;
     const PAGE = 1000;
     while (true) {
       const { data: page } = await adminClient
         .from("receipts")
-        .select("id, tenant, unit, property, amount, receipt_date, batch_id, status, reference")
+        .select("id, tenant, unit, property, amount, receipt_date, rent_month, batch_id, status, reference")
         .is("deleted_at", null)
         .range(from, from + PAGE - 1);
       if (!page || page.length === 0) break;
@@ -165,18 +165,54 @@ serve(async (req) => {
       from += PAGE;
     }
 
+    const depositDate = deposit.deposit_date ? new Date(deposit.deposit_date) : new Date();
+    const depositMonth = deposit.deposit_date ? deposit.deposit_date.substring(0, 7) : null;
+
     // Match each line item to a receipt
-    const matched: { receiptId: string; lineItem: any }[] = [];
+    const matched: { receiptId: string; lineItem: any; score: number }[] = [];
     const unmatched: any[] = [];
+    const nearMatches: any[] = []; // close but not confident enough
     const usedReceiptIds = new Set<string>();
 
     for (const item of deposit.line_items) {
-      const match = findBestMatch(item, allReceipts, usedReceiptIds);
-      if (match) {
-        matched.push({ receiptId: match.id, lineItem: item });
-        usedReceiptIds.add(match.id);
+      const result = findBestMatch(item, allReceipts, usedReceiptIds, depositDate, depositMonth);
+      if (result.match) {
+        matched.push({ receiptId: result.match.id, lineItem: item, score: result.score });
+        usedReceiptIds.add(result.match.id);
       } else {
-        unmatched.push(item);
+        unmatched.push({
+          tenant_name: item.tenant_name,
+          amount: item.amount,
+          property: item.property,
+          check_number: item.check_number,
+          date: item.date,
+          description: item.description,
+        });
+        // Include near-matches for preview UI
+        if (result.nearMatch) {
+          nearMatches.push({
+            deposit_line: {
+              tenant_name: item.tenant_name,
+              amount: item.amount,
+              property: item.property,
+              check_number: item.check_number,
+              date: item.date,
+              description: item.description,
+            },
+            receipt: {
+              id: result.nearMatch.id,
+              tenant: result.nearMatch.tenant,
+              property: result.nearMatch.property,
+              amount: result.nearMatch.amount,
+              rent_month: result.nearMatch.rent_month,
+              reference: result.nearMatch.reference,
+              unit: result.nearMatch.unit,
+              receipt_date: result.nearMatch.receipt_date,
+            },
+            score: result.nearScore,
+            reasons: result.nearReasons,
+          });
+        }
       }
     }
 
@@ -184,34 +220,34 @@ serve(async (req) => {
     const matchedCount = matched.length;
     const unmatchedCount = unmatched.length;
 
-    // Determine match category
-    let matchCategory: "perfect" | "partial" | "unrelated";
+    let matchCategory: "complete" | "partial" | "unrelated";
     if (matchedCount === 0) {
       matchCategory = "unrelated";
     } else if (unmatchedCount === 0) {
-      matchCategory = "perfect";
+      matchCategory = "complete";
     } else {
       matchCategory = "partial";
     }
 
-    // Only create a batch for PERFECT matches
-    if (matchCategory === "perfect") {
-      // Look up property for ownership entity
-      let ownershipEntityId: string | null = null;
-      if (matched.length > 0) {
-        const firstReceipt = allReceipts.find(r => r.id === matched[0].receiptId);
-        if (firstReceipt?.property) {
-          const { data: prop } = await adminClient
-            .from("properties")
-            .select("ownership_entity_id")
-            .eq("address", firstReceipt.property)
-            .maybeSingle();
-          if (prop?.ownership_entity_id) ownershipEntityId = prop.ownership_entity_id;
-        }
+    // ALWAYS create the batch (even partial), assign matched receipts
+    let ownershipEntityId: string | null = null;
+    if (matched.length > 0) {
+      const firstReceipt = allReceipts.find(r => r.id === matched[0].receiptId);
+      if (firstReceipt?.property) {
+        const { data: prop } = await adminClient
+          .from("properties")
+          .select("ownership_entity_id")
+          .eq("address", firstReceipt.property)
+          .maybeSingle();
+        if (prop?.ownership_entity_id) ownershipEntityId = prop.ownership_entity_id;
       }
+    }
 
-      const totalMatched = matched.reduce((s, m) => s + Number(m.lineItem.amount), 0);
+    const totalMatched = matched.reduce((s, m) => s + Number(m.lineItem.amount), 0);
 
+    // Only create batch if we have at least one match
+    let batchRecord: any = null;
+    if (matchedCount > 0) {
       const { data: newBatch, error: batchErr } = await adminClient
         .from("deposit_batches")
         .insert({
@@ -234,32 +270,31 @@ serve(async (req) => {
         throw new Error(`Failed to create batch: ${batchErr.message}`);
       }
 
-      // Assign matched receipts to this batch
-      for (const m of matched) {
-        await adminClient
-          .from("receipts")
-          .update({ batch_id: newBatch.id })
-          .eq("id", m.receiptId);
-      }
+      batchRecord = newBatch;
 
-      return new Response(JSON.stringify({
-        status: "perfect",
-        batch_id: batchLabel,
-        deposit_number: depNum,
-        deposit_date: deposit.deposit_date,
-        total_amount: deposit.total_amount,
-        matched_count: matchedCount,
-        unmatched_count: 0,
-        message: `All ${matchedCount} receipts matched — batch ${batchLabel} created`,
-      }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      // Assign matched receipts (skip any already batched)
+      const receiptIdsToAssign = matched
+        .filter(m => {
+          const r = allReceipts.find(x => x.id === m.receiptId);
+          return r && !r.batch_id;
+        })
+        .map(m => m.receiptId);
+
+      if (receiptIdsToAssign.length > 0) {
+        for (let i = 0; i < receiptIdsToAssign.length; i += 100) {
+          const batch = receiptIdsToAssign.slice(i, i + 100);
+          await adminClient
+            .from("receipts")
+            .update({ batch_id: newBatch.id })
+            .in("id", batch);
+        }
+      }
     }
 
-    // For partial and unrelated — just return info, don't create anything
     return new Response(JSON.stringify({
       status: matchCategory,
       batch_id: batchLabel,
+      batch_uuid: batchRecord?.id || null,
       deposit_number: depNum,
       deposit_date: deposit.deposit_date,
       total_amount: deposit.total_amount,
@@ -269,15 +304,15 @@ serve(async (req) => {
         tenant: m.lineItem.tenant_name,
         amount: m.lineItem.amount,
         receiptId: m.receiptId,
+        score: m.score,
       })),
-      unmatched_items: unmatched.map(u => ({
-        tenant: u.tenant_name,
-        amount: u.amount,
-        property: u.property,
-      })),
-      message: matchCategory === "partial"
-        ? `${matchedCount}/${totalItems} receipts matched — batch NOT created`
-        : `No matching receipts found — deposit is unrelated`,
+      unmatched_items: unmatched,
+      near_matches: nearMatches,
+      message: matchCategory === "complete"
+        ? `All ${matchedCount} receipts matched — batch ${batchLabel} created`
+        : matchCategory === "partial"
+        ? `${matchedCount}/${totalItems} matched — batch ${batchLabel} created with matched receipts`
+        : `No matching receipts found`,
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
@@ -290,106 +325,141 @@ serve(async (req) => {
   }
 });
 
-/**
- * Match a deposit line item to a receipt in the DB.
- * Priority: reference match > amount + date + tenant + property/unit
- * Hard filters: amount within $0.01, date within ±15 days
- */
-function findBestMatch(item: any, receipts: any[], used: Set<string>): any | null {
+interface MatchResult {
+  match: any | null;
+  score: number;
+  nearMatch: any | null;
+  nearScore: number;
+  nearReasons: string[];
+}
+
+function findBestMatch(item: any, receipts: any[], used: Set<string>, depositDate: Date, depositMonth: string | null): MatchResult {
   const itemAmount = Number(item.amount);
   const itemTenant = normalizeName(item.tenant_name);
-  const itemDate = item.date ? new Date(item.date) : null;
-  const itemRef = normalizeRef(item.check_number);
+  const itemRef = extractNumericRef(item.check_number);
   const { streetNum, unitNum } = parsePropertyUnit(item.property);
 
   let bestScore = 0;
   let bestReceipt: any = null;
+  let bestReasons: string[] = [];
+
+  let nearScore = 0;
+  let nearReceipt: any = null;
+  let nearReasons: string[] = [];
 
   for (const r of receipts) {
     if (used.has(r.id)) continue;
+    // DUPLICATE GUARD: never add a receipt that already has a batch_id
     if (r.batch_id) continue;
+
+    let score = 0;
+    const reasons: string[] = [];
 
     // Amount must match within $0.01
     if (Math.abs(Number(r.amount) - itemAmount) > 0.01) continue;
+    score += 1;
+    reasons.push("amount");
 
-    // Date must be within ±15 days (hard filter)
-    if (itemDate && r.receipt_date) {
-      const rDate = new Date(r.receipt_date);
-      const diffDays = Math.abs((itemDate.getTime() - rDate.getTime()) / 86400000);
-      if (diffDays > 15) continue;
+    // 1. PRIMARY: Reference match
+    const rRef = extractNumericRef(r.reference);
+    if (itemRef && rRef) {
+      if (itemRef === rRef) {
+        score += 10;
+        reasons.push("ref_exact");
+      } else if (rRef.includes(itemRef) || itemRef.includes(rRef)) {
+        score += 7;
+        reasons.push("ref_partial");
+      }
     }
 
-    let score = 1; // base score for amount match
-
-    // Reference / check number match (very strong signal)
-    const rRef = normalizeRef(r.reference);
-    if (itemRef && rRef && itemRef === rRef) {
-      score += 10; // reference match is nearly definitive
-    } else if (itemRef && rRef && (rRef.includes(itemRef) || itemRef.includes(rRef))) {
-      score += 7; // partial reference match (one contains the other)
-    }
-
-    // Date proximity scoring
-    if (itemDate && r.receipt_date) {
-      const rDate = new Date(r.receipt_date);
-      const diffDays = Math.abs((itemDate.getTime() - rDate.getTime()) / 86400000);
-      if (diffDays === 0) score += 4;
-      else if (diffDays <= 3) score += 3;
-      else if (diffDays <= 7) score += 2;
-      else score += 1; // within 15 days
-    }
-
-    // Tenant name match
+    // 2. SECONDARY: Tenant name match
     const rTenant = normalizeName(r.tenant);
     if (rTenant === itemTenant) {
       score += 5;
+      reasons.push("tenant_exact");
     } else if (lastNameMatch(itemTenant, rTenant)) {
       score += 3;
+      reasons.push("tenant_lastname");
     } else if (fuzzyNameMatch(itemTenant, rTenant)) {
       score += 2;
+      reasons.push("tenant_fuzzy");
     } else if (score < 10) {
-      // Only skip if we don't have a strong reference match
+      // Only allow no tenant match if we have a strong reference match
+      // Track as near-match candidate
+      if (score > nearScore) {
+        nearScore = score;
+        nearReceipt = r;
+        nearReasons = [...reasons, "tenant_mismatch"];
+      }
       continue;
     }
 
-    // Property/unit match
+    // 3. Property/unit match
     const rStreetNum = extractStreetNumber(r.property);
     const rUnit = extractUnitNumber(r.unit);
-    if (streetNum && rStreetNum === streetNum) score += 2;
-    if (unitNum && rUnit === unitNum) score += 3;
+    if (streetNum && rStreetNum === streetNum) {
+      score += 2;
+      reasons.push("property");
+    }
+    if (unitNum && rUnit === unitNum) {
+      score += 3;
+      reasons.push("unit");
+    }
+
+    // 4. DATE FLEXIBILITY: Use rent_month, allow ±1 month of deposit date
+    if (r.rent_month && depositMonth) {
+      const [ry, rm] = r.rent_month.split("-").map(Number);
+      const [dy, dm] = depositMonth.split("-").map(Number);
+      const diffMonths = Math.abs((ry * 12 + rm) - (dy * 12 + dm));
+      if (diffMonths <= 1) {
+        score += 2;
+        reasons.push("month_match");
+      }
+      // Never reject based on date — just don't add bonus
+    }
 
     if (score > bestScore) {
       bestScore = score;
       bestReceipt = r;
+      bestReasons = reasons;
+    }
+
+    // Track near-match
+    if (score > nearScore) {
+      nearScore = score;
+      nearReceipt = r;
+      nearReasons = reasons;
     }
   }
 
-  // Require minimum score of 5 (tighter than before)
-  return bestScore >= 5 ? bestReceipt : null;
+  // Require minimum score of 5
+  if (bestScore >= 5) {
+    return { match: bestReceipt, score: bestScore, nearMatch: null, nearScore: 0, nearReasons: [] };
+  }
+
+  return {
+    match: null,
+    score: 0,
+    nearMatch: nearReceipt,
+    nearScore,
+    nearReasons,
+  };
 }
 
-function normalizeRef(ref: string): string {
+function extractNumericRef(ref: string): string {
   if (!ref) return "";
-  // Strip common prefixes and non-alphanumeric chars, keep core number
-  return ref.replace(/^(CHK|ACH|EFT|WIRE|REF|#)\s*/i, "").replace(/[^a-z0-9]/gi, "").toLowerCase();
+  return ref.replace(/[^0-9]/g, "");
 }
 
 function normalizeName(name: string): string {
   if (!name) return "";
-  return name
-    .toLowerCase()
-    .replace(/[^a-z\s]/g, "")
-    .replace(/\b(jr|sr|sir|ii|iii|iv)\b/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
+  return name.toLowerCase().replace(/[^a-z\s]/g, "").replace(/\b(jr|sr|sir|ii|iii|iv)\b/g, "").replace(/\s+/g, " ").trim();
 }
 
 function lastNameMatch(a: string, b: string): boolean {
   const aWords = a.split(" ");
   const bWords = b.split(" ");
-  const aLast = aWords[aWords.length - 1];
-  const bLast = bWords[bWords.length - 1];
-  return aLast === bLast && aLast.length > 2;
+  return aWords[aWords.length - 1] === bWords[bWords.length - 1] && aWords[aWords.length - 1].length > 2;
 }
 
 function fuzzyNameMatch(a: string, b: string): boolean {
@@ -402,22 +472,18 @@ function fuzzyNameMatch(a: string, b: string): boolean {
 
 function parsePropertyUnit(prop: string): { streetNum: string; unitNum: string } {
   if (!prop) return { streetNum: "", unitNum: "" };
-  const streetMatch = prop.match(/^(\d+)/);
-  const unitMatch = prop.match(/[-–]\s*(\d+)\s*$/);
   return {
-    streetNum: streetMatch?.[1] || "",
-    unitNum: unitMatch?.[1] || "",
+    streetNum: prop.match(/^(\d+)/)?.[1] || "",
+    unitNum: prop.match(/[-–]\s*(\d+)\s*$/)?.[1] || "",
   };
 }
 
 function extractStreetNumber(address: string): string {
   if (!address) return "";
-  const m = address.match(/^(\d+)/);
-  return m?.[1] || "";
+  return address.match(/^(\d+)/)?.[1] || "";
 }
 
 function extractUnitNumber(unit: string): string {
   if (!unit) return "";
-  const m = unit.match(/(?:^|\D)(\d+)$/);
-  return m?.[1] || unit.replace(/\D/g, "");
+  return unit.match(/(?:^|\D)(\d+)$/)?.[1] || unit.replace(/\D/g, "");
 }
