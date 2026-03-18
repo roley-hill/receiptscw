@@ -214,21 +214,25 @@ serve(async (req) => {
     console.log(`Deposit sync ${fromDate}→${toDate} autoCreate=${autoCreateBatches} createMissing=${createMissingReceipts}`);
 
     // ── Fetch deposit register ─────────────────────────────────────────────
+    // NOTE: AppFolio deposit_register does NOT support &page=N parameter.
+    // Pagination is handled via next_page_url in the response.
     const appfolioBase = "https://countywidemanagement.appfolio.com";
     const basicAuth = btoa(`${clientId}:${clientSecret}`);
     const rawRows: any[] = [];
-    let pg = 1, more = true;
-    while (more) {
-      const url = `${appfolioBase}/api/v0/reports/deposit_register.json?paginate_results=true&per_page=500&page=${pg}&from_date=${fromDate}&to_date=${toDate}`;
-      const resp = await fetch(url, { headers: { "Authorization": `Basic ${basicAuth}`, "Accept": "application/json" } });
-      if (!resp.ok) { console.error(`AppFolio ${resp.status}`); break; }
+    let nextUrl: string | null = `${appfolioBase}/api/v0/reports/deposit_register.json?paginate_results=true&per_page=5000&from_date=${fromDate}&to_date=${toDate}`;
+
+    while (nextUrl) {
+      const resp = await fetch(nextUrl, { headers: { "Authorization": `Basic ${basicAuth}`, "Accept": "application/json" } });
+      if (!resp.ok) { console.error(`AppFolio ${resp.status}: ${await resp.text().then(t=>t.substring(0,200))}`); break; }
       const data = await resp.json();
-      const results = data?.results || (Array.isArray(data) ? data : []);
-      if (!results.length) { more = false; break; }
+      const results: any[] = data?.results || (Array.isArray(data) ? data : []);
+      console.log(`Fetched page: ${results.length} rows`);
       rawRows.push(...results);
-      if (results.length < 500) more = false; else pg++;
+      // Follow next_page_url if present and results were full page
+      const rawNext: string = data?.next_page_url || "";
+      nextUrl = rawNext && results.length >= 100 ? rawNext : null;
     }
-    console.log(`Fetched ${rawRows.length} raw rows`);
+    console.log(`Fetched ${rawRows.length} total raw rows`);
 
     const afDeposits = parseDepositRegister(rawRows);
     const totalAfLines = afDeposits.reduce((s: number, d: AfDeposit) => s + d.lines.length, 0);
