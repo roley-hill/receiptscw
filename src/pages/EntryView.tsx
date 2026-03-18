@@ -242,10 +242,16 @@ export default function EntryView() {
     return acc;
   }, {} as Record<string, Record<string, DbReceipt[]>>);
 
-  // Apply column filters
+  // Apply recorded filter + column filters
+  const recordedFiltered = useMemo(() => {
+    if (recordedFilter === "recorded") return finalized.filter(r => (r as any).appfolio_recorded);
+    if (recordedFilter === "unrecorded") return finalized.filter(r => !(r as any).appfolio_recorded);
+    return finalized;
+  }, [finalized, recordedFilter]);
+
   const sidebarFiltered = useMemo(() => {
-    return applyColumnFilters(finalized, columnFilterGroups, filterableColumns);
-  }, [finalized, columnFilterGroups, filterableColumns]);
+    return applyColumnFilters(recordedFiltered, columnFilterGroups, filterableColumns);
+  }, [recordedFiltered, columnFilterGroups, filterableColumns]);
 
 
   const filtered = selectedProperty === "all"
