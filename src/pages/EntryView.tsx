@@ -153,6 +153,32 @@ export default function EntryView() {
   const [recordedFilter, setRecordedFilter] = useState<"all" | "recorded" | "unrecorded">("all");
   const [isSyncingBatches, setIsSyncingBatches] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isSyncingUndeposited, setIsSyncingUndeposited] = useState(false);
+
+  const syncUndeposited = async () => {
+    if (!session?.access_token) return;
+    setIsSyncingUndeposited(true);
+    toast({ title: "Syncing undeposited receipts...", description: "Fetching payments from AppFolio income register. This may take 30–60s." });
+    try {
+      const resp = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/sync-undeposited`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ from_date: "2026-01-01", to_date: new Date().toISOString().substring(0, 10) }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      toast({
+        title: "Undeposited Sync Complete",
+        description: `${data.created_count} new receipts created from ${data.undeposited_count} undeposited payments found`,
+      });
+      queryClient.invalidateQueries({ queryKey: ["receipts"] });
+      queryClient.invalidateQueries({ queryKey: ["pending_counts"] });
+    } catch (err: any) {
+      toast({ title: "Sync Failed", description: err.message, variant: "destructive" });
+    } finally {
+      setIsSyncingUndeposited(false);
+    }
+  };
 
   const syncBatches = async () => {
     if (!session?.access_token) return;
@@ -1184,6 +1210,15 @@ export default function EntryView() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={syncUndeposited}
+            disabled={isSyncingUndeposited}
+          >
+            <RefreshCw className={`h-4 w-4 mr-1 ${isSyncingUndeposited ? "animate-spin" : ""}`} />
+            {isSyncingUndeposited ? "Syncing..." : "Sync Undeposited"}
+          </Button>
           <Button
             variant="outline"
             size="sm"
