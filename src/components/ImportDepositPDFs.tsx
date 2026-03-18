@@ -5,14 +5,18 @@ import { useAuth } from "@/hooks/useAuth";
 import { motion, AnimatePresence } from "framer-motion";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "@/hooks/use-toast";
+import { supabase } from "@/integrations/supabase/client";
+import DepositMatchPreview from "@/components/DepositMatchPreview";
 
 interface FileResult {
   fileName: string;
-  status: "pending" | "processing" | "perfect" | "partial" | "unrelated" | "skipped" | "error";
+  status: "pending" | "processing" | "complete" | "partial" | "unrelated" | "skipped" | "error";
   message?: string;
   depositNumber?: string;
   matchedCount?: number;
   unmatchedCount?: number;
+  nearMatches?: any[];
+  batchUuid?: string | null;
 }
 
 export default function ImportDepositPDFs() {
@@ -22,6 +26,18 @@ export default function ImportDepositPDFs() {
   const [files, setFiles] = useState<FileResult[]>([]);
   const [processing, setProcessing] = useState(false);
   const [completed, setCompleted] = useState(0);
+  const [activePreview, setActivePreview] = useState<number | null>(null);
+
+  const handleIncludeReceipt = async (receiptId: string, batchUuid: string) => {
+    const { error } = await supabase.from("receipts").update({ batch_id: batchUuid }).eq("id", receiptId);
+    if (error) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    } else {
+      toast({ title: "Receipt added to batch" });
+      queryClient.invalidateQueries({ queryKey: ["receipts"] });
+      queryClient.invalidateQueries({ queryKey: ["batches"] });
+    }
+  };
 
   const handleFiles = useCallback(async (selectedFiles: FileList | null) => {
     if (!selectedFiles || selectedFiles.length === 0 || !session?.access_token) return;
@@ -44,9 +60,10 @@ export default function ImportDepositPDFs() {
     setFiles(results);
     setProcessing(true);
     setCompleted(0);
+    setActivePreview(null);
 
     const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/import-deposit-pdf`;
-    let perfectCount = 0;
+    let completeCount = 0;
     let partialCount = 0;
     let unrelatedCount = 0;
     let errorCount = 0;
@@ -72,18 +89,20 @@ export default function ImportDepositPDFs() {
           errorCount++;
         } else if (data.status === "skipped") {
           results[i] = { ...results[i], status: "skipped", message: data.message, depositNumber: data.batch_id };
-        } else if (data.status === "perfect") {
+        } else if (data.status === "complete") {
           results[i] = {
-            ...results[i], status: "perfect", depositNumber: data.batch_id,
+            ...results[i], status: "complete", depositNumber: data.batch_id,
             matchedCount: data.matched_count, unmatchedCount: 0,
             message: `✓ All ${data.matched_count} receipts matched — batch created`,
           };
-          perfectCount++;
+          completeCount++;
         } else if (data.status === "partial") {
           results[i] = {
             ...results[i], status: "partial", depositNumber: data.batch_id,
             matchedCount: data.matched_count, unmatchedCount: data.unmatched_count,
-            message: `${data.matched_count}/${data.matched_count + data.unmatched_count} matched — NOT batched`,
+            nearMatches: data.near_matches || [],
+            batchUuid: data.batch_uuid,
+            message: `${data.matched_count}/${data.matched_count + data.unmatched_count} matched — batch created, review needed`,
           };
           partialCount++;
         } else if (data.status === "unrelated") {
@@ -113,12 +132,12 @@ export default function ImportDepositPDFs() {
 
     toast({
       title: "Import Complete",
-      description: `${perfectCount} batches created, ${partialCount} partial, ${unrelatedCount} unrelated, ${errorCount} errors`,
+      description: `${completeCount} complete, ${partialCount} partial, ${unrelatedCount} unrelated, ${errorCount} errors`,
     });
   }, [session, queryClient]);
 
   const totalFiles = files.length;
-  const perfectFiles = files.filter(f => f.status === "perfect").length;
+  const completeFiles = files.filter(f => f.status === "complete").length;
   const partialFiles = files.filter(f => f.status === "partial").length;
   const unrelatedFiles = files.filter(f => f.status === "unrelated").length;
   const errorFiles = files.filter(f => f.status === "error").length;
@@ -128,20 +147,22 @@ export default function ImportDepositPDFs() {
     switch (status) {
       case "pending": return <FileText className="h-3.5 w-3.5 text-muted-foreground shrink-0" />;
       case "processing": return <Loader2 className="h-3.5 w-3.5 text-accent animate-spin shrink-0" />;
-      case "perfect": return <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />;
-      case "partial": return <AlertTriangle className="h-3.5 w-3.5 text-yellow-500 shrink-0" />;
+      case "complete": return <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />;
+      case "partial": return <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0" />;
       case "unrelated": return <MinusCircle className="h-3.5 w-3.5 text-muted-foreground shrink-0" />;
-      case "skipped": return <AlertTriangle className="h-3.5 w-3.5 text-yellow-500 shrink-0" />;
-      case "error": return <XCircle className="h-3.5 w-3.5 text-red-500 shrink-0" />;
+      case "skipped": return <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0" />;
+      case "error": return <XCircle className="h-3.5 w-3.5 text-destructive shrink-0" />;
     }
   };
+
+  const activeFile = activePreview !== null ? files[activePreview] : null;
 
   return (
     <div className="space-y-6">
       <div>
         <h2 className="text-lg font-semibold text-foreground">Import AppFolio Bank Deposits</h2>
         <p className="text-sm text-muted-foreground mt-1">
-          Upload Bank Deposit PDFs. Perfect matches create batches. Partial & unrelated deposits are flagged only.
+          Upload Bank Deposit PDFs. Matched receipts are batched. Partial matches can be reviewed.
         </p>
       </div>
 
@@ -190,7 +211,7 @@ export default function ImportDepositPDFs() {
             <span className="text-muted-foreground">
               {processing
                 ? `Processing ${completed}/${totalFiles}...`
-                : `Done — ${perfectFiles} batched, ${partialFiles} partial, ${unrelatedFiles} unrelated, ${skippedFiles} skipped, ${errorFiles} errors`}
+                : `Done — ${completeFiles} complete, ${partialFiles} partial, ${unrelatedFiles} unrelated, ${skippedFiles} skipped, ${errorFiles} errors`}
             </span>
             <span className="vault-mono text-xs text-muted-foreground">
               {Math.round((completed / totalFiles) * 100)}%
@@ -208,12 +229,17 @@ export default function ImportDepositPDFs() {
           {/* File list */}
           <div className="border border-border rounded-lg divide-y divide-border max-h-[50vh] overflow-y-auto">
             <AnimatePresence>
-              {files.map((f) => (
+              {files.map((f, i) => (
                 <motion.div
                   key={f.fileName}
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
-                  className="flex items-center gap-3 px-3 py-2 text-xs"
+                  className={`flex items-center gap-3 px-3 py-2 text-xs ${f.status === "partial" && f.nearMatches && f.nearMatches.length > 0 ? "cursor-pointer hover:bg-muted/50" : ""}`}
+                  onClick={() => {
+                    if (f.status === "partial" && f.nearMatches && f.nearMatches.length > 0) {
+                      setActivePreview(activePreview === i ? null : i);
+                    }
+                  }}
                 >
                   {getIcon(f.status)}
                   <span className="font-medium text-foreground truncate min-w-0">{f.fileName}</span>
@@ -221,11 +247,33 @@ export default function ImportDepositPDFs() {
                     <span className="vault-mono text-accent shrink-0">{f.depositNumber}</span>
                   )}
                   <span className="text-muted-foreground truncate ml-auto">{f.message || ""}</span>
+                  {f.status === "partial" && f.nearMatches && f.nearMatches.length > 0 && (
+                    <span className="text-[10px] font-semibold text-amber-600 bg-amber-500/15 rounded-full px-2 py-0.5 shrink-0">
+                      {f.nearMatches.length} to review
+                    </span>
+                  )}
                 </motion.div>
               ))}
             </AnimatePresence>
           </div>
         </div>
+      )}
+
+      {/* Match Preview Panel */}
+      {activeFile && activeFile.nearMatches && activeFile.nearMatches.length > 0 && activeFile.batchUuid && (
+        <DepositMatchPreview
+          nearMatches={activeFile.nearMatches}
+          batchId={activeFile.depositNumber || ""}
+          batchUuid={activeFile.batchUuid}
+          onInclude={(receiptId) => handleIncludeReceipt(receiptId, activeFile.batchUuid!)}
+          onSkip={() => {}}
+          onDone={() => {
+            setActivePreview(null);
+            queryClient.invalidateQueries({ queryKey: ["batches"] });
+            queryClient.invalidateQueries({ queryKey: ["receipts"] });
+            toast({ title: "Batch finalized", description: `${activeFile.depositNumber} review complete` });
+          }}
+        />
       )}
     </div>
   );
