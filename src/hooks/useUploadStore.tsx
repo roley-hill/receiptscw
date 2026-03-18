@@ -10,6 +10,7 @@ export interface UploadedFile {
   error?: string;
   insertedCount?: number;
   duplicateCount?: number;
+  attachedCount?: number;
   totalLineItems?: number;
   duplicateContentWarning?: boolean;
   duplicateContentFile?: string;

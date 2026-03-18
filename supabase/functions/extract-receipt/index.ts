@@ -1108,6 +1108,7 @@ ${knownTenantsList}` : ""}`;
     // ---- DUPLICATE DETECTION & INSERT ----
     const insertedReceipts: any[] = [];
     const duplicates: any[] = [];
+    const attachedToExisting: any[] = [];  // files attached to AppFolio-created receipts with no prior attachment
 
     // Helper: store a skipped duplicate record
     async function recordSkippedDuplicate(item: any, existingId: string, existingUuid: string | null, reason: string) {
@@ -1145,6 +1146,39 @@ ${knownTenantsList}` : ""}`;
       });
     }
 
+    // Helper: try to attach uploaded file to existing receipt if it has no attachment yet;
+    // if it already has one, log to skipped_duplicates as "duplicate_has_attachment"
+    async function tryAttachOrSkip(
+      item: any,
+      existingReceiptId: string,
+      existingUuid: string,
+      existingFilePath: string | null,
+      existingBatchId: string | null,
+    ): Promise<"attached" | "skipped"> {
+      if (!existingFilePath) {
+        // No attachment yet — attach the uploaded file
+        await supabase.from("receipts").update({
+          file_path: filePath,
+          file_name: file.name,
+          original_text: extractedText,
+        }).eq("id", existingUuid);
+        attachedToExisting.push({
+          receipt_id: existingReceiptId,
+          db_id: existingUuid,
+          batch_id: existingBatchId,
+          file_path: filePath,
+          tenant: item.tenant,
+          amount: item.amount,
+        });
+        console.log(`Attached file to existing receipt ${existingReceiptId} (batch: ${existingBatchId})`);
+        return "attached";
+      } else {
+        // Already has attachment — log so user can review in Duplicates queue
+        await recordSkippedDuplicate(item, existingReceiptId, existingUuid, "duplicate_has_attachment");
+        return "skipped";
+      }
+    }
+
     for (const item of extractedItems) {
       // ---- CHECK 1: Exact field match (normalize names first) ----
       // Normalise "Last, First" → "First Last" so AppFolio-created receipts match PDF-extracted ones
@@ -1157,10 +1191,10 @@ ${knownTenantsList}` : ""}`;
       const normalizedItemTenant = normalizePersonName(item.tenant);
 
       if (item.tenant && item.amount && item.receipt_date) {
-        // Query by amount + date + property + unit, then compare normalized names
+        // Query by amount + date + property, then compare normalized names
         let dupQuery = supabase
           .from("receipts")
-          .select("id, receipt_id, tenant")
+          .select("id, receipt_id, tenant, file_path, batch_id")
           .eq("amount", item.amount)
           .eq("receipt_date", item.receipt_date)
           .eq("property", item.property || "")
@@ -1175,7 +1209,7 @@ ${knownTenantsList}` : ""}`;
         if (existing && existing.length > 0) {
           const exactDup = existing.find(r => normalizePersonName(r.tenant) === normalizedItemTenant);
           if (exactDup) {
-            await recordSkippedDuplicate(item, exactDup.receipt_id, exactDup.id, "exact_match");
+            await tryAttachOrSkip(item, exactDup.receipt_id, exactDup.id, exactDup.file_path, exactDup.batch_id);
             continue;
           }
         }
@@ -1189,7 +1223,7 @@ ${knownTenantsList}` : ""}`;
         if (normalizedItemUnit) {
           let fuzzyQuery = supabase
             .from("receipts")
-            .select("id, receipt_id, tenant, unit, rent_month")
+            .select("id, receipt_id, tenant, unit, rent_month, file_path, batch_id")
             .eq("amount", item.amount)
             .eq("receipt_date", item.receipt_date)
             .is("deleted_at", null)
@@ -1212,7 +1246,7 @@ ${knownTenantsList}` : ""}`;
             });
             if (fuzzyDup) {
               console.log(`Fuzzy duplicate: "${item.tenant}" matches existing "${fuzzyDup.tenant}" (unit=${fuzzyDup.unit}, amount=$${item.amount}, date=${item.receipt_date}, rent_month=${item.rent_month})`);
-              await recordSkippedDuplicate(item, fuzzyDup.receipt_id, fuzzyDup.id, "fuzzy_unit_amount_date");
+              await tryAttachOrSkip(item, fuzzyDup.receipt_id, fuzzyDup.id, fuzzyDup.file_path, fuzzyDup.batch_id);
               continue;
             }
           }
@@ -1229,7 +1263,7 @@ ${knownTenantsList}` : ""}`;
         if (itemRef.length >= 4) {
           const { data: refMatches } = await supabase
             .from("receipts")
-            .select("id, receipt_id, tenant, reference")
+            .select("id, receipt_id, tenant, reference, file_path, batch_id")
             .eq("amount", item.amount)
             .is("deleted_at", null)
             .limit(50);
@@ -1241,7 +1275,7 @@ ${knownTenantsList}` : ""}`;
             });
             if (refDup) {
               console.log(`Reference duplicate: "${item.tenant}" ref=${item.reference} matches existing "${refDup.tenant}" ref=${refDup.reference} $${item.amount}`);
-              await recordSkippedDuplicate(item, refDup.receipt_id, refDup.id, "reference_match");
+              await tryAttachOrSkip(item, refDup.receipt_id, refDup.id, refDup.file_path, refDup.batch_id);
               continue;
             }
           }
@@ -1517,9 +1551,11 @@ ${knownTenantsList}` : ""}`;
     return new Response(JSON.stringify({
       receipts: insertedReceipts,
       duplicates,
+      attached_to_existing: attachedToExisting,
       total_line_items: extractedItems.length,
       inserted_count: insertedReceipts.length,
       duplicate_count: duplicates.length,
+      attached_count: attachedToExisting.length,
       ...(duplicateContentFile ? {
         duplicate_content_warning: true,
         duplicate_content_file: duplicateContentFile,

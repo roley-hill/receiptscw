@@ -9,6 +9,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useUploadStore, UploadedFile } from "@/hooks/useUploadStore";
 import { supabase } from "@/integrations/supabase/client";
 import UploadHistory from "@/components/UploadHistory";
+import { highlightPdfLines, highlightExcelRows, BatchReceipt } from "@/lib/batchHighlighting";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -55,6 +56,74 @@ export default function UploadPage() {
 
   const removeFile = (id: string) => {
     setFiles((prev) => prev.filter((f) => f.id !== id));
+  };
+
+  // After a file is attached to an existing receipt in a batch, run highlighting
+  // on the uploaded file and re-upload the highlighted version to the same file_path
+  const highlightAndAttach = async (
+    originalFile: File,
+    attachedItems: Array<{ receipt_id: string; db_id: string; batch_id: string | null; file_path: string }>
+  ) => {
+    // Group by file_path (could be multiple receipts from same file mapped to same path)
+    const byPath = new Map<string, typeof attachedItems>();
+    for (const item of attachedItems) {
+      if (!item.batch_id || !item.file_path) continue;
+      const key = item.file_path;
+      if (!byPath.has(key)) byPath.set(key, []);
+      byPath.get(key)!.push(item);
+    }
+
+    for (const [filePath, items] of byPath.entries()) {
+      try {
+        // Collect all batch_ids involved (usually just one)
+        const batchIds = [...new Set(items.map(i => i.batch_id).filter(Boolean))];
+
+        // Fetch all receipts in these batches so we highlight all their lines
+        const { data: batchReceipts } = await supabase
+          .from("receipts")
+          .select("id, receipt_id, tenant, unit, amount, receipt_date, reference")
+          .in("batch_id", batchIds)
+          .is("deleted_at", null);
+
+        if (!batchReceipts || batchReceipts.length === 0) continue;
+
+        const receiptsForHighlight: BatchReceipt[] = batchReceipts.map(r => ({
+          receipt_id: r.receipt_id,
+          tenant: r.tenant || "",
+          unit: r.unit || "",
+          amount: Number(r.amount),
+          receipt_date: r.receipt_date,
+          reference: r.reference,
+        }));
+
+        const ext = originalFile.name.split(".").pop()?.toLowerCase() || "";
+        let highlightedBytes: Uint8Array | null = null;
+
+        if (ext === "pdf") {
+          highlightedBytes = await highlightPdfLines(originalFile, receiptsForHighlight);
+        } else if (ext === "xlsx" || ext === "xls") {
+          highlightedBytes = await highlightExcelRows(originalFile, receiptsForHighlight);
+        }
+
+        if (!highlightedBytes) continue;
+
+        // Re-upload highlighted version to the same storage path (overwrites raw file)
+        const { error: uploadErr } = await supabase.storage
+          .from("receipts")
+          .upload(filePath, highlightedBytes, {
+            contentType: ext === "pdf" ? "application/pdf" : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            upsert: true,
+          });
+
+        if (uploadErr) {
+          console.warn("Failed to re-upload highlighted file:", uploadErr.message);
+        } else {
+          console.log(`Highlighted and re-uploaded: ${filePath} (${receiptsForHighlight.length} receipts)`);
+        }
+      } catch (err) {
+        console.warn("Highlight+attach error:", err);
+      }
+    }
   };
 
   const startExtraction = async () => {
@@ -165,16 +234,27 @@ export default function UploadPage() {
 
         const insertedCount = result.inserted_count ?? 1;
         const duplicateCount = result.duplicate_count ?? 0;
+        const attachedCount = result.attached_count ?? 0;
         const totalLineItems = result.total_line_items ?? 1;
         const duplicateContentWarning = result.duplicate_content_warning ?? false;
         const duplicateContentFile = result.duplicate_content_file ?? null;
         const duplicateContentCount = result.duplicate_content_count ?? 0;
         const fileContentHash = result.file_content_hash ?? null;
 
+        // If any receipts had files attached, run highlighting on them
+        const attachedToExisting: Array<{ receipt_id: string; db_id: string; batch_id: string | null; file_path: string }> =
+          result.attached_to_existing ?? [];
+        if (attachedToExisting.length > 0) {
+          // Run in background — don't block the UI
+          highlightAndAttach(f.file, attachedToExisting).catch(err =>
+            console.warn("Highlight attach failed:", err)
+          );
+        }
+
         setFiles((prev) =>
           prev.map((pf) =>
             pf.id === f.id
-              ? { ...pf, status: "done", insertedCount, duplicateCount, totalLineItems, duplicateContentWarning, duplicateContentFile, duplicateContentCount, fileContentHash }
+              ? { ...pf, status: "done", insertedCount, duplicateCount, attachedCount, totalLineItems, duplicateContentWarning, duplicateContentFile, duplicateContentCount, fileContentHash }
               : pf
           )
         );
@@ -385,6 +465,11 @@ export default function UploadPage() {
                       {file.status === "done" && (file.duplicateCount ?? 0) > 0 && (
                         <span className="ml-2 vault-mono text-amber-500 flex items-center gap-1 inline-flex">
                           <Copy className="h-3 w-3" /> {file.duplicateCount} duplicate{file.duplicateCount !== 1 ? "s" : ""} skipped
+                        </span>
+                      )}
+                      {file.status === "done" && (file.attachedCount ?? 0) > 0 && (
+                        <span className="ml-2 vault-mono text-blue-400 flex items-center gap-1 inline-flex">
+                          <FileText className="h-3 w-3" /> {file.attachedCount} attached to existing receipt{file.attachedCount !== 1 ? "s" : ""}
                         </span>
                       )}
                       {file.error && <span className="ml-2 text-destructive">{file.error}</span>}
