@@ -147,8 +147,8 @@ serve(async (req) => {
     }>();
 
     for (const row of allIncomeRows) {
-      const receiptAmt = parseAmount(row.receipt_amount);
-      if (receiptAmt === 0) continue; // skip $0 ledger adjustments
+      const receiptAmt = parseFloat(String(row.receipt_amount || "0").replace(/[$,]/g, ""));
+      if (receiptAmt <= 0) continue; // skip $0 adjustments and negative reversals
       if (!row.receipt_id) continue;
       const rid = Number(row.receipt_id);
 
