@@ -322,8 +322,15 @@ serve(async (req) => {
       // Create batch if requested and deposit has real lines
       let batchId: string | null = null, batchCreated = false, batchExisted = false;
       if (autoCreateBatches && lineMatches.length > 0 && dep.depositNumber !== "UNDEPOSITED") {
+        // Build a unique period key: "AF-{number} {YYYY-MM-DD}"
+        // depositDate is MM/DD/YYYY from AppFolio — convert to YYYY-MM-DD for readability
+        let isoDate = dep.depositDate;
+        const dateParts = dep.depositDate.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+        if (dateParts) isoDate = `${dateParts[3]}-${dateParts[1].padStart(2,"0")}-${dateParts[2].padStart(2,"0")}`;
+        const depositPeriodKey = `AF-${dep.depositNumber} ${isoDate}`;
+
         const { data: existing } = await adminClient.from("deposit_batches")
-          .select("id").eq("deposit_period", `AF-${dep.depositNumber}`).maybeSingle();
+          .select("id").eq("deposit_period", depositPeriodKey).maybeSingle();
 
         if (existing) {
           batchId = existing.id; batchExisted = true;
@@ -336,7 +343,7 @@ serve(async (req) => {
 
           const { data: nb } = await adminClient.from("deposit_batches").insert({
             property: batchProp,
-            deposit_period: `AF-${dep.depositNumber}`,
+            deposit_period: depositPeriodKey,
             total_amount: Math.round(total * 100) / 100,
             receipt_count: lineMatches.length,
             created_by: user.id,
