@@ -119,8 +119,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           <SidebarContent>
             <div className="px-4 py-5">
               <div className="flex items-center gap-2.5">
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-sidebar-primary">
-                  <span className="text-xs font-black text-sidebar-primary-foreground tracking-tighter">CW</span>
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg overflow-hidden" style={{background: "linear-gradient(135deg, #cc785c, #c96a3a)"}}>
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <rect x="4" y="4" width="16" height="4" rx="2" fill="white" opacity="0.95"/>
+                    <rect x="4" y="10" width="11" height="4" rx="2" fill="white" opacity="0.95"/>
+                    <rect x="4" y="16" width="16" height="4" rx="2" fill="white" opacity="0.95"/>
+                  </svg>
                 </div>
                 <div>
                   <h1 className="text-sm font-bold text-sidebar-accent-foreground tracking-tight">Countywide</h1>
