@@ -20,3 +20,6 @@ verify_jwt = false
 
 [functions.import-deposit-pdf]
 verify_jwt = false
+
+[functions.verify-appfolio-receipts]
+verify_jwt = false

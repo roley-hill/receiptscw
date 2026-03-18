@@ -4,8 +4,9 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { fetchReceipts, markAppfolioRecorded, getFilePreviewUrl, createDepositBatch, updateReceipt } from "@/lib/api";
 import { motion } from "framer-motion";
-import { Copy, Check, FileText, Layers, Loader2, ChevronRight, ChevronDown, Building2, Search, User, AlertTriangle, Trash2, CheckSquare, Square, Calendar, Filter, X, SlidersHorizontal, Undo2 } from "lucide-react";
+import { Copy, Check, FileText, Layers, Loader2, ChevronRight, ChevronDown, Building2, Search, User, AlertTriangle, Trash2, CheckSquare, Square, Calendar, Filter, X, SlidersHorizontal, Undo2, Lock, RefreshCw } from "lucide-react";
 import ColumnFilterPanel, { applyColumnFilters, type ColumnFilterGroup, type FilterableColumn } from "@/components/ColumnFilterPanel";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { DbReceipt } from "@/lib/api";
@@ -107,7 +108,7 @@ function sortRentMonths(a: string, b: string): number {
 
 /* ─── Main page ─── */
 export default function EntryView() {
-  const { user } = useAuth();
+  const { user, session } = useAuth();
   const queryClient = useQueryClient();
   const { isAdmin, deleteMutation } = useAdminDelete();
   const { pushUndo } = useUndoStack("entry");
@@ -134,6 +135,31 @@ export default function EntryView() {
   const finalized = allReceipts.filter((r) => r.status === "finalized" && !r.batch_id);
   const canonicalMap = buildCanonicalPropertyMap(finalized);
   const canonical = (prop: string) => canonicalMap.get(normalizeAddress(prop)) ?? prop;
+
+  // Recorded filter state
+  const [recordedFilter, setRecordedFilter] = useState<"all" | "recorded" | "unrecorded">("all");
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  const syncWithAppfolio = async () => {
+    if (!session?.access_token) return;
+    setIsSyncing(true);
+    toast({ title: "Syncing with AppFolio...", description: "Checking receipts against AppFolio records. This may take a moment." });
+    try {
+      const resp = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/verify-appfolio-receipts`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      toast({ title: "Sync Complete", description: `${data.verified} receipts confirmed recorded, ${data.not_found} not found in AppFolio` });
+      queryClient.invalidateQueries({ queryKey: ["receipts"] });
+    } catch (err: any) {
+      toast({ title: "Sync Failed", description: err.message, variant: "destructive" });
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   // Map canonical property names to their ownership entity
   const propertyToEntity = useMemo(() => {
@@ -216,10 +242,16 @@ export default function EntryView() {
     return acc;
   }, {} as Record<string, Record<string, DbReceipt[]>>);
 
-  // Apply column filters
+  // Apply recorded filter + column filters
+  const recordedFiltered = useMemo(() => {
+    if (recordedFilter === "recorded") return finalized.filter(r => (r as any).appfolio_recorded);
+    if (recordedFilter === "unrecorded") return finalized.filter(r => !(r as any).appfolio_recorded);
+    return finalized;
+  }, [finalized, recordedFilter]);
+
   const sidebarFiltered = useMemo(() => {
-    return applyColumnFilters(finalized, columnFilterGroups, filterableColumns);
-  }, [finalized, columnFilterGroups, filterableColumns]);
+    return applyColumnFilters(recordedFiltered, columnFilterGroups, filterableColumns);
+  }, [recordedFiltered, columnFilterGroups, filterableColumns]);
 
 
   const filtered = selectedProperty === "all"
@@ -441,15 +473,9 @@ export default function EntryView() {
           </Button>
         )}
         {recorded.length > 0 && (
-          <Button size="sm" variant="outline" className="h-6 text-[10px] px-2" onClick={async (e) => {
-            e.stopPropagation();
-            for (const r of recorded) await markAppfolioRecorded(r.id, false, user!.id);
-            queryClient.invalidateQueries({ queryKey: ["receipts"] });
-            toast({ title: `${recorded.length} unmarked` });
-            setSelectedReceipts(prev => { const next = new Set(prev); recorded.forEach(r => next.delete(r.id)); return next; });
-          }} disabled={toggleMutation.isPending}>
-            <Square className="h-3 w-3 mr-0.5" />Unmark ({recorded.length})
-          </Button>
+          <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
+            <Lock className="h-2.5 w-2.5" />{recorded.length} locked
+          </span>
         )}
         {isAdmin && (
           <AlertDialog>
@@ -798,7 +824,10 @@ export default function EntryView() {
         </td>
       )}
       <td className="px-3 py-2.5">
-        <Checkbox checked={(r as any).appfolio_recorded || false} onCheckedChange={(checked) => toggleMutation.mutate({ id: r.id, recorded: !!checked })} disabled={toggleMutation.isPending} />
+        <div className="flex items-center gap-1">
+          <Checkbox checked={(r as any).appfolio_recorded || false} onCheckedChange={(checked) => toggleMutation.mutate({ id: r.id, recorded: !!checked })} disabled={toggleMutation.isPending || (r as any).appfolio_recorded} />
+          {(r as any).appfolio_recorded && <Lock className="h-3 w-3 text-emerald-500 shrink-0" />}
+        </div>
       </td>
       <td className="px-3 py-2.5 text-center">
         {r.file_path && (<Tooltip><TooltipTrigger asChild><Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => handleViewAttachment(r)}><FileText className="h-3.5 w-3.5 text-vault-blue" /></Button></TooltipTrigger><TooltipContent>View document</TooltipContent></Tooltip>)}
@@ -1051,8 +1080,28 @@ export default function EntryView() {
         <div>
           <h1 className="text-2xl font-bold text-foreground">AppFolio Entry & Recording</h1>
           <p className="text-sm text-muted-foreground mt-1">Select a building, copy fields into AppFolio, mark as recorded, then create deposit batches.</p>
+          <Tabs value={recordedFilter} onValueChange={(v) => setRecordedFilter(v as any)} className="mt-3">
+            <TabsList>
+              <TabsTrigger value="all">All ({finalized.length})</TabsTrigger>
+              <TabsTrigger value="recorded">
+                ✅ Recorded ({finalized.filter(r => (r as any).appfolio_recorded).length})
+              </TabsTrigger>
+              <TabsTrigger value="unrecorded">
+                ☐ Unrecorded ({finalized.filter(r => !(r as any).appfolio_recorded).length})
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={syncWithAppfolio}
+            disabled={isSyncing}
+          >
+            <RefreshCw className={`h-4 w-4 mr-1 ${isSyncing ? "animate-spin" : ""}`} />
+            {isSyncing ? "Syncing..." : "Sync with AppFolio"}
+          </Button>
           <Button
             variant={filterPanelOpen ? "default" : "outline"}
             size="sm"
