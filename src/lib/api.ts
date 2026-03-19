@@ -57,16 +57,25 @@ export async function fetchBatches() {
 }
 
 export async function uploadReceiptFile(file: File, token: string) {
-  const formData = new FormData();
-  formData.append("file", file);
+  const doFetch = async () => {
+    const formData = new FormData();
+    formData.append("file", file);
+    return fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/extract-receipt`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData,
+    });
+  };
 
-  const resp = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/extract-receipt`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-    body: formData,
-  });
+  let resp: Response;
+  try {
+    resp = await doFetch();
+  } catch (networkErr) {
+    // "Failed to fetch" = network drop or timeout — wait 3s and retry once
+    console.warn("Upload network error, retrying in 3s...", networkErr);
+    await new Promise(r => setTimeout(r, 3000));
+    resp = await doFetch();
+  }
 
   if (!resp.ok) {
     const err = await resp.json();

@@ -22,7 +22,7 @@ async function fetchAIWithRetry(url: string, options: RequestInit, corsHdrs: Rec
     if (resp.status === 429) {
       // Rate limited — wait with exponential backoff then retry
       if (attempt < maxRetries - 1) {
-        const waitMs = Math.min(10000 * Math.pow(2, attempt), 60000); // 10s, 20s, 40s, 60s, 60s
+        const waitMs = Math.min(5000 * Math.pow(2, attempt), 30000); // 5s, 10s, 20s, 30s, 30s — stays within browser timeout
         console.log(`Rate limited (429). Waiting ${waitMs}ms before retry ${attempt + 2}/${maxRetries}...`);
         await new Promise((r) => setTimeout(r, waitMs));
         continue;
