@@ -1236,6 +1236,41 @@ ${knownTenantsList}` : ""}`;
         }
       }
 
+      // ---- CHECK 1b: Tenant + amount + rent_month match (date-agnostic) ----
+      // Remittance documents often use the rent period date, AppFolio uses the payment received date.
+      // Match on normalized tenant name + amount + rent_month regardless of which date was recorded.
+      if (item.tenant && item.amount && item.rent_month) {
+        const { data: rentMonthMatches } = await supabase
+          .from("receipts")
+          .select("id, receipt_id, tenant, unit, property, file_path, batch_id")
+          .eq("amount", item.amount)
+          .eq("rent_month", item.rent_month)
+          .is("deleted_at", null)
+          .limit(50);
+
+        if (rentMonthMatches && rentMonthMatches.length > 0) {
+          const normalizedUnit = cleanUnit(item.unit || "").toLowerCase();
+          const rentMonthDup = rentMonthMatches.find(r => {
+            // Must match normalized tenant name
+            if (normalizePersonName(r.tenant) !== normalizedItemTenant) return false;
+            // Unit must also match (catches same tenant paying different units)
+            if (normalizedUnit) {
+              const existingUnit = cleanUnit(r.unit || "").toLowerCase();
+              const unitMatch = existingUnit === normalizedUnit ||
+                existingUnit.endsWith("-" + normalizedUnit) ||
+                normalizedUnit.endsWith("-" + existingUnit);
+              if (!unitMatch) return false;
+            }
+            return true;
+          });
+          if (rentMonthDup) {
+            console.log(`Date-agnostic match: "${item.tenant}" amount=$${item.amount} rent_month=${item.rent_month} → ${rentMonthDup.receipt_id}`);
+            await tryAttachOrSkip(item, rentMonthDup.receipt_id, rentMonthDup.id, rentMonthDup.file_path, rentMonthDup.batch_id);
+            continue;
+          }
+        }
+      }
+
       // ---- CHECK 2: Fuzzy match (amount + date + normalized unit, ignoring tenant name spelling) ----
       // This catches cases like "Morgan L. Mahowald" vs "Morgan Mahowald"
       // But respects rent_month differences — same payment for a different month is NOT a duplicate
