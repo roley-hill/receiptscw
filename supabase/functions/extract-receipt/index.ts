@@ -36,7 +36,7 @@ async function fetchAIWithRetry(url: string, options: RequestInit, corsHdrs: Rec
       await new Promise((r) => setTimeout(r, 3000 * (attempt + 1)));
       continue;
     }
-    throw new Error(`AI extraction failed (HTTP ${resp.status})`);
+    throw new Error(`AI extraction failed (HTTP ${resp.status}): ${errText.substring(0, 300)}`);
   }
   throw new Error("AI extraction failed after retries");
 }
@@ -376,7 +376,6 @@ ${knownTenantsList}` : ""}`;
       }
 
       const messages: any[] = [
-        { role: "system", content: systemPrompt },
         { role: "user", content: contentItems },
       ];
 
