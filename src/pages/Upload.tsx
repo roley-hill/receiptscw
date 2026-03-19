@@ -287,6 +287,11 @@ export default function UploadPage() {
             .eq("file_name", f.name);
         }
       }
+
+      // Brief pause between files to stay within API rate limits
+      if (i < pending.length - 1 && !cancelledRef.current) {
+        await new Promise((r) => setTimeout(r, 1500));
+      }
     }
 
     if (batchId && !cancelledRef.current) {

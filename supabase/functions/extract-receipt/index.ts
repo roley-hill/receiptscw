@@ -7,25 +7,33 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-// Retry helper for transient AI gateway errors (503, 500)
-async function fetchAIWithRetry(url: string, options: RequestInit, corsHdrs: Record<string, string>, maxRetries = 3): Promise<Response> {
+// Retry helper for transient AI gateway errors (503, 500, 429)
+async function fetchAIWithRetry(url: string, options: RequestInit, corsHdrs: Record<string, string>, maxRetries = 6): Promise<Response> {
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     const resp = await fetch(url, options);
     if (resp.ok) return resp;
     const errText = await resp.text();
-    console.error(`AI attempt ${attempt + 1}/${maxRetries} failed:`, resp.status, errText);
+    console.error(`AI attempt ${attempt + 1}/${maxRetries} failed:`, resp.status, errText.substring(0, 200));
     if (resp.status === 402) {
       return new Response(JSON.stringify({ error: "AI credits exhausted. Please add credits." }), {
         status: 402, headers: { ...corsHdrs, "Content-Type": "application/json" },
       });
     }
     if (resp.status === 429) {
-      return new Response(JSON.stringify({ error: "Rate limit exceeded. Please try again shortly." }), {
+      // Rate limited — wait with exponential backoff then retry
+      if (attempt < maxRetries - 1) {
+        const waitMs = Math.min(10000 * Math.pow(2, attempt), 60000); // 10s, 20s, 40s, 60s, 60s
+        console.log(`Rate limited (429). Waiting ${waitMs}ms before retry ${attempt + 2}/${maxRetries}...`);
+        await new Promise((r) => setTimeout(r, waitMs));
+        continue;
+      }
+      // Exhausted all retries
+      return new Response(JSON.stringify({ error: "Rate limit exceeded after retries. Please try again in a minute." }), {
         status: 429, headers: { ...corsHdrs, "Content-Type": "application/json" },
       });
     }
     if (resp.status >= 500 && attempt < maxRetries - 1) {
-      await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
+      await new Promise((r) => setTimeout(r, 3000 * (attempt + 1)));
       continue;
     }
     throw new Error(`AI extraction failed (HTTP ${resp.status})`);
