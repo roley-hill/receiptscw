@@ -739,15 +739,128 @@ ${knownTenantsList}` : ""}`;
 
       // Only run text-based AI extraction if we haven't already extracted from a PDF attachment
       if (textContent !== "__PDF_EXTRACTED__" && textContent !== "__IMAGE_EXTRACTED__") {
-        const textClaudeResult = await callClaude([
-          { role: "user", content: `Extract ALL rent payment line items from this ${isEml ? "email" : "spreadsheet"}. EVERY row/line item in the ${isEml ? "remittance detail" : "spreadsheet"} represents a separate receipt for a different tenant — extract ALL of them as separate items.\n\n${textContent}` },
-        ], systemPrompt);
 
-        if (!textClaudeResult?.ok) return new Response(JSON.stringify({ error: "AI extraction failed" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        // ── Direct CSV parser for Landlord Ledger / structured remittance spreadsheets ──
+        // If the CSV has known column headers, parse directly — no AI needed (10x faster)
+        const csvLines = textContent.split("\n").map(l => l.trim()).filter(Boolean);
+        const headerLine = csvLines.find(l =>
+          (l.toLowerCase().includes("tenant name") || l.toLowerCase().includes("tenantname")) &&
+          (l.toLowerCase().includes("amount") || l.toLowerCase().includes("check")) 
+        );
 
-        extractedItems = textClaudeResult.items || [];
-        if (!extractedText) {
-          extractedText = textClaudeResult.extracted_text || textContent.substring(0, 5000);
+        if (headerLine && !isEml) {
+          console.log("Detected structured spreadsheet — parsing directly without AI");
+
+          // Parse CSV respecting quoted fields
+          function parseCSVRow(row: string): string[] {
+            const result: string[] = [];
+            let cur = "", inQ = false;
+            for (let i = 0; i < row.length; i++) {
+              const ch = row[i];
+              if (ch === '"') { inQ = !inQ; }
+              else if (ch === ',' && !inQ) { result.push(cur.trim()); cur = ""; }
+              else { cur += ch; }
+            }
+            result.push(cur.trim());
+            return result;
+          }
+
+          const headers = parseCSVRow(headerLine).map(h => h.toLowerCase().replace(/[^a-z0-9]/g, ""));
+          const colIdx = (names: string[]) => headers.findIndex(h => names.some(n => h.includes(n)));
+
+          const tenantCol  = colIdx(["tenantname","tenant"]);
+          const amountCol  = colIdx(["amount"]);
+          const dateCol    = colIdx(["checkdate","date","paymentdate"]);
+          const refCol     = colIdx(["eft","check","ref","adj"]);
+          const addrCol    = colIdx(["unitaddress","address","unit","description"]);
+          const notesCol   = colIdx(["notes","memo","description"]);
+
+          const headerIdx = csvLines.indexOf(headerLine);
+          const dataLines = csvLines.slice(headerIdx + 1);
+
+          for (const line of dataLines) {
+            if (!line || line.startsWith("===")) continue;
+            const cols = parseCSVRow(line);
+            if (cols.length < 3) continue;
+
+            const tenantRaw = tenantCol >= 0 ? cols[tenantCol] : "";
+            const amountRaw = amountCol >= 0 ? cols[amountCol] : "";
+            const dateRaw   = dateCol  >= 0 ? cols[dateCol]  : "";
+            const refRaw    = refCol   >= 0 ? cols[refCol]   : "";
+            const addrRaw   = addrCol  >= 0 ? cols[addrCol]  : "";
+            const notesRaw  = notesCol >= 0 ? cols[notesCol] : "";
+
+            if (!tenantRaw && !amountRaw) continue;
+
+            const amount = parseFloat(amountRaw.replace(/[$,\s]/g, ""));
+            if (isNaN(amount) || amount <= 0) continue;
+
+            // Normalize tenant: "Last, First" → "First Last"
+            const tenantParts = tenantRaw.replace(/"/g, "").split(",").map((s: string) => s.trim());
+            const tenant = tenantParts.length === 2 ? `${tenantParts[1]} ${tenantParts[0]}` : tenantRaw.replace(/"/g, "");
+
+            // Parse date MM/DD/YYYY → YYYY-MM-DD
+            let receiptDate: string | null = null;
+            const dm = dateRaw.match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+            if (dm) {
+              const yr = dm[3].length === 2 ? `20${dm[3]}` : dm[3];
+              receiptDate = `${yr}-${dm[1].padStart(2,"0")}-${dm[2].padStart(2,"0")}`;
+            }
+
+            // Extract property from address (first street address portion)
+            const addrClean = addrRaw.replace(/"/g, "");
+            const propMatch = addrClean.match(/^([^,]+)/);
+            const property = propMatch ? propMatch[1].trim() : addrClean;
+
+            // Extract unit from address (second comma-separated part)
+            const addrParts = addrClean.split(",");
+            const unit = addrParts.length > 1 ? addrParts[1].trim() : "";
+
+            // Rent month from notes (e.g. "HAP 01/26" or "January 2026")
+            let rentMonth: string | null = receiptDate ? receiptDate.substring(0, 7) : null;
+            const monthMatch = notesRaw.match(/(\d{2})\/(\d{2})\b/) || notesRaw.match(/\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{4})/i);
+            if (monthMatch) {
+              if (monthMatch[0].includes("/")) {
+                rentMonth = `20${monthMatch[2]}-${monthMatch[1]}`;
+              } else {
+                const months: Record<string,string> = {january:"01",february:"02",march:"03",april:"04",may:"05",june:"06",july:"07",august:"08",september:"09",october:"10",november:"11",december:"12"};
+                rentMonth = `${monthMatch[2]}-${months[monthMatch[1].toLowerCase()]}`;
+              }
+            }
+
+            extractedItems.push({
+              property: property || "",
+              property_confidence: property ? 0.9 : 0.3,
+              tenant: tenant || "",
+              tenant_confidence: tenant ? 0.9 : 0.3,
+              amount,
+              amount_confidence: 0.95,
+              receipt_date: receiptDate,
+              rent_month: rentMonth,
+              payment_type: refRaw.startsWith("ACH") ? "ACH" : refRaw.startsWith("CC") ? "CC" : "",
+              reference: refRaw.replace(/"/g, ""),
+              memo: notesRaw.replace(/"/g, ""),
+              unit,
+              subsidy_provider: null,
+              extracted_text: line.substring(0, 500),
+            });
+          }
+
+          extractedText = textContent.substring(0, 2000);
+          console.log(`Direct parse: extracted ${extractedItems.length} items from structured spreadsheet`);
+
+        } else {
+          // Fall back to AI for unstructured content (EML text, non-standard spreadsheets)
+          const textClaudeResult = await callClaude([
+            { role: "user", content: `Extract ALL rent payment line items from this ${isEml ? "email" : "spreadsheet"}. EVERY row/line item in the ${isEml ? "remittance detail" : "spreadsheet"} represents a separate receipt for a different tenant — extract ALL of them as separate items.\n\n${textContent}` },
+          ], systemPrompt);
+
+          if (!textClaudeResult?.ok) return new Response(JSON.stringify({ error: "AI extraction failed" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+
+          extractedItems = textClaudeResult.items || [];
+          if (!extractedText) {
+            extractedText = textClaudeResult.extracted_text || textContent.substring(0, 5000);
+          }
         }
       }
     } else {
