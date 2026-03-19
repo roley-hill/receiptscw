@@ -938,7 +938,7 @@ ${knownTenantsList}` : ""}`;
             extractedText = textContent.substring(0, 2000);
             console.log(`Direct parse: extracted ${extractedItems.length} items from structured spreadsheet`);
           }
-        }
+        } else {
           // Fall back to AI for unstructured content (EML text, non-standard spreadsheets)
           const textClaudeResult = await callClaude([
             { role: "user", content: `Extract ALL rent payment line items from this ${isEml ? "email" : "spreadsheet"}. EVERY row/line item in the ${isEml ? "remittance detail" : "spreadsheet"} represents a separate receipt for a different tenant — extract ALL of them as separate items.\n\n${textContent}` },
