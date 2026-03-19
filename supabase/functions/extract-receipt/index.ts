@@ -287,6 +287,7 @@ serve(async (req) => {
         headers: {
           "x-api-key": ANTHROPIC_API_KEY!,
           "anthropic-version": "2023-06-01",
+          "anthropic-beta": "pdfs-2024-09-25",
           "Content-Type": "application/json",
         },
         body,
@@ -355,17 +356,28 @@ ${knownTenantsList}` : ""}`;
 
     if (isImage || isPdf) {
       const base64 = uint8ToBase64(fileBytes);
-      const dataUrl = `data:${file.type};base64,${base64}`;
+
+      const contentItems: any[] = [
+        { type: "text", text: "Extract ALL rent payment line items from this document. If it is a remittance detail with multiple tenants/units, extract EACH line item separately. Carefully distinguish between: the property street address, each tenant's personal name, the paying organization/agency, the payment amount per tenant, and the payment method." },
+      ];
+
+      if (isPdf) {
+        // Use document type for PDFs (required for Haiku)
+        contentItems.push({
+          type: "document",
+          source: { type: "base64", media_type: "application/pdf", data: base64 },
+        });
+      } else {
+        // Images use image type
+        contentItems.push({
+          type: "image",
+          source: { type: "base64", media_type: file.type || "image/jpeg", data: base64 },
+        });
+      }
 
       const messages: any[] = [
         { role: "system", content: systemPrompt },
-        {
-          role: "user",
-          content: [
-            { type: "text", text: "Extract ALL rent payment line items from this document. If it is a remittance detail with multiple tenants/units, extract EACH line item separately. Carefully distinguish between: the property street address, each tenant's personal name, the paying organization/agency, the payment amount per tenant, and the payment method." },
-            { type: "image_url", image_url: { url: dataUrl } },
-          ],
-        },
+        { role: "user", content: contentItems },
       ];
 
       const claudeResult = await callClaude(messages, systemPrompt);
@@ -607,7 +619,7 @@ ${knownTenantsList}` : ""}`;
           const pdfClaudeResult = await callClaude([
             { role: "user", content: [
               { type: "text", text: "Extract ALL rent payment line items from this PDF document attached to an email. If it is a remittance detail with multiple tenants/units, extract EACH line item separately. Carefully distinguish between: the property street address, each tenant's personal name, the paying organization/agency, the payment amount per tenant, and the payment method." },
-              { type: "image", source: { type: "base64", media_type: "application/pdf", data: pdfBase64 } },
+              { type: "document", source: { type: "base64", media_type: "application/pdf", data: pdfBase64 } },
             ]},
           ], systemPrompt);
           if (!pdfClaudeResult?.ok) return new Response(JSON.stringify({ error: "AI extraction failed" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -638,7 +650,9 @@ ${knownTenantsList}` : ""}`;
           const imgClaudeResult = await callClaude([
             { role: "user", content: [
               { type: "text", text: `Extract ALL rent payment line items from this ${isActuallyPdf ? "PDF document" : "image"} attached to an email. If it is a remittance detail with multiple tenants/units, extract EACH line item separately. Carefully distinguish between: the property street address, each tenant's personal name, the paying organization/agency, the payment amount per tenant, and the payment method.` },
-              { type: "image", source: { type: "base64", media_type: isActuallyPdf ? "application/pdf" : imageAttachment.mimeType as any, data: attachmentBase64 } },
+              isActuallyPdf
+                ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: attachmentBase64 } }
+                : { type: "image", source: { type: "base64", media_type: imageAttachment.mimeType as any, data: attachmentBase64 } },
             ]},
           ], systemPrompt);
           if (!imgClaudeResult?.ok) return new Response(JSON.stringify({ error: "AI extraction failed" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
