@@ -819,105 +819,126 @@ ${knownTenantsList}` : ""}`;
         if (headerLine && !isEml) {
           console.log("Detected structured spreadsheet — parsing directly without AI");
 
-          // Parse CSV respecting quoted fields
-          function parseCSVRow(row: string): string[] {
-            const result: string[] = [];
-            let cur = "", inQ = false;
-            for (let i = 0; i < row.length; i++) {
-              const ch = row[i];
-              if (ch === '"') { inQ = !inQ; }
-              else if (ch === ',' && !inQ) { result.push(cur.trim()); cur = ""; }
-              else { cur += ch; }
-            }
-            result.push(cur.trim());
-            return result;
-          }
-
-          const headers = parseCSVRow(headerLine).map(h => h.toLowerCase().replace(/[^a-z0-9]/g, ""));
-          const colIdx = (names: string[]) => headers.findIndex(h => names.some(n => h.includes(n)));
-
-          const tenantCol  = colIdx(["tenantname","tenant"]);
-          const amountCol  = colIdx(["amount"]);
-          const dateCol    = colIdx(["checkdate","date","paymentdate"]);
-          const refCol     = colIdx(["eft","check","ref","adj"]);
-          const addrCol    = colIdx(["unitaddress","address","unit","description"]);
-          const notesCol   = colIdx(["notes","memo","description"]);
-
-          const headerIdx = csvLines.indexOf(headerLine);
-          const dataLines = csvLines.slice(headerIdx + 1);
-
-          for (const line of dataLines) {
-            if (!line || line.startsWith("===")) continue;
-            const cols = parseCSVRow(line);
-            if (cols.length < 3) continue;
-
-            const tenantRaw = tenantCol >= 0 ? cols[tenantCol] : "";
-            const amountRaw = amountCol >= 0 ? cols[amountCol] : "";
-            const dateRaw   = dateCol  >= 0 ? cols[dateCol]  : "";
-            const refRaw    = refCol   >= 0 ? cols[refCol]   : "";
-            const addrRaw   = addrCol  >= 0 ? cols[addrCol]  : "";
-            const notesRaw  = notesCol >= 0 ? cols[notesCol] : "";
-
-            if (!tenantRaw && !amountRaw) continue;
-
-            const amount = parseFloat(amountRaw.replace(/[$,\s]/g, ""));
-            if (isNaN(amount) || amount <= 0) continue;
-
-            // Normalize tenant: "Last, First" → "First Last"
-            const tenantParts = tenantRaw.replace(/"/g, "").split(",").map((s: string) => s.trim());
-            const tenant = tenantParts.length === 2 ? `${tenantParts[1]} ${tenantParts[0]}` : tenantRaw.replace(/"/g, "");
-
-            // Parse date MM/DD/YYYY → YYYY-MM-DD
-            let receiptDate: string | null = null;
-            const dm = dateRaw.match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
-            if (dm) {
-              const yr = dm[3].length === 2 ? `20${dm[3]}` : dm[3];
-              receiptDate = `${yr}-${dm[1].padStart(2,"0")}-${dm[2].padStart(2,"0")}`;
-            }
-
-            // Extract property from address (first street address portion)
-            const addrClean = addrRaw.replace(/"/g, "");
-            const propMatch = addrClean.match(/^([^,]+)/);
-            const property = propMatch ? propMatch[1].trim() : addrClean;
-
-            // Extract unit from address (second comma-separated part)
-            const addrParts = addrClean.split(",");
-            const unit = addrParts.length > 1 ? addrParts[1].trim() : "";
-
-            // Rent month from notes (e.g. "HAP 01/26" or "January 2026")
-            let rentMonth: string | null = receiptDate ? receiptDate.substring(0, 7) : null;
-            const monthMatch = notesRaw.match(/(\d{2})\/(\d{2})\b/) || notesRaw.match(/\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{4})/i);
-            if (monthMatch) {
-              if (monthMatch[0].includes("/")) {
-                rentMonth = `20${monthMatch[2]}-${monthMatch[1]}`;
-              } else {
-                const months: Record<string,string> = {january:"01",february:"02",march:"03",april:"04",may:"05",june:"06",july:"07",august:"08",september:"09",october:"10",november:"11",december:"12"};
-                rentMonth = `${monthMatch[2]}-${months[monthMatch[1].toLowerCase()]}`;
+          // Parse entire CSV content respecting quoted multi-line fields
+          // Must NOT split by \n first — addresses contain embedded \r\n inside quotes
+          function parseAllCSVRows(content: string): string[][] {
+            const rows: string[][] = [];
+            let row: string[] = [];
+            let cur = "";
+            let inQ = false;
+            let i = 0;
+            while (i < content.length) {
+              const ch = content[i];
+              if (ch === '"') {
+                if (inQ && content[i+1] === '"') { cur += '"'; i += 2; continue; } // escaped quote
+                inQ = !inQ;
+                i++; continue;
               }
+              if (!inQ && ch === ',') { row.push(cur.trim()); cur = ""; i++; continue; }
+              if (!inQ && (ch === '\n' || (ch === '\r' && content[i+1] === '\n'))) {
+                row.push(cur.trim()); cur = "";
+                if (row.some(c => c.length > 0)) rows.push(row);
+                row = [];
+                if (ch === '\r') i++;
+                i++; continue;
+              }
+              // Inside quoted field: collapse embedded newlines to space
+              if (inQ && (ch === '\n' || ch === '\r')) { cur += ' '; i++; continue; }
+              cur += ch; i++;
             }
-
-            extractedItems.push({
-              property: property || "",
-              property_confidence: property ? 0.9 : 0.3,
-              tenant: tenant || "",
-              tenant_confidence: tenant ? 0.9 : 0.3,
-              amount,
-              amount_confidence: 0.95,
-              receipt_date: receiptDate,
-              rent_month: rentMonth,
-              payment_type: refRaw.startsWith("ACH") ? "ACH" : refRaw.startsWith("CC") ? "CC" : "",
-              reference: refRaw.replace(/"/g, ""),
-              memo: notesRaw.replace(/"/g, ""),
-              unit,
-              subsidy_provider: null,
-              extracted_text: line.substring(0, 500),
-            });
+            if (cur || row.length > 0) { row.push(cur.trim()); if (row.some(c => c.length > 0)) rows.push(row); }
+            return rows;
           }
 
-          extractedText = textContent.substring(0, 2000);
-          console.log(`Direct parse: extracted ${extractedItems.length} items from structured spreadsheet`);
+          const allRows = parseAllCSVRows(textContent);
 
-        } else {
+          // Find header row
+          const headerRowIdx = allRows.findIndex(row =>
+            row.some(c => c.toLowerCase().includes("tenant name") || c.toLowerCase().includes("tenantname")) &&
+            row.some(c => c.toLowerCase().includes("amount"))
+          );
+
+          if (headerRowIdx === -1) {
+            console.log("No structured header found — falling back to AI");
+          } else {
+            const headers = allRows[headerRowIdx].map(h => h.toLowerCase().replace(/[^a-z0-9]/g, ""));
+            const colIdx = (names: string[]) => headers.findIndex(h => names.some(n => h.includes(n)));
+
+            const tenantCol = colIdx(["tenantname","tenant"]);
+            const amountCol = colIdx(["amount"]);
+            const dateCol   = colIdx(["checkdate","date","paymentdate"]);
+            const refCol    = colIdx(["eft","check","ref","adj"]);
+            const addrCol   = colIdx(["unitaddress","address","unit","description"]);
+            const notesCol  = colIdx(["notes","memo"]);
+
+            console.log(`Headers: ${headers.join("|")} → tenant=${tenantCol} amount=${amountCol} date=${dateCol} ref=${refCol} addr=${addrCol} notes=${notesCol}`);
+
+            for (const cols of allRows.slice(headerRowIdx + 1)) {
+              if (cols.length < 3) continue;
+
+              const tenantRaw = tenantCol >= 0 ? cols[tenantCol] : "";
+              const amountRaw = amountCol >= 0 ? cols[amountCol] : "";
+              const dateRaw   = dateCol  >= 0 ? cols[dateCol]  : "";
+              const refRaw    = refCol   >= 0 ? cols[refCol]   : "";
+              const addrRaw   = addrCol  >= 0 ? cols[addrCol]  : "";
+              const notesRaw  = notesCol >= 0 ? cols[notesCol] : "";
+
+              if (!tenantRaw && !amountRaw) continue;
+
+              const amount = parseFloat(amountRaw.replace(/[$,\s]/g, ""));
+              if (isNaN(amount) || amount <= 0) continue;
+
+              // Normalize tenant: "Last, First" → "First Last"
+              const tenantParts = tenantRaw.replace(/"/g, "").split(",").map((s: string) => s.trim());
+              const tenant = tenantParts.length === 2 ? `${tenantParts[1]} ${tenantParts[0]}` : tenantRaw.replace(/"/g, "");
+
+              // Parse date MM/DD/YYYY → YYYY-MM-DD
+              let receiptDate: string | null = null;
+              const dm = dateRaw.match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+              if (dm) {
+                const yr = dm[3].length === 2 ? `20${dm[3]}` : dm[3];
+                receiptDate = `${yr}-${dm[1].padStart(2,"0")}-${dm[2].padStart(2,"0")}`;
+              }
+
+              // Extract property street from address (before first comma)
+              const addrClean = addrRaw.replace(/"/g, "");
+              const propMatch = addrClean.match(/^([^,]+)/);
+              const property = propMatch ? propMatch[1].trim() : addrClean;
+
+              // Extract unit number from address (second part after first comma)
+              const addrParts = addrClean.split(",");
+              const unit = addrParts.length > 1 ? addrParts[1].trim() : "";
+
+              // Rent month from notes (e.g. "HAP 01/26")
+              let rentMonth: string | null = receiptDate ? receiptDate.substring(0, 7) : null;
+              const mmYY = notesRaw.match(/(\d{2})\/(\d{2})\b/);
+              const longMonth = notesRaw.match(/\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{4})/i);
+              if (mmYY) {
+                rentMonth = `20${mmYY[2]}-${mmYY[1]}`;
+              } else if (longMonth) {
+                const months: Record<string,string> = {january:"01",february:"02",march:"03",april:"04",may:"05",june:"06",july:"07",august:"08",september:"09",october:"10",november:"11",december:"12"};
+                rentMonth = `${longMonth[2]}-${months[longMonth[1].toLowerCase()]}`;
+              }
+
+              extractedItems.push({
+                property, unit, tenant,
+                property_confidence: property ? 0.9 : 0.3,
+                tenant_confidence: tenant ? 0.9 : 0.3,
+                amount, amount_confidence: 0.95,
+                receipt_date: receiptDate,
+                rent_month: rentMonth,
+                payment_type: refRaw.startsWith("ACH") ? "ACH" : refRaw.startsWith("CC") ? "CC" : "",
+                reference: refRaw.replace(/"/g, ""),
+                memo: notesRaw.replace(/"/g, ""),
+                subsidy_provider: null,
+                extracted_text: cols.join(",").substring(0, 500),
+              });
+            }
+
+            extractedText = textContent.substring(0, 2000);
+            console.log(`Direct parse: extracted ${extractedItems.length} items from structured spreadsheet`);
+          }
+        }
           // Fall back to AI for unstructured content (EML text, non-standard spreadsheets)
           const textClaudeResult = await callClaude([
             { role: "user", content: `Extract ALL rent payment line items from this ${isEml ? "email" : "spreadsheet"}. EVERY row/line item in the ${isEml ? "remittance detail" : "spreadsheet"} represents a separate receipt for a different tenant — extract ALL of them as separate items.\n\n${textContent}` },
