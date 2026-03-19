@@ -350,11 +350,79 @@ ${knownTenantsList}` : ""}`;
     
     const isImage = file.type.startsWith("image/");
     const fileExt = file.name.split(".").pop()?.toLowerCase();
+    const fileNameLower = file.name.toLowerCase();
     const isXlsx = fileExt === "xlsx" || fileExt === "xls" || file.type.includes("spreadsheet") || file.type.includes("excel");
     const isEml = fileExt === "eml" || file.type === "message/rfc822";
     const isPdf = fileExt === "pdf" || file.type === "application/pdf";
 
     if (isImage || isPdf) {
+
+      // ── Fast path: AppFolio transaction PDFs ──────────────────────────────────
+      // Files named "transaction-XXXXX.pdf" are AppFolio receipt PDFs.
+      // The number IS the income_register receipt_id, already in the DB.
+      // Just attach the file — no AI extraction needed.
+      const txnMatch = fileNameLower.match(/transaction[_-](\d+)\.pdf$/i);
+      if (txnMatch) {
+        const txnId = txnMatch[1];
+        console.log(`Transaction PDF detected: ID=${txnId} — looking up existing receipt`);
+
+        const { data: existing } = await supabase
+          .from("receipts")
+          .select("id, receipt_id, file_path, batch_id, tenant, amount")
+          .like("file_name", `%${txnId}%`)
+          .is("deleted_at", null)
+          .limit(1)
+          .single();
+
+        if (existing) {
+          console.log(`Matched transaction ${txnId} → ${existing.receipt_id} (${existing.tenant} $${existing.amount})`);
+          if (!existing.file_path) {
+            // Attach the PDF to the existing receipt
+            await supabase.from("receipts").update({
+              file_path: filePath,
+              file_name: file.name,
+            }).eq("id", existing.id);
+
+            attachedToExisting.push({
+              receipt_id: existing.receipt_id,
+              db_id: existing.id,
+              batch_id: existing.batch_id,
+              file_path: filePath,
+              tenant: existing.tenant,
+              amount: existing.amount,
+            });
+            console.log(`Attached transaction PDF to ${existing.receipt_id} (no AI needed)`);
+          } else {
+            // Already has a file — log as duplicate
+            await recordSkippedDuplicate(
+              { tenant: existing.tenant, amount: existing.amount, receipt_date: null },
+              existing.receipt_id, existing.id, "duplicate_has_attachment"
+            );
+            console.log(`Transaction ${txnId} already has attachment — skipped`);
+          }
+          // Return early — no receipts to insert, file handled
+          return new Response(JSON.stringify({
+            receipts: [],
+            inserted_count: 0,
+            duplicate_count: existing.file_path ? 1 : 0,
+            attached_count: existing.file_path ? 0 : 1,
+            attached_to_existing: existing.file_path ? [] : [{
+              receipt_id: existing.receipt_id,
+              db_id: existing.id,
+              batch_id: existing.batch_id,
+              file_path: filePath,
+              tenant: existing.tenant,
+              amount: existing.amount,
+            }],
+            total_line_items: 1,
+            file_content_hash: fileContentHash,
+          }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        } else {
+          console.log(`No existing receipt found for transaction ${txnId} — falling through to AI`);
+        }
+      }
+      // ── End fast path ─────────────────────────────────────────────────────────
+
       const base64 = uint8ToBase64(fileBytes);
 
       const contentItems: any[] = [
